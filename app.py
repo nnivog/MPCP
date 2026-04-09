@@ -209,7 +209,7 @@ def _seed(db):
     def P(pid,fy,bsm,eid,ec,mpr,cpr,metric,tot,comp,tgt,act,unit,notes=""):
         nc=tot-comp; pct_c=round(comp/tot*100,2) if tot else 0; pct_nc=round(nc/tot*100,2) if tot else 0
         st=calc_status(act,tgt,unit)
-        return (pid,fy,bsm,bs_q(bsm),eid,ec,mpr,cpr,metric,tot,comp,nc,pct_c,pct_nc,tgt,act,unit,st,notes)
+        return (pid,fy,bsm,bs_q(bsm),eid,ec,mpr,cpr,metric,tot,comp,nc,pct_c,pct_nc,tgt,act,unit,st,notes,'')
     perf=[
       P("p01","2080-81","Shrawan","e2","EMP-002","HODL-1","LM-VEH-1","Vehicle Border Tracking",250,240,100,96,"%","All tracked"),
       P("p02","2080-81","Shrawan","e2","EMP-002","HODL-1","LM-VEH-2-B","CC within 3 Days",280,265,3,2.8,"Days","On track"),

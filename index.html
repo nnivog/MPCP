@@ -1,0 +1,1664 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Sipradi SC-MPCP System</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#f0f2f7;--surface:#fff;--border:#e2e6ef;--text:#0f1a2e;--muted:#6b7a99;
+  --navy:#0a1628;--blue:#1d4ed8;--green:#16a34a;--amber:#d97706;--red:#dc2626;
+  --violet:#6d28d9;--teal:#0891b2;
+  --hod:#0f2540;--vehicle:#1d4ed8;--registration:#6d28d9;
+  --warehouse:#047857;--stock:#b45309;--ops:#475569;
+  --radius:12px;--shadow:0 2px 16px rgba(0,0,0,.08)
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);font-size:14px;min-height:100vh}
+h1,h2,h3{font-family:'Syne',sans-serif}
+
+/* ── HEADER ── */
+#header{background:linear-gradient(135deg,#0a1628 0%,#0f2540 100%);padding:12px 24px 0;position:sticky;top:0;z-index:100;box-shadow:0 2px 20px rgba(0,0,0,.4)}
+#header-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+#header h1{font-size:18px;color:#fff;letter-spacing:-.5px}
+#header-meta{font-size:11px;color:#93c5fd;margin-top:2px}
+#header-meta span{margin-right:12px}
+#header-meta .dot{color:#4ade80}
+#header-meta .fy-pill{background:rgba(255,255,255,.15);padding:2px 10px;border-radius:20px;font-weight:700;color:#fbbf24;font-family:'Syne',sans-serif}
+.hdr-actions{display:flex;gap:8px}
+.hbtn{font-size:11px;color:#93c5fd;border:1px solid rgba(255,255,255,.2);background:transparent;padding:5px 12px;border-radius:8px;cursor:pointer;transition:.2s;font-family:'Syne',sans-serif;font-weight:700}
+.hbtn:hover{color:#fff;border-color:rgba(255,255,255,.5)}
+#nav{display:flex;gap:0;overflow-x:auto}
+.nav-tab{font-size:12px;font-weight:700;font-family:'Syne',sans-serif;padding:10px 20px;border:none;background:transparent;color:#93c5fd;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:.2s;letter-spacing:.3px}
+.nav-tab:hover{color:#fff}.nav-tab.active{color:#fff;border-bottom-color:#60a5fa}
+
+/* ── LAYOUT ── */
+#app{max-width:1400px;margin:0 auto;padding:20px}
+.tab-panel{display:none}.tab-panel.active{display:block}
+
+/* ── CARDS ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
+.card-head{padding:14px 18px;border-bottom:1px solid var(--border);background:#f8fafc;border-radius:var(--radius) var(--radius) 0 0;display:flex;align-items:center;justify-content:space-between}
+.card-head p{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-family:'Syne',sans-serif}
+.card-body{padding:18px}
+
+/* ── GRID ── */
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.grid-5{display:grid;grid-template-columns:repeat(5,1fr);gap:10px}
+.grid-auto{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px}
+@media(max-width:900px){.grid-2,.grid-3,.grid-4,.grid-5{grid-template-columns:1fr!important}}
+
+/* ── STAT BOX ── */
+.stat-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;text-align:center}
+.stat-box .val{font-size:28px;font-weight:800;font-family:'Syne',sans-serif;line-height:1}
+.stat-box .lbl{font-size:11px;color:var(--muted);margin-top:4px;font-weight:600;letter-spacing:.4px;text-transform:uppercase}
+.stat-box .sub{font-size:11px;color:var(--muted);margin-top:2px}
+
+/* ── COMPLIANCE CARD (the key display widget) ── */
+.compliance-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow)}
+.compliance-card .cc-title{font-size:12px;font-weight:700;color:var(--text);margin-bottom:10px;display:flex;align-items:center;gap:8px;font-family:'Syne',sans-serif}
+.compliance-card .cc-ref{font-family:monospace;font-size:11px;font-weight:900;background:#0f2540;color:#fff;padding:2px 8px;border-radius:6px}
+.compliance-card .cc-pct{font-size:24px;font-weight:900;font-family:'Syne',sans-serif}
+.compliance-card .cc-bar{height:10px;border-radius:20px;background:#f1f5f9;overflow:hidden;margin:8px 0}
+.compliance-card .cc-bar-c{height:100%;border-radius:20px;display:inline-block;vertical-align:top;transition:.6s}
+.compliance-card .cc-bar-nc{height:100%;border-radius:0 20px 20px 0;display:inline-block;vertical-align:top}
+.compliance-card .cc-nums{display:flex;gap:16px;font-size:11px;flex-wrap:wrap;margin-top:4px}
+.cc-total{color:var(--muted);font-weight:600}.cc-c{color:var(--green);font-weight:700}.cc-nc{color:var(--red);font-weight:700}
+
+/* ── BUTTONS ── */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:10px;font-size:12px;font-weight:700;font-family:'Syne',sans-serif;border:none;cursor:pointer;transition:.15s;letter-spacing:.3px;text-decoration:none}
+.btn-primary{background:var(--blue);color:#fff}.btn-primary:hover{background:#1e40af}
+.btn-success{background:var(--green);color:#fff}.btn-success:hover{background:#15803d}
+.btn-danger{background:var(--red);color:#fff}.btn-danger:hover{background:#b91c1c}
+.btn-ghost{background:transparent;border:1.5px solid var(--border);color:var(--muted)}.btn-ghost:hover{background:#f8fafc;color:var(--text)}
+.btn-amber{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}.btn-amber:hover{background:#fde68a}
+.btn-sm{padding:5px 12px;font-size:11px}
+.btn-icon{padding:6px;border-radius:8px;background:transparent;border:1px solid var(--border);cursor:pointer;color:var(--muted);font-size:13px;transition:.15s}.btn-icon:hover{background:#f0f2f7;color:var(--text)}
+
+/* ── FORMS (exact Master Setup style) ── */
+.form-group{margin-bottom:14px}
+.form-label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:6px;font-family:'Syne',sans-serif}
+.form-input,.form-select,.form-textarea{width:100%;border:1.5px solid var(--border);border-radius:10px;padding:9px 12px;font-size:13px;background:#f8fafc;transition:.15s;font-family:'DM Sans',sans-serif;color:var(--text)}
+.form-input:focus,.form-select:focus,.form-textarea:focus{outline:none;border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(29,78,216,.1)}
+.form-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.form-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+
+/* ── TABLE ── */
+.tbl-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--border)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead tr{background:#f8fafc;border-bottom:2px solid var(--border)}
+thead th{padding:10px 14px;text-align:left;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);white-space:nowrap;font-family:'Syne',sans-serif}
+tbody tr{border-bottom:1px solid var(--border)}.tbody tr:last-child{border:none}
+tbody tr:hover{background:#f8fafc}
+tbody td{padding:10px 14px;vertical-align:middle}
+
+/* ── BADGES ── */
+.badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;font-family:'Syne',sans-serif;letter-spacing:.3px}
+.badge-c{background:#dcfce7;color:#15803d}
+.badge-nc{background:#fee2e2;color:#b91c1c}
+.badge-pct-green{background:#dcfce7;color:#15803d}
+.badge-pct-amber{background:#fef3c7;color:#92400e}
+.badge-pct-red{background:#fee2e2;color:#b91c1c}
+.badge-gray{background:#f1f5f9;color:#475569}
+.badge-blue{background:#dbeafe;color:#1e40af}
+.dept-badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;color:#fff}
+.ref-badge{font-family:monospace;font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;background:#f1f5f9;color:#334155}
+.ref-badge-blue{background:#dbeafe;color:#1e40af}
+.emp-code{font-family:monospace;font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;background:#f0f9ff;color:#0369a1;border:1px solid #bae6fd}
+
+/* ── AVATAR ── */
+.avatar{border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-family:'Syne',sans-serif;flex-shrink:0}
+.avatar-sm{width:32px;height:32px;font-size:11px}
+.avatar-md{width:42px;height:42px;font-size:14px}
+.avatar-lg{width:56px;height:56px;font-size:20px}
+
+/* ── MP CARDS ── */
+.mp-card{background:var(--surface);border:2px solid var(--border);border-radius:var(--radius);overflow:hidden;cursor:pointer;transition:.2s}
+.mp-card:hover{border-color:#93c5fd;box-shadow:0 4px 20px rgba(29,78,216,.12)}
+.mp-card.expanded{border-color:var(--blue);box-shadow:0 6px 32px rgba(29,78,216,.2)}
+.mp-card-head{padding:14px 16px;display:flex;gap:12px;align-items:flex-start}
+.mp-ref{font-family:monospace;font-size:11px;font-weight:900;color:#fff;background:#0f2540;padding:4px 8px;border-radius:6px;display:block;text-align:center;white-space:nowrap}
+.mp-pct{font-size:20px;font-weight:900;font-family:'Syne',sans-serif;text-align:center;margin-top:4px}
+.mp-body{flex:1;min-width:0}
+.mp-title{font-size:13px;font-weight:700;color:var(--text);line-height:1.4}
+.mp-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.tag{display:inline-block;font-size:10px;padding:2px 8px;border-radius:20px;font-weight:600;background:#f1f5f9;color:#475569}
+.tag-blue{background:#dbeafe;color:#1e40af}
+.tag-violet{background:#ede9fe;color:#5b21b6}
+.tag-green{background:#dcfce7;color:#15803d}
+.tag-red{background:#fee2e2;color:#b91c1c}
+.mp-owners{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.owner-chip{font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;color:#fff;cursor:pointer;transition:.15s}
+.owner-chip:hover{opacity:.8}
+.mp-expand{display:none;background:#f8faff;border-top:1px solid #dbeafe;padding:16px}
+.mp-expand.open{display:block}
+.cp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:10px}
+.cp-card{background:#fff;border:1px solid #dbeafe;border-radius:10px;padding:12px;transition:.15s}
+.cp-card:hover{border-color:#93c5fd}
+.cp-ref{font-family:monospace;font-size:10px;font-weight:700;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px}
+
+/* ── MODAL ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+.modal-overlay.hidden{display:none}
+.modal{background:#fff;border-radius:16px;width:100%;max-width:600px;box-shadow:0 24px 80px rgba(0,0,0,.3);margin:auto}
+.modal.wide{max-width:820px}
+.modal-head{padding:18px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;border-radius:16px 16px 0 0;z-index:10}
+.modal-head h3{font-size:15px;font-weight:800;font-family:'Syne',sans-serif}
+.modal-close{width:32px;height:32px;border-radius:50%;border:none;background:transparent;cursor:pointer;font-size:20px;color:var(--muted);display:flex;align-items:center;justify-content:center;transition:.15s}
+.modal-close:hover{background:#f1f5f9;color:var(--text)}
+.modal-body{padding:24px;max-height:70vh;overflow-y:auto}
+.modal-foot{padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;background:#f8fafc;border-radius:0 0 16px 16px}
+
+/* ── OWNER/ITEM PICKERS (Master Setup style) ── */
+.owner-list{border:1.5px solid var(--border);border-radius:10px;max-height:200px;overflow-y:auto;background:#f8fafc}
+.owner-item{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:.15s}
+.owner-item:last-child{border:none}.owner-item:hover{background:#fff}
+.owner-item input{width:16px;height:16px;accent-color:var(--blue);cursor:pointer}
+.item-list{border:1.5px solid var(--border);border-radius:10px;max-height:180px;overflow-y:auto;background:#f8fafc}
+.item-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:.15s}
+.item-row:last-child{border:none}.item-row:hover{background:#fff}
+.item-row input{width:15px;height:15px;accent-color:var(--blue);cursor:pointer}
+
+/* ── SUB-TABS ── */
+.sub-tabs{display:flex;border-bottom:2px solid var(--border);margin-bottom:20px;gap:0;overflow-x:auto}
+.sub-tab{font-size:12px;font-weight:700;font-family:'Syne',sans-serif;padding:10px 18px;border:none;background:transparent;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;white-space:nowrap;transition:.15s;letter-spacing:.3px}
+.sub-tab:hover{color:var(--text)}.sub-tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+
+/* ── SEARCH ── */
+.search-wrap{position:relative}.search-wrap input{padding-left:32px}
+.search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none;font-size:13px}
+
+/* ── HOD BANNER ── */
+.hod-banner{background:linear-gradient(135deg,#0a1628 0%,#0f2540 100%);border-radius:16px;padding:22px 28px;display:flex;flex-wrap:wrap;align-items:center;gap:24px;margin-bottom:20px}
+.hod-stats{display:flex;gap:12px;flex-wrap:wrap;margin-left:auto}
+.hod-stat{background:rgba(255,255,255,.1);border-radius:10px;padding:10px 18px;text-align:center}
+.hod-stat .v{font-size:22px;font-weight:900;color:#fff;font-family:'Syne',sans-serif}
+.hod-stat .l{font-size:10px;color:#93c5fd;margin-top:2px;font-weight:600;letter-spacing:.4px;text-transform:uppercase}
+
+/* ── PROFILE ── */
+.profile-header{border-left:4px solid;border-radius:12px;padding:16px 20px;display:flex;align-items:center;gap:16px;margin-bottom:16px}
+.mp-tree{border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:12px}
+.mp-tree-head{background:#f8fafc;padding:10px 16px;display:flex;align-items:center;gap:10px}
+.cp-tree-row{padding:8px 16px 8px 40px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px;font-size:12px}
+.cp-tree-row:hover{background:#f8fafc}
+
+/* ── UPLOAD ZONE ── */
+.upload-zone{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:1.5px dashed var(--border);border-radius:10px;cursor:pointer;transition:.15s;font-size:12px;font-weight:700;font-family:'Syne',sans-serif;color:var(--muted)}
+.upload-zone:hover{border-color:var(--blue);color:var(--blue);background:#f0f9ff}
+.upload-zone input{display:none}
+
+/* ── SAMPLE FILE BANNER ── */
+.sample-banner{background:linear-gradient(135deg,#f0f9ff,#eff6ff);border:1.5px solid #bae6fd;border-radius:12px;padding:14px 18px;margin-bottom:16px}
+.sample-banner h4{font-size:12px;font-weight:800;color:#0369a1;font-family:'Syne',sans-serif;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}
+.sample-banner p{font-size:11px;color:#0c4a6e;line-height:1.6}
+.sample-files{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.sample-link{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;background:#fff;border:1px solid #93c5fd;border-radius:8px;font-size:11px;font-weight:700;color:#1d4ed8;text-decoration:none;transition:.15s}
+.sample-link:hover{background:#dbeafe;border-color:#60a5fa}
+
+/* ── FY CACHE CARDS ── */
+.fy-cache-card{border:2px solid var(--border);border-radius:var(--radius);padding:16px;background:var(--surface);transition:.2s}
+.fy-cache-card.active{border-color:var(--blue);background:#f0f9ff}
+.fy-cache-card.locked{border-color:var(--amber);background:#fffbeb}
+
+/* ── SECTION HEAD ── */
+.section-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px}
+.section-head h2{font-size:16px;font-weight:900;color:var(--text);font-family:'Syne',sans-serif}
+.section-head p{font-size:11px;color:var(--muted);margin-top:2px}
+
+/* ── TOAST / SPINNER / MISC ── */
+#toast{position:fixed;bottom:24px;right:24px;z-index:9999;pointer-events:none}
+.toast-msg{background:#0f2540;color:#fff;padding:12px 20px;border-radius:10px;font-size:12px;font-weight:600;margin-top:8px;transform:translateX(120%);transition:.3s;box-shadow:0 4px 20px rgba(0,0,0,.3)}
+.toast-msg.show{transform:none}.toast-msg.success{background:#15803d}.toast-msg.error{background:#b91c1c}
+.spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;margin:40px auto}
+@keyframes spin{to{transform:rotate(360deg)}}
+.flex{display:flex}.flex-1{flex:1}.items-center{align-items:center}.items-start{align-items:flex-start}
+.justify-between{justify-content:space-between}.gap-4{gap:4px}.gap-6{gap:6px}.gap-8{gap:8px}
+.gap-12{gap:12px}.gap-16{gap:16px}.gap-20{gap:20px}
+.mt-8{margin-top:8px}.mt-12{margin-top:12px}.mt-16{margin-top:16px}.mt-20{margin-top:20px}
+.mb-8{margin-bottom:8px}.mb-12{margin-bottom:12px}.mb-16{margin-bottom:16px}.mb-20{margin-bottom:20px}
+.text-sm{font-size:12px}.text-xs{font-size:11px}.text-xxs{font-size:10px}
+.text-muted{color:var(--muted)}.font-bold{font-weight:700}.font-black{font-weight:900;font-family:'Syne',sans-serif}
+.truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.italic{font-style:italic}
+.hidden{display:none!important}
+.row-actions{display:flex;gap:6px;opacity:0;transition:.15s}
+tbody tr:hover .row-actions{opacity:1}
+.color-swatch{width:20px;height:20px;border-radius:50%;display:inline-block;vertical-align:middle;flex-shrink:0}
+.kpi-bar{height:4px;border-radius:4px;background:#e2e8f0;overflow:hidden;margin-top:6px}
+.kpi-bar-fill{height:100%;border-radius:4px;transition:.6s}
+.info-box{background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:12px 16px;margin-bottom:16px}
+.info-box p{font-size:11px;color:#0c4a6e;line-height:1.6}
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div id="header-top">
+    <div>
+      <p style="font-size:10px;color:#93c5fd;font-weight:700;text-transform:uppercase;letter-spacing:1px">Sipradi Trading Pvt. Ltd.</p>
+      <h1>SC-MPCP Control System</h1>
+      <div id="header-meta">
+        <span id="hdr-emps">— members</span>
+        <span id="hdr-mps">— MPs</span>
+        <span id="hdr-cps">— CPs</span>
+        <span id="hdr-roles">— Roles</span>
+        <span id="hdr-perf">— Records</span>
+        <span class="fy-pill" id="hdr-fy">FY —</span>
+        <span class="dot">● Saved</span>
+      </div>
+    </div>
+    <div class="hdr-actions">
+      <button class="hbtn" onclick="openCachePanel()">📦 FY Cache</button>
+      <button class="hbtn" onclick="switchFY()">⇄ Switch FY</button>
+    </div>
+  </div>
+  <div id="nav">
+    <button class="nav-tab active" onclick="switchTab('dashboard')">📊 Dashboard</button>
+    <button class="nav-tab" onclick="switchTab('team')">👥 Team</button>
+    <button class="nav-tab" onclick="switchTab('master')">🔧 Master Setup</button>
+    <button class="nav-tab" onclick="switchTab('data')">📁 Data Manager</button>
+    <button class="nav-tab" onclick="switchTab('reports')">📈 Reports</button>
+  </div>
+</div>
+
+<div id="app">
+  <div id="tab-dashboard" class="tab-panel active"><div class="spinner"></div></div>
+  <div id="tab-team" class="tab-panel">
+    <div class="section-head">
+      <div><h2>Team & Hierarchy</h2><p id="team-sub"></p></div>
+      <div class="flex gap-8">
+        <button class="btn btn-ghost btn-sm" onclick="setTeamView('cards')">⊞ Cards</button>
+        <button class="btn btn-ghost btn-sm" onclick="setTeamView('org')">⑂ Org Chart</button>
+        <button class="btn btn-primary btn-sm" onclick="openEmpForm()">+ Add Member</button>
+      </div>
+    </div>
+    <div id="team-content"><div class="spinner"></div></div>
+  </div>
+  <div id="tab-master" class="tab-panel">
+    <div class="sub-tabs" id="master-tabs">
+      <button class="sub-tab active" onclick="switchMaster('mps')">Managing Points</button>
+      <button class="sub-tab" onclick="switchMaster('cps')">Checking Points</button>
+      <button class="sub-tab" onclick="switchMaster('roles')">Role Templates</button>
+      <button class="sub-tab" onclick="switchMaster('links')">Role Assignments</button>
+    </div>
+    <div id="master-content"><div class="spinner"></div></div>
+  </div>
+  <div id="tab-data" class="tab-panel">
+    <div class="sub-tabs">
+      <button class="sub-tab active" onclick="switchData('perf')">Performance Records</button>
+      <button class="sub-tab" onclick="switchData('cache')">FY Cache Manager</button>
+    </div>
+    <div id="data-content"><div class="spinner"></div></div>
+  </div>
+  <div id="tab-reports" class="tab-panel">
+    <div class="sub-tabs">
+      <button class="sub-tab active" onclick="switchReport('overview')">📊 Overview</button>
+      <button class="sub-tab" onclick="switchReport('yoy')">📅 Year-on-Year</button>
+      <button class="sub-tab" onclick="switchReport('employee')">👤 Employee-wise</button>
+      <button class="sub-tab" onclick="switchReport('mpcp')">🎯 MP / CP Drill-down</button>
+    </div>
+    <div id="report-content"><div class="spinner"></div></div>
+  </div>
+</div>
+
+<div class="modal-overlay hidden" id="modal-overlay" onclick="closeModal(event)">
+  <div class="modal" id="modal-box">
+    <div class="modal-head">
+      <h3 id="modal-title"></h3>
+      <button class="modal-close" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-foot" id="modal-foot"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script>
+// ── STATE ────────────────────────────────────────────────────────────────────
+const S = {
+  employees:[], mps:[], cps:[], roles:[], perf:[], cache:[],
+  currentTab:'dashboard', teamView:'cards', masterSub:'mps',
+  dataSub:'perf', reportSub:'overview', currentFY:'2081-82'
+}
+const DC = { HOD:'#0f2540',Vehicle:'#1d4ed8',Registration:'#6d28d9',Warehouse:'#047857',Stock:'#b45309',Ops:'#475569',Finance:'#0e7490',HR:'#be185d' }
+const BS_MONTHS = ['Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra','Baisakh','Jestha','Ashadh']
+const BS_Q = {Shrawan:'Q1',Bhadra:'Q1',Ashwin:'Q1',Kartik:'Q2',Mangsir:'Q2',Poush:'Q2',Magh:'Q3',Falgun:'Q3',Chaitra:'Q3',Baisakh:'Q4',Jestha:'Q4',Ashadh:'Q4'}
+let charts = {}
+
+// ── API ──────────────────────────────────────────────────────────────────────
+const api = {
+  get: url => fetch(url).then(r=>r.json()),
+  post: (url,d) => fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()),
+  put: (url,d) => fetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()),
+  del: url => fetch(url,{method:'DELETE'}).then(r=>r.json()),
+}
+
+async function loadAll() {
+  const [e,m,c,r,p,ca] = await Promise.all([
+    api.get('/api/employees'), api.get('/api/mps'), api.get('/api/cps'),
+    api.get('/api/roles'), api.get('/api/perf'), api.get('/api/cache')
+  ])
+  S.employees=e; S.mps=m; S.cps=c; S.roles=r; S.perf=p; S.cache=ca
+  // Set currentFY from most recent active cache
+  const latest = ca.sort((a,b)=>b.fy.localeCompare(a.fy))[0]
+  if (latest && !S.cache.find(x=>x.fy===S.currentFY)) S.currentFY = latest.fy
+  updateHeader(); renderCurrent()
+}
+
+function updateHeader() {
+  $('hdr-emps').textContent = S.employees.length+' members'
+  $('hdr-mps').textContent  = S.mps.length+' MPs'
+  $('hdr-cps').textContent  = S.cps.length+' CPs'
+  $('hdr-roles').textContent= S.roles.length+' Roles'
+  $('hdr-perf').textContent = S.perf.length+' Records'
+  $('hdr-fy').textContent   = 'FY '+S.currentFY
+}
+
+// ── UTILS ────────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id)
+const q = sel => document.querySelector(sel)
+const qq = sel => [...document.querySelectorAll(sel)]
+const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+const dc = d => DC[d]||'#475569'
+const av = n => (n||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
+const pc = p => p==null?'#94a3b8':p>=95?'#16a34a':p>=80?'#d97706':'#dc2626'
+
+function pctBadge(p) {
+  if (p==null) return '<span class="text-muted text-xs">—</span>'
+  const cls = p>=95?'pct-green':p>=80?'pct-amber':'pct-red'
+  return `<span class="badge badge-${cls}">${p}%</span>`
+}
+function statusBadge(s) { return s==='C'?'<span class="badge badge-c">✓ C</span>':'<span class="badge badge-nc">✗ NC</span>' }
+function deptBadge(d) { return `<span class="dept-badge" style="background:${dc(d)}">${d}</span>` }
+function ownerChips(ids) { return (ids||[]).map(id=>{const e=getEmp(id);if(!e)return '';return `<span class="owner-chip" style="background:${dc(e.dept)}" onclick="openProfile('${e.id}',event)">${e.name.split(' ')[0]}</span>`}).join('') }
+function getEmp(id) { return S.employees.find(e=>e.id===id) }
+function getEmpByCode(code) { return S.employees.find(e=>e.emp_code===code) }
+function getMP(id) { return S.mps.find(m=>m.id===id) }
+function getMPByRef(ref) { return S.mps.find(m=>m.ref===ref) }
+function getCP(id) { return S.cps.find(c=>c.id===id) }
+function getRole(id) { return S.roles.find(r=>r.id===id) }
+function perfByFY(fy) { return S.perf.filter(p=>p.fy===fy) }
+
+function complianceSummary(records) {
+  const tot = records.reduce((s,r)=>s+(r.total||1),0)
+  const comp = records.reduce((s,r)=>s+(r.compliant||(r.status==='C'?1:0)),0)
+  const nc = records.reduce((s,r)=>s+(r.non_compliant||(r.status==='NC'?1:0)),0)
+  const pct_c = tot ? +(comp/tot*100).toFixed(2) : 0
+  const pct_nc = tot ? +(nc/tot*100).toFixed(2) : 0
+  return {tot,comp,nc,pct_c,pct_nc}
+}
+
+function compCard({ref,title,tot,comp,nc,pct_c,pct_nc,color}) {
+  const c = color||pc(pct_c)
+  const barC = Math.min(pct_c,100)+'%'
+  return `<div class="compliance-card">
+    <div class="cc-title">
+      ${ref?`<span class="cc-ref">${esc(ref)}</span>`:''}
+      <span class="truncate flex-1">${esc(title)}</span>
+      <span class="cc-pct" style="color:${c}">${(pct_c||0).toFixed(2)}%</span>
+    </div>
+    <div class="cc-bar">
+      <span class="cc-bar-c" style="width:${barC};background:${c}"></span>
+    </div>
+    <div class="cc-nums">
+      <span class="cc-total">Total: <strong>${(tot||0).toLocaleString()}</strong></span>
+      <span class="cc-c">✓ ${(comp||0).toLocaleString()} &nbsp;(${(pct_c||0).toFixed(2)}%)</span>
+      <span class="cc-nc">✗ ${(nc||0).toLocaleString()} &nbsp;(${(pct_nc||0).toFixed(2)}%)</span>
+    </div>
+  </div>`
+}
+
+function toast(msg, type='') {
+  const el = document.createElement('div')
+  el.className = 'toast-msg '+(type==='ok'?'success':type==='err'?'error':type)
+  el.textContent = msg
+  $('toast').appendChild(el)
+  requestAnimationFrame(()=>el.classList.add('show'))
+  setTimeout(()=>{el.classList.remove('show');setTimeout(()=>el.remove(),300)},3500)
+}
+function destroyChart(id){if(charts[id]){charts[id].destroy();delete charts[id]}}
+function setSpinner(elId){$(elId).innerHTML='<div class="spinner"></div>'}
+
+// ── TAB ROUTING ──────────────────────────────────────────────────────────────
+function switchTab(t) {
+  S.currentTab=t
+  qq('.tab-panel').forEach(el=>el.classList.remove('active'))
+  qq('.nav-tab').forEach(el=>el.classList.remove('active'))
+  q(`#tab-${t}`).classList.add('active')
+  qq('.nav-tab').find(el=>el.textContent.toLowerCase().includes(t.slice(0,4)))?.classList.add('active')
+  renderCurrent()
+}
+function renderCurrent() {
+  if(S.currentTab==='dashboard') renderDashboard()
+  else if(S.currentTab==='team') renderTeam()
+  else if(S.currentTab==='master') renderMaster()
+  else if(S.currentTab==='data') renderData()
+  else if(S.currentTab==='reports') renderReport()
+}
+function switchMaster(s) { S.masterSub=s; qq('#master-tabs .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderMaster() }
+function switchData(s) { S.dataSub=s; qq('#tab-data .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderData() }
+function switchReport(s) { S.reportSub=s; qq('#tab-reports .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderReport() }
+function setTeamView(v) { S.teamView=v; renderTeam() }
+
+function switchFY() {
+  const fys = S.cache.map(c=>c.fy).sort((a,b)=>b.localeCompare(a))
+  if(!fys.length){toast('No FY cache configured','error');return}
+  const html = `<div class="form-group"><label class="form-label">Select Active Fiscal Year</label>
+    <select class="form-select" id="fy-select">
+      ${fys.map(f=>`<option value="${f}" ${f===S.currentFY?'selected':''}>${f}${f===S.currentFY?' (current)':''}</option>`).join('')}
+    </select></div>
+    <p class="text-xs text-muted mt-8">Dashboard and reports will show data for the selected FY.</p>`
+  openModal('Switch Active Fiscal Year', html, [{label:'Switch',cls:'btn-primary',fn:()=>{S.currentFY=q('#fy-select').value;updateHeader();closeModal();renderCurrent();toast('FY switched to '+S.currentFY,'ok')}}])
+}
+
+// ── MODAL ────────────────────────────────────────────────────────────────────
+function openModal(title, body, actions=[], wide=false) {
+  q('#modal-title').textContent = title
+  q('#modal-body').innerHTML = body
+  q('#modal-box').className = 'modal'+(wide?' wide':'')
+  const ft = q('#modal-foot'); ft.innerHTML = '<button class="btn btn-ghost" onclick="closeModal()">Cancel</button>'
+  actions.forEach(a=>{const b=document.createElement('button');b.className='btn '+(a.cls||'btn-primary');b.textContent=a.label;b.onclick=a.fn;ft.appendChild(b)})
+  q('#modal-overlay').classList.remove('hidden')
+}
+function closeModal(e){if(e&&e.target!==e.currentTarget)return;q('#modal-overlay').classList.add('hidden')}
+
+// ── PICKERS ──────────────────────────────────────────────────────────────────
+function buildOwnerPicker(pid, sel) {
+  return `<div class="owner-list" id="${pid}">${S.employees.map(e=>`
+  <div class="owner-item">
+    <input type="checkbox" value="${e.id}" id="op-${pid}-${e.id}" ${sel.includes(e.id)?'checked':''}>
+    <div class="avatar avatar-sm" style="background:${dc(e.dept)}">${av(e.name)}</div>
+    <div class="flex-1 truncate">
+      <p class="text-sm font-bold truncate">${esc(e.name)}</p>
+      <p class="text-xxs text-muted">${esc(e.emp_code||'')} · ${esc(e.dept)}</p>
+    </div>
+    ${deptBadge(e.dept)}
+  </div>`).join('')}</div>`
+}
+function getOwnerPicked(pid) { return [...document.querySelectorAll(`#${pid} input:checked`)].map(i=>i.value) }
+function buildItemPicker(pid, items, sel, lf) {
+  return `<div class="item-list" id="${pid}">${items.map(i=>`
+  <div class="item-row">
+    <input type="checkbox" value="${i.id}" id="ip-${pid}-${i.id}" ${sel.includes(i.id)?'checked':''}>
+    <span class="ref-badge">${esc(i.ref||i.code||i.id)}</span>
+    <span class="text-xs truncate flex-1">${esc(lf?lf(i):(i.title||i.name||'').slice(0,55))}</span>
+  </div>`).join('')}</div>`
+}
+function getItemPicked(pid) { return [...document.querySelectorAll(`#${pid} input:checked`)].map(i=>i.value) }
+function setItemPicked(pid, ids) { document.querySelectorAll(`#${pid} input`).forEach(cb=>{cb.checked=ids.includes(cb.value)}) }
+
+// ── DASHBOARD ────────────────────────────────────────────────────────────────
+function renderDashboard() {
+  const hod = S.employees.find(e=>e.level===1)
+  const fyPerf = perfByFY(S.currentFY)
+  const {tot,comp,nc,pct_c,pct_nc} = complianceSummary(fyPerf)
+  const allPcts = S.mps.map(m=>m.pct).filter(p=>p!=null)
+  const avgKPI = allPcts.length ? (allPcts.reduce((s,p)=>s+p,0)/allPcts.length).toFixed(1) : '—'
+
+  let html = ''
+  if (hod) html += `
+  <div class="hod-banner">
+    <div class="avatar avatar-lg" style="background:${dc(hod.dept)}">${av(hod.name)}</div>
+    <div>
+      <p style="font-size:10px;color:#93c5fd;font-weight:700;text-transform:uppercase;letter-spacing:1px">Head of Department</p>
+      <p style="font-size:22px;font-weight:900;color:#fff;font-family:'Syne',sans-serif">${esc(hod.name)}</p>
+      <p style="font-size:12px;color:#93c5fd">${esc(hod.role)}</p>
+    </div>
+    <div class="hod-stats">
+      ${[['MPs',S.mps.length],['CPs',S.cps.length],['Team',S.employees.length-1],['Roles',S.roles.length]].map(([l,v])=>`<div class="hod-stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('')}
+      <div class="hod-stat"><div class="v" style="color:${pc(Number(avgKPI))}">${avgKPI}%</div><div class="l">KPI Rate</div></div>
+      <div class="hod-stat"><div class="v" style="color:${pc(pct_c)}">${pct_c}%</div><div class="l">FY ${S.currentFY}</div></div>
+    </div>
+  </div>`
+
+  // Overall compliance card
+  html += `<div class="card mb-20">
+    <div class="card-head"><p>FY ${esc(S.currentFY)} — Overall Performance</p></div>
+    <div class="card-body">
+      <div class="grid-4 mb-16">
+        ${compCard({title:'FY '+S.currentFY+' Overall',tot,comp,nc,pct_c,pct_nc})}
+        <div class="stat-box"><div class="val" style="color:var(--blue)">${tot.toLocaleString()}</div><div class="lbl">Total</div></div>
+        <div class="stat-box"><div class="val" style="color:var(--green)">${comp.toLocaleString()}</div><div class="lbl">✓ Compliant</div><div class="sub">${pct_c}%</div></div>
+        <div class="stat-box"><div class="val" style="color:var(--red)">${nc.toLocaleString()}</div><div class="lbl">✗ Non-Compliant</div><div class="sub">${pct_nc}%</div></div>
+      </div>
+    </div>
+  </div>`
+
+  html += `<p class="text-xs text-muted italic mb-12">Click any MP card to expand Checking Points. Click name chips to view employee profile.</p>`
+  html += '<div class="grid-2" id="mp-cards-grid">'
+  S.mps.forEach(mp => {
+    const mpPerf = fyPerf.filter(p=>p.mp_ref===mp.ref)
+    const {tot:mt,comp:mc,nc:mn,pct_c:mpc,pct_nc:mpnc} = complianceSummary(mpPerf)
+    const linkedCPs = S.cps.filter(c=>c.mp_id===mp.id)
+    html += `
+    <div class="mp-card" id="mpc-${mp.id}" onclick="toggleMP('${mp.id}')">
+      <div class="mp-card-head">
+        <div style="min-width:70px;text-align:center">
+          <span class="mp-ref">${esc(mp.ref)}</span>
+          <div class="mp-pct" style="color:${pc(mp.pct)}">${mp.pct!=null?mp.pct+'%':'—'}</div>
+          ${mt>0?`<div class="text-xxs" style="color:${pc(mpc)}">data:${mpc}%</div>`:''}
+        </div>
+        <div class="mp-body">
+          <div class="mp-title">${esc(mp.title)}</div>
+          <div class="mp-tags mt-8">
+            <span class="tag">${esc(mp.freq)}</span>
+            <span class="tag tag-blue">⌖ ${esc(mp.target)}</span>
+            <span class="tag tag-violet">${linkedCPs.length} CPs</span>
+          </div>
+          ${mt>0?`<div class="mp-tags mt-4">
+            <span class="tag tag-green">✓${mc.toLocaleString()} (${mpc}%)</span>
+            <span class="tag tag-red">✗${mn.toLocaleString()} (${mpnc}%)</span>
+            <span class="tag">/${mt.toLocaleString()} total</span>
+          </div>`:''}
+          <div class="mp-owners mt-8">${ownerChips(mp.owner_ids||[])}</div>
+        </div>
+        <span style="color:#94a3b8;font-size:12px" id="arr-${mp.id}">▼</span>
+      </div>
+      <div class="mp-expand" id="mpx-${mp.id}">
+        <p style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:#1e40af;margin-bottom:10px">Checking Points — ${linkedCPs.length}</p>
+        <div class="cp-grid">${linkedCPs.length ? linkedCPs.map(cp=>{
+          const cpP = fyPerf.filter(p=>p.cp_ref===cp.ref)
+          const {tot:ct,comp:cc,nc:cn,pct_c:cpc,pct_nc:cpnc} = complianceSummary(cpP)
+          return `<div class="cp-card">
+            <div class="flex gap-8 items-center mb-8">
+              <span class="cp-ref">${esc(cp.ref)}</span>
+              <span class="tag">${esc(cp.freq)}</span>
+              ${cp.source?`<span class="tag" style="background:#d1fae5;color:#065f46">${esc(cp.source)}</span>`:''}
+            </div>
+            <p class="text-sm font-bold" style="line-height:1.4">${esc(cp.title)}</p>
+            <p class="text-xxs text-muted mt-8">Target: <strong>${esc(cp.target)}</strong></p>
+            ${ct>0?`<div class="kpi-bar mt-8"><div class="kpi-bar-fill" style="width:${Math.min(cpc,100)}%;background:${pc(cpc)}"></div></div>
+            <div class="flex gap-8 mt-4 text-xxs">
+              <span style="color:var(--green);font-weight:700">✓${cc} (${cpc}%)</span>
+              <span style="color:var(--red)">✗${cn} (${cpnc}%)</span>
+              <span class="text-muted">/${ct}</span>
+            </div>`:''}
+            <div class="mp-owners mt-8">${ownerChips(cp.owner_ids||[])}</div>
+          </div>`}).join('') : '<p class="text-sm text-muted italic">No CPs linked yet.</p>'}</div>
+      </div>
+    </div>`
+  })
+  html += '</div>'
+  q('#tab-dashboard').innerHTML = html
+
+  const chartMPs = S.mps.filter(m=>m.pct!=null)
+  if (chartMPs.length) {
+    const c = document.createElement('canvas'); c.id='kpi-chart-mini'; c.height=100
+    // Inject mini chart if we have space - it's optional here
+  }
+}
+function toggleMP(id) {
+  const card=q(`#mpc-${id}`),exp=q(`#mpx-${id}`),arr=q(`#arr-${id}`)
+  const open=exp.classList.toggle('open')
+  card.classList.toggle('expanded',open); arr.textContent=open?'▲':'▼'
+}
+
+// ── TEAM ─────────────────────────────────────────────────────────────────────
+function renderTeam() {
+  q('#team-sub').textContent = `${S.employees.length} members · ${[...new Set(S.employees.map(e=>e.dept))].length} departments`
+  if (S.teamView==='org') { renderOrgChart(); return }
+
+  let html = ''
+  for (let lvl=1;lvl<=3;lvl++) {
+    const emps = S.employees.filter(e=>e.level===lvl)
+    if (!emps.length) continue
+    const label = ['','Level 1 — Head of Department','Level 2 — Team Leads & Supervisors','Level 3 — Operations & Execution'][lvl]
+    html += `<p class="text-xxs text-muted font-bold" style="text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px;${lvl>1?'margin-top:18px;':''}padding-bottom:6px;border-bottom:1px solid var(--border)">${label}</p>`
+    html += '<div class="grid-auto">'
+    emps.forEach(emp=>{
+      const mgr=getEmp(emp.manager_id)
+      const myMPs=S.mps.filter(m=>(m.owner_ids||[]).includes(emp.id)).length
+      const myCPs=S.cps.filter(c=>(c.owner_ids||[]).includes(emp.id)).length
+      const eroles=(emp.role_ids||[]).map(getRole).filter(Boolean)
+      html += `<div class="card" style="padding:14px;border-left:3px solid ${dc(emp.dept)}">
+        <div class="flex gap-12">
+          <div class="avatar avatar-md" style="background:${dc(emp.dept)}">${av(emp.name)}</div>
+          <div class="flex-1" style="min-width:0">
+            <p class="font-bold truncate">${esc(emp.name)}</p>
+            <p class="text-xs text-muted truncate">${esc(emp.role)}</p>
+            <div class="mt-8"><span class="emp-code">${esc(emp.emp_code||'—')}</span></div>
+            ${mgr?`<p class="text-xxs text-muted mt-4">↑ ${esc(mgr.name.split(' ')[0])}</p>`:''}
+            <div class="flex gap-4 mt-8" style="flex-wrap:wrap">
+              ${deptBadge(emp.dept)}
+              <span class="badge badge-gray">${myMPs} MPs</span>
+              <span class="badge badge-gray">${myCPs} CPs</span>
+            </div>
+            ${eroles.length?`<div class="flex gap-4 mt-6" style="flex-wrap:wrap">${eroles.map(r=>`<span class="badge" style="background:${r.color};color:#fff">${esc(r.code)}</span>`).join('')}</div>`:''}
+          </div>
+        </div>
+        <div class="flex gap-6 mt-12" style="border-top:1px solid var(--border);padding-top:10px">
+          <button class="btn btn-ghost btn-sm flex-1" onclick="openEmpForm('${emp.id}')">Edit</button>
+          <button class="btn btn-ghost btn-sm flex-1" onclick="openProfile('${emp.id}')">Profile</button>
+          <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="delEmp('${emp.id}')">Del</button>
+        </div>
+      </div>`
+    })
+    html += '</div>'
+  }
+  q('#team-content').innerHTML = html
+}
+
+function renderOrgChart() {
+  const roots = S.employees.filter(e=>!e.manager_id||!S.employees.find(x=>x.id===e.manager_id))
+  function nodeHtml(emp) {
+    const reports = S.employees.filter(e=>e.manager_id===emp.id)
+    const myMPs = S.mps.filter(m=>(m.owner_ids||[]).includes(emp.id)).length
+    return `<div style="display:flex;flex-direction:column;align-items:center">
+      <button onclick="openProfile('${emp.id}')"
+        style="display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 14px;border:2px solid ${dc(emp.dept)}40;border-radius:12px;background:#fff;cursor:pointer;min-width:120px;max-width:148px;transition:.2s"
+        onmouseover="this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'" onmouseout="this.style.boxShadow=''">
+        <div class="avatar avatar-sm" style="background:${dc(emp.dept)}">${av(emp.name)}</div>
+        <div style="font-size:11px;font-weight:700;text-align:center;line-height:1.3">${esc(emp.name.split(' ')[0])}</div>
+        <div class="text-xxs text-muted">${esc(emp.dept)}</div>
+        <div class="emp-code" style="font-size:9px">${esc(emp.emp_code||'')}</div>
+        ${myMPs?`<span class="badge badge-blue text-xxs">${myMPs} MPs</span>`:''}
+      </button>
+      ${reports.length?`<div style="width:2px;height:16px;background:var(--border)"></div>
+      <div style="display:flex;gap:16px;position:relative">
+        <div style="position:absolute;top:0;left:0;right:0;height:2px;background:var(--border)"></div>
+        ${reports.map(r=>`<div style="display:flex;flex-direction:column;align-items:center;position:relative;padding-top:2px">
+          <div style="width:2px;height:14px;background:var(--border)"></div>${nodeHtml(r)}</div>`).join('')}
+      </div>`:''}
+    </div>`
+  }
+  q('#team-content').innerHTML = `<div class="card"><div class="card-body" style="overflow-x:auto">
+    <div style="display:flex;justify-content:center;gap:32px;flex-wrap:wrap;padding:8px">${roots.map(r=>nodeHtml(r)).join('')}</div>
+  </div></div>`
+}
+
+function openEmpForm(id) {
+  const emp = id?getEmp(id):null
+  const DEPTS = ['HOD','Vehicle','Registration','Warehouse','Stock','Ops','Finance','HR']
+  openModal(emp?'Edit Team Member':'Add Team Member', `
+    <div class="form-group"><label class="form-label">Employee Code</label>
+      <input class="form-input" id="ef-code" value="${esc(emp?.emp_code||'')}" placeholder="Auto-generated e.g. EMP-001">
+      <p class="text-xs text-muted mt-8">Used in CSV/Excel uploads as the employee identifier.</p>
+    </div>
+    <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="ef-name" value="${esc(emp?.name||'')}"></div>
+    <div class="form-group"><label class="form-label">Role / Designation</label><input class="form-input" id="ef-role" value="${esc(emp?.role||'')}"></div>
+    <div class="form-group"><label class="form-label">Email</label><input class="form-input" type="email" id="ef-email" value="${esc(emp?.email||'')}"></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label class="form-label">Department</label>
+        <select class="form-select" id="ef-dept">${DEPTS.map(d=>`<option ${emp?.dept===d?'selected':''}>${d}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label">Level</label>
+        <select class="form-select" id="ef-level">
+          <option value="1" ${emp?.level===1?'selected':''}>1 — Head of Department</option>
+          <option value="2" ${emp?.level===2?'selected':''}>2 — Team Lead</option>
+          <option value="3" ${!emp||emp.level===3?'selected':''}>3 — Operations</option>
+        </select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Reports To (Manager)</label>
+      <select class="form-select" id="ef-mgr">
+        <option value="">— None / Top Level —</option>
+        ${S.employees.filter(e=>e.id!==id).map(e=>`<option value="${e.id}" ${emp?.manager_id===e.id?'selected':''}>${esc(e.name)} (${esc(e.emp_code||'')})</option>`).join('')}
+      </select></div>`,
+    [{label:emp?'Save Changes':'Add Member',cls:'btn-primary',fn:async()=>{
+      const d={name:q('#ef-name').value,role:q('#ef-role').value,email:q('#ef-email').value,
+        emp_code:q('#ef-code').value.trim(),dept:q('#ef-dept').value,
+        level:+q('#ef-level').value,manager_id:q('#ef-mgr').value||null}
+      if(!d.name){toast('Name required','error');return}
+      if(emp){d.id=emp.id;await api.put(`/api/employees/${emp.id}`,d)}
+      else await api.post('/api/employees',d)
+      toast(emp?'Member updated':'Member added','ok');closeModal();await loadAll()
+    }}]
+  )
+}
+async function delEmp(id) {
+  if(!confirm(`Remove ${getEmp(id)?.name}? They will be unlinked from all MPs and CPs.`))return
+  await api.del(`/api/employees/${id}`);toast('Removed','ok');await loadAll()
+}
+function openProfile(id, e) {
+  if(e)e.stopPropagation()
+  const emp=getEmp(id);if(!emp)return
+  const myMPs=S.mps.filter(m=>(m.owner_ids||[]).includes(id))
+  const myCPs=S.cps.filter(c=>(c.owner_ids||[]).includes(id))
+  const mgr=getEmp(emp.manager_id)
+  const reports=S.employees.filter(e=>e.manager_id===id)
+  const eroles=(emp.role_ids||[]).map(getRole).filter(Boolean)
+  const fyPerf=perfByFY(S.currentFY)
+
+  const treeHtml = myMPs.map(mp=>{
+    const {tot:mt,comp:mc,nc:mn,pct_c:mpc} = complianceSummary(fyPerf.filter(p=>p.mp_ref===mp.ref))
+    const linked = S.cps.filter(c=>c.mp_id===mp.id)
+    return `<div class="mp-tree">
+      <div class="mp-tree-head">
+        <span class="ref-badge">${esc(mp.ref)}</span>
+        <span class="text-sm font-bold flex-1">${esc(mp.title)}</span>
+        ${mt>0?`<span class="text-xxs" style="color:var(--green);font-weight:700">✓${mc}</span>
+        <span class="text-xxs" style="color:var(--red)">✗${mn}</span>
+        ${pctBadge(mpc)}`:''}
+      </div>
+      ${linked.map(cp=>`<div class="cp-tree-row ${(cp.owner_ids||[]).includes(id)?'':'text-muted'}" style="opacity:${(cp.owner_ids||[]).includes(id)?1:.4}">
+        <span class="text-muted">└</span>
+        <span class="ref-badge ref-badge-blue">${esc(cp.ref)}</span>
+        <span class="text-xs flex-1">${esc(cp.title)}</span>
+        <span class="text-xxs text-muted">${esc(cp.target)}</span>
+        ${(cp.owner_ids||[]).includes(id)?'<span class="badge badge-c text-xxs">Owner</span>':''}
+      </div>`).join('')}
+    </div>`
+  }).join('')
+
+  openModal('Employee Profile', `
+    <div class="profile-header" style="border-color:${dc(emp.dept)};background:${dc(emp.dept)}10">
+      <div class="avatar avatar-lg" style="background:${dc(emp.dept)}">${av(emp.name)}</div>
+      <div class="flex-1">
+        <p style="font-size:20px;font-weight:900;font-family:'Syne',sans-serif">${esc(emp.name)}</p>
+        <p class="text-sm text-muted">${esc(emp.role)}</p>
+        <div class="flex gap-8 mt-8" style="flex-wrap:wrap">
+          <span class="emp-code">${esc(emp.emp_code||'—')}</span>
+          ${deptBadge(emp.dept)}
+          <span class="badge badge-gray">Level ${emp.level}</span>
+          ${mgr?`<span class="badge badge-gray">→ ${esc(mgr.name.split(' ')[0])}</span>`:''}
+        </div>
+        ${eroles.length?`<div class="flex gap-4 mt-8">${eroles.map(r=>`<span class="badge" style="background:${r.color};color:#fff">${esc(r.name)}</span>`).join('')}</div>`:''}
+      </div>
+      <div class="flex gap-12">
+        <div class="stat-box" style="padding:10px 16px"><div class="val" style="color:var(--blue)">${myMPs.length}</div><div class="lbl">MPs</div></div>
+        <div class="stat-box" style="padding:10px 16px"><div class="val" style="color:var(--violet)">${myCPs.length}</div><div class="lbl">CPs</div></div>
+      </div>
+    </div>
+    ${reports.length?`<p class="text-xxs text-muted font-bold" style="text-transform:uppercase;margin-bottom:8px">Direct Reports (${reports.length})</p>
+    <div class="flex gap-8 mb-16" style="flex-wrap:wrap">${reports.map(r=>`<div class="flex gap-8 items-center" style="background:#f8fafc;border:1px solid var(--border);border-radius:10px;padding:6px 12px">
+      <div class="avatar avatar-sm" style="background:${dc(r.dept)}">${av(r.name)}</div>
+      <div><p class="text-xs font-bold">${esc(r.name.split(' ')[0])}</p><p class="text-xxs text-muted">${esc(r.emp_code||'')}</p></div>
+    </div>`).join('')}</div>`:''}
+    <p class="text-xxs text-muted font-bold" style="text-transform:uppercase;margin-bottom:10px">MP → CP Responsibility Tree</p>
+    ${treeHtml||'<p class="text-sm text-muted italic">No managing points assigned.</p>'}
+  `,[], true)
+}
+
+// ── MASTER SETUP ─────────────────────────────────────────────────────────────
+function renderMaster() {
+  if(S.masterSub==='mps') renderMPs()
+  else if(S.masterSub==='cps') renderCPs()
+  else if(S.masterSub==='roles') renderRoles()
+  else renderLinks()
+}
+
+function renderMPs() {
+  const FREQS=['Daily','Weekly','Fortnightly','Monthly','Quarterly']
+  let html = `
+  <div class="sample-banner">
+    <h4>📥 Excel Upload — Managing Points</h4>
+    <p>Upload MPs in bulk via Excel. The file can contain Ref, Title, Target, Frequency, KPI totals, and Owner_Codes (comma-separated employee codes).<br>
+    Existing MPs with the same Ref will be updated. New ones will be created.</p>
+    <div class="sample-files">
+      <a href="/api/samples/mps" class="sample-link">⬇ Sample_ManagingPoints.xlsx</a>
+      <a href="/api/mps/template_excel" class="sample-link">⬇ Blank Template</a>
+    </div>
+  </div>
+  <div class="section-head">
+    <div><h2>Managing Points</h2><p>${S.mps.length} HOD-level strategic objectives</p></div>
+    <div class="flex gap-8">
+      <label class="upload-zone">⬆ Upload Excel<input type="file" accept=".xlsx,.xls" onchange="uploadMPExcel(this)"></label>
+      <button class="btn btn-primary btn-sm" onclick="openMPForm()">+ New MP</button>
+    </div>
+  </div>
+  <div class="mb-16"><div class="search-wrap"><span class="search-icon">🔍</span>
+    <input class="form-input" id="mp-search" placeholder="Search MPs…" oninput="filterMPs()"></div></div>
+  <div id="mp-list">`
+  S.mps.forEach(mp=>{
+    const owners=(mp.owner_ids||[]).map(getEmp).filter(Boolean)
+    const cpCount=S.cps.filter(c=>c.mp_id===mp.id).length
+    html += `<div class="card mb-12" style="padding:14px 16px" data-s="${esc(mp.ref)} ${esc(mp.title)}">
+      <div class="flex gap-12 items-start">
+        <div style="text-align:center;min-width:68px">
+          <span class="ref-badge" style="display:block;font-size:11px;font-weight:900">${esc(mp.ref)}</span>
+          <div style="font-size:18px;font-weight:900;color:${pc(mp.pct)};font-family:'Syne',sans-serif;margin-top:4px">${mp.pct!=null?mp.pct+'%':'—'}</div>
+          ${mp.kpi_total>0?`<div class="text-xxs text-muted">${mp.kpi_c} C / ${mp.kpi_nc} NC</div>`:''}
+        </div>
+        <div class="flex-1">
+          <p class="font-bold">${esc(mp.title)}</p>
+          <div class="flex gap-4 mt-8" style="flex-wrap:wrap">
+            <span class="badge badge-gray">${esc(mp.freq)}</span>
+            <span class="badge badge-blue">⌖ ${esc(mp.target)}</span>
+            <span class="badge" style="background:#ede9fe;color:#5b21b6">${cpCount} CPs</span>
+            ${mp.kpi_total>0?`<span class="badge badge-gray">${mp.kpi_total.toLocaleString()} Total</span>`:''}
+          </div>
+          <div class="mp-owners mt-8">${owners.map(o=>`<span class="owner-chip" style="background:${dc(o.dept)}">${o.name.split(' ')[0]}<span style="font-size:9px;opacity:.7;margin-left:3px">(${o.emp_code||''})</span></span>`).join('')}
+          ${owners.length===0?'<span class="text-xs text-muted italic">No owners assigned</span>':''}</div>
+        </div>
+        <div class="flex gap-6">
+          <button class="btn btn-ghost btn-sm" onclick="openMPForm('${mp.id}')">Edit</button>
+          <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="delMP('${mp.id}')">Del</button>
+        </div>
+      </div>
+    </div>`
+  })
+  html += '</div>'
+  q('#master-content').innerHTML = html
+}
+function filterMPs(){const s=(q('#mp-search')?.value||'').toLowerCase();qq('[data-s]').forEach(el=>el.style.display=el.dataset.s.toLowerCase().includes(s)?'':'none')}
+function openMPForm(id){
+  const mp=id?getMP(id):null
+  const FREQS=['Daily','Weekly','Fortnightly','Monthly','Quarterly']
+  openModal(mp?'Edit Managing Point':'Create Managing Point',`
+    <div class="form-grid-2">
+      <div class="form-group"><label class="form-label">MP Reference</label><input class="form-input" id="mf-ref" value="${esc(mp?.ref||'')}" placeholder="e.g. HODL-1"></div>
+      <div class="form-group"><label class="form-label">Frequency</label>
+        <select class="form-select" id="mf-freq">${FREQS.map(f=>`<option ${mp?.freq===f?'selected':''}>${f}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Managing Point Title</label><input class="form-input" id="mf-title" value="${esc(mp?.title||'')}" placeholder="Objective description…"></div>
+    <div class="form-group"><label class="form-label">Target / SLA</label><input class="form-input" id="mf-target" value="${esc(mp?.target||'')}" placeholder="e.g. 3 Days, 24 Hours, 100%"></div>
+    <div class="form-group"><label class="form-label">Responsible Owners</label>${buildOwnerPicker('mf-owners',mp?.owner_ids||[])}</div>
+    <p style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);border-top:1px dashed var(--border);padding-top:14px;margin-top:4px">KPI / Compliance Figures</p>
+    <div class="form-grid-3 mt-8">
+      <div class="form-group"><label class="form-label">Total</label><input class="form-input" type="number" id="mf-total" value="${mp?.kpi_total||0}"></div>
+      <div class="form-group"><label class="form-label">Compliant (C)</label><input class="form-input" type="number" id="mf-c" value="${mp?.kpi_c||0}"></div>
+      <div class="form-group"><label class="form-label">Non-Compliant</label><input class="form-input" type="number" id="mf-nc" value="${mp?.kpi_nc||0}"></div>
+    </div>`,
+    [{label:mp?'Save Changes':'Create MP',cls:'btn-primary',fn:async()=>{
+      const d={ref:q('#mf-ref').value,title:q('#mf-title').value,target:q('#mf-target').value,
+        freq:q('#mf-freq').value,kpi_total:+q('#mf-total').value,kpi_c:+q('#mf-c').value,
+        kpi_nc:+q('#mf-nc').value,owner_ids:getOwnerPicked('mf-owners')}
+      if(!d.ref||!d.title){toast('Ref and title required','error');return}
+      if(mp){d.id=mp.id;await api.put(`/api/mps/${mp.id}`,d)}else await api.post('/api/mps',d)
+      toast(mp?'MP updated':'MP created','ok');closeModal();await loadAll()
+    }}],true
+  )
+}
+async function delMP(id){if(!confirm('Delete MP? Linked CPs become unlinked.'))return;await api.del(`/api/mps/${id}`);toast('Deleted');await loadAll()}
+async function uploadMPExcel(input){
+  const fd=new FormData();fd.append('file',input.files[0])
+  const r=await fetch('/api/mps/import_excel',{method:'POST',body:fd}).then(r=>r.json())
+  toast(r.imported!=null?`✅ ${r.imported} MPs imported`:`❌ ${r.error||'Error'}`,(r.imported?'ok':'error'))
+  if(r.errors?.length) console.warn('Import errors:',r.errors)
+  await loadAll();input.value=''
+}
+
+function renderCPs() {
+  let html = `
+  <div class="sample-banner">
+    <h4>📥 Excel Upload — Checking Points</h4>
+    <p>Upload CPs in bulk. Required columns: Ref, Title, MP_Ref (must match an existing MP). Owners set by Owner_Codes (comma-separated employee codes).<br>
+    If the MP_Ref doesn't match an existing MP, the CP will be created as unlinked.</p>
+    <div class="sample-files">
+      <a href="/api/samples/cps" class="sample-link">⬇ Sample_CheckingPoints.xlsx</a>
+      <a href="/api/cps/template_excel" class="sample-link">⬇ Blank Template</a>
+    </div>
+  </div>
+  <div class="section-head">
+    <div><h2>Checking Points</h2><p>${S.cps.length} operational checkpoints</p></div>
+    <div class="flex gap-8">
+      <label class="upload-zone">⬆ Upload Excel<input type="file" accept=".xlsx,.xls" onchange="uploadCPExcel(this)"></label>
+      <button class="btn btn-primary btn-sm" onclick="openCPForm()">+ New CP</button>
+    </div>
+  </div>
+  <div class="flex gap-8 mb-16">
+    <div class="search-wrap flex-1"><span class="search-icon">🔍</span>
+      <input class="form-input" id="cp-search" placeholder="Search CPs…" oninput="filterCPs()"></div>
+    <select class="form-select" id="cp-mp-filter" style="width:160px" onchange="filterCPs()">
+      <option value="">All MPs</option>${S.mps.map(m=>`<option value="${m.id}">${esc(m.ref)}</option>`).join('')}
+    </select>
+  </div>
+  <div class="tbl-wrap"><table>
+    <thead><tr><th>CP Ref</th><th>Checking Point</th><th>Linked MP</th><th>Target</th><th>Freq</th><th>Source</th><th>Owners</th><th></th></tr></thead>
+    <tbody id="cp-tbody">`
+  S.cps.forEach(cp=>{
+    const mp=S.mps.find(m=>m.id===cp.mp_id)
+    const owners=(cp.owner_ids||[]).map(getEmp).filter(Boolean)
+    html+=`<tr data-cs="${esc(cp.ref)} ${esc(cp.title)}" data-cm="${cp.mp_id}">
+      <td><span class="ref-badge ref-badge-blue">${esc(cp.ref)}</span></td>
+      <td style="max-width:240px"><p class="font-bold text-sm" style="line-height:1.4">${esc(cp.title)}</p></td>
+      <td>${mp?`<span class="ref-badge">${esc(mp.ref)}</span>`:'<span style="color:var(--red);font-size:10px">Unlinked</span>'}</td>
+      <td class="text-muted">${esc(cp.target)}</td>
+      <td class="text-muted">${esc(cp.freq)}</td>
+      <td>${cp.source?`<span class="badge" style="background:#d1fae5;color:#065f46">${esc(cp.source)}</span>`:''}</td>
+      <td>${owners.map(o=>`<span class="owner-chip" style="background:${dc(o.dept)}">${o.name.split(' ')[0]}</span>`).join('')}</td>
+      <td><div class="row-actions">
+        <button class="btn-icon" onclick="openCPForm('${cp.id}')">✏</button>
+        <button class="btn-icon" style="color:var(--red)" onclick="delCP('${cp.id}')">🗑</button>
+      </div></td>
+    </tr>`
+  })
+  html += '</tbody></table></div>'
+  q('#master-content').innerHTML = html
+}
+function filterCPs(){const s=(q('#cp-search')?.value||'').toLowerCase(),mp=q('#cp-mp-filter')?.value||'';qq('#cp-tbody tr').forEach(tr=>tr.style.display=(tr.dataset.cs?.toLowerCase().includes(s)&&(!mp||tr.dataset.cm===mp))?'':'none')}
+function openCPForm(id){
+  const cp=id?getCP(id):null
+  const FREQS=['Daily','Weekly','Fortnightly','Monthly','Quarterly']
+  const SRCS=['','System','Manual','Check/System']
+  openModal(cp?'Edit Checking Point':'Create Checking Point',`
+    <div class="form-grid-2">
+      <div class="form-group"><label class="form-label">CP Reference</label><input class="form-input" id="cf-ref" value="${esc(cp?.ref||'')}" placeholder="e.g. LM-VEH-1"></div>
+      <div class="form-group"><label class="form-label">Frequency</label>
+        <select class="form-select" id="cf-freq">${FREQS.map(f=>`<option ${cp?.freq===f?'selected':''}>${f}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Checking Point Description</label><input class="form-input" id="cf-title" value="${esc(cp?.title||'')}"></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label class="form-label">Target / SLA</label><input class="form-input" id="cf-target" value="${esc(cp?.target||'')}"></div>
+      <div class="form-group"><label class="form-label">Report Source</label>
+        <select class="form-select" id="cf-source">${SRCS.map(s=>`<option value="${s}" ${cp?.source===s?'selected':''}>${s||'— None —'}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Linked Managing Point (MP)</label>
+      <select class="form-select" id="cf-mp">
+        <option value="">— Select MP to link this CP under —</option>
+        ${S.mps.map(m=>`<option value="${m.id}" ${cp?.mp_id===m.id?'selected':''}>${esc(m.ref)}: ${esc(m.title.slice(0,55))}</option>`).join('')}
+      </select></div>
+    <div class="form-group"><label class="form-label">Responsible Owners</label>${buildOwnerPicker('cf-owners',cp?.owner_ids||[])}</div>`,
+    [{label:cp?'Save Changes':'Create CP',cls:'btn-primary',fn:async()=>{
+      const d={ref:q('#cf-ref').value,title:q('#cf-title').value,target:q('#cf-target').value,
+        freq:q('#cf-freq').value,source:q('#cf-source').value,mp_id:q('#cf-mp').value,
+        owner_ids:getOwnerPicked('cf-owners')}
+      if(!d.ref||!d.title){toast('Ref and title required','error');return}
+      if(cp){d.id=cp.id;await api.put(`/api/cps/${cp.id}`,d)}else await api.post('/api/cps',d)
+      toast(cp?'CP updated':'CP created','ok');closeModal();await loadAll()
+    }}],true
+  )
+}
+async function delCP(id){if(!confirm('Delete this Checking Point?'))return;await api.del(`/api/cps/${id}`);toast('Deleted');await loadAll()}
+async function uploadCPExcel(input){
+  const fd=new FormData();fd.append('file',input.files[0])
+  const r=await fetch('/api/cps/import_excel',{method:'POST',body:fd}).then(r=>r.json())
+  toast(r.imported!=null?`✅ ${r.imported} CPs imported`:`❌ ${r.error||'Error'}`,(r.imported?'ok':'error'))
+  await loadAll();input.value=''
+}
+
+function renderRoles(){
+  let html=`<div class="section-head">
+    <div><h2>Role Templates</h2><p>Bundle MPs + CPs into named roles assignable to team members</p></div>
+    <button class="btn btn-primary btn-sm" onclick="openRoleForm()">+ New Role</button>
+  </div><div class="grid-2">`
+  S.roles.forEach(r=>{
+    const mpTags=r.mp_ids.map(mid=>{const m=getMP(mid);return m?`<span class="ref-badge" style="margin:2px">${esc(m.ref)}</span>`:''}).join('')
+    html+=`<div class="card" style="border-top:3px solid ${r.color};padding:16px">
+      <div class="flex items-start justify-between mb-8">
+        <div class="flex gap-8 items-center"><span class="color-swatch" style="background:${r.color}"></span><span class="ref-badge">${esc(r.code)}</span></div>
+        <div class="flex gap-6">
+          <button class="btn btn-ghost btn-sm" onclick="openRoleForm('${r.id}')">Edit</button>
+          <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="delRole('${r.id}')">Del</button>
+        </div>
+      </div>
+      <p class="font-black" style="font-size:14px">${esc(r.name)}</p>
+      <p class="text-xs text-muted mt-4">${esc(r.description||'')}</p>
+      <div class="mt-12">${mpTags}</div>
+      <p class="text-xxs text-muted mt-6">${r.mp_ids.length} MPs · ${r.cp_ids.length} CPs bundled</p>
+    </div>`
+  })
+  html+='</div>'
+  q('#master-content').innerHTML=html
+}
+function openRoleForm(id){
+  const role=id?getRole(id):null
+  const COLORS=['#1d4ed8','#6d28d9','#047857','#b45309','#0891b2','#be185d','#0f2540','#dc2626']
+  openModal(role?'Edit Role Template':'Create Role Template',`
+    <div class="form-grid-2">
+      <div class="form-group"><label class="form-label">Role Code</label><input class="form-input" id="rf-code" value="${esc(role?.code||'')}" placeholder="ROLE-VIM"></div>
+      <div class="form-group"><label class="form-label">Role Name</label><input class="form-input" id="rf-name" value="${esc(role?.name||'')}"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Description</label><textarea class="form-textarea" id="rf-desc" rows="2">${esc(role?.description||'')}</textarea></div>
+    <div class="form-group"><label class="form-label">Role Color</label>
+      <div class="flex gap-8">${COLORS.map(c=>`<button type="button" onclick="pickRoleColor(this,'${c}')"
+        style="width:28px;height:28px;border-radius:50%;background:${c};border:3px solid ${role?.color===c?'#000':'transparent'};cursor:pointer"></button>`).join('')}</div>
+      <input type="hidden" id="rf-color" value="${role?.color||COLORS[0]}">
+    </div>
+    <div class="form-group"><label class="form-label">Linked MPs (selecting MP auto-includes its CPs)</label>
+      ${buildItemPicker('rf-mps',S.mps,role?.mp_ids||[],m=>m.ref+': '+m.title.slice(0,50))}</div>
+    <div class="form-group"><label class="form-label">Fine-tune CPs</label>
+      ${buildItemPicker('rf-cps',S.cps,role?.cp_ids||[],c=>c.ref+': '+c.title.slice(0,50))}</div>`,
+    [{label:role?'Save Changes':'Create Role',cls:'btn-primary',fn:async()=>{
+      const selMPs=getItemPicked('rf-mps')
+      let selCPs=getItemPicked('rf-cps')
+      selMPs.forEach(mid=>{S.cps.filter(c=>c.mp_id===mid).forEach(c=>{if(!selCPs.includes(c.id))selCPs.push(c.id)})})
+      const d={code:q('#rf-code').value,name:q('#rf-name').value,description:q('#rf-desc').value,
+        color:q('#rf-color').value,mp_ids:selMPs,cp_ids:selCPs}
+      if(!d.code||!d.name){toast('Code and name required','error');return}
+      if(role){d.id=role.id;await api.put(`/api/roles/${role.id}`,d)}else await api.post('/api/roles',d)
+      toast(role?'Updated':'Created','ok');closeModal();await loadAll()
+    }}],true
+  )
+}
+function pickRoleColor(el,c){qq('[onclick^="pickRoleColor"]').forEach(b=>b.style.borderColor='transparent');el.style.borderColor='#000';q('#rf-color').value=c}
+async function delRole(id){if(!confirm('Delete role?'))return;await api.del(`/api/roles/${id}`);toast('Deleted');await loadAll()}
+
+function renderLinks(){
+  let html=`<div class="section-head">
+    <div><h2>Role Assignments</h2><p>Assign role templates + individual MPs/CPs to each team member</p></div>
+    <button class="btn btn-primary btn-sm" onclick="openLinkForm()">+ Assign Role</button>
+  </div>`
+  S.employees.forEach(emp=>{
+    const eroles=(emp.role_ids||[]).map(getRole).filter(Boolean)
+    const emps_mp=(emp.mp_ids||[]).map(getMP).filter(Boolean)
+    const emps_cp=(emp.cp_ids||[]).map(getCP).filter(Boolean)
+    if(!eroles.length&&!emps_mp.length&&!emps_cp.length)return
+    html+=`<div class="card mb-12" style="padding:14px 16px">
+      <div class="flex gap-12 items-center mb-12">
+        <div class="avatar avatar-md" style="background:${dc(emp.dept)}">${av(emp.name)}</div>
+        <div class="flex-1">
+          <p class="font-bold">${esc(emp.name)}</p>
+          <div class="flex gap-8 mt-4"><span class="emp-code">${esc(emp.emp_code||'')}</span><span class="text-xs text-muted">${esc(emp.dept)}</span></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="openLinkForm('${emp.id}')">Edit</button>
+        <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="removeLink('${emp.id}')">Remove</button>
+      </div>
+      <div class="grid-3 text-xs">
+        <div><p class="text-xxs text-muted font-bold" style="text-transform:uppercase;margin-bottom:6px">Roles</p>
+          ${eroles.map(r=>`<span class="badge" style="background:${r.color};color:#fff;margin:2px">${esc(r.code)}</span>`).join('')||'<span class="text-muted">none</span>'}</div>
+        <div><p class="text-xxs text-muted font-bold" style="text-transform:uppercase;margin-bottom:6px">MPs (${emps_mp.length})</p>
+          ${emps_mp.slice(0,5).map(m=>`<span class="ref-badge" style="margin:2px">${esc(m.ref)}</span>`).join('')}${emps_mp.length>5?`<span class="text-muted">+${emps_mp.length-5}</span>`:''}</div>
+        <div><p class="text-xxs text-muted font-bold" style="text-transform:uppercase;margin-bottom:6px">CPs (${emps_cp.length})</p>
+          ${emps_cp.slice(0,5).map(c=>`<span class="ref-badge ref-badge-blue" style="margin:2px">${esc(c.ref)}</span>`).join('')}${emps_cp.length>5?`<span class="text-muted">+${emps_cp.length-5}</span>`:''}</div>
+      </div>
+    </div>`
+  })
+  q('#master-content').innerHTML=html
+}
+function openLinkForm(eid){
+  const emp=eid?getEmp(eid):null
+  openModal('Assign Role to Employee',`
+    <div class="form-group"><label class="form-label">Employee</label>
+      <select class="form-select" id="lf-emp" onchange="onLinkEmpChange(this.value)">
+        <option value="">— Select employee —</option>
+        ${S.employees.map(e=>`<option value="${e.id}" ${eid===e.id?'selected':''}>${esc(e.name)} (${esc(e.emp_code||'')})</option>`).join('')}
+      </select></div>
+    <div id="lf-rest" style="${eid?'':'display:none'}">
+      <div class="form-group"><label class="form-label">Role Templates (auto-links their MPs + CPs)</label>
+        <div class="item-list" id="lf-roles">
+          ${S.roles.map(r=>`<div class="item-row">
+            <input type="checkbox" value="${r.id}" id="lr-${r.id}" onchange="onRoleCheck('${r.id}')">
+            <span class="color-swatch" style="background:${r.color}"></span>
+            <div class="flex-1"><p class="text-sm font-bold">${esc(r.name)}</p><p class="text-xxs text-muted">${r.mp_ids.length} MPs · ${r.cp_ids.length} CPs</p></div>
+            <span class="ref-badge">${esc(r.code)}</span>
+          </div>`).join('')}
+        </div></div>
+      <div class="form-group"><label class="form-label">Fine-tune MPs</label>${buildItemPicker('lf-mps',S.mps,[])}</div>
+      <div class="form-group"><label class="form-label">Fine-tune CPs</label>${buildItemPicker('lf-cps',S.cps,[])}</div>
+    </div>`,
+    [{label:'Save Assignment',cls:'btn-primary',fn:async()=>{
+      const eid2=q('#lf-emp').value;if(!eid2){toast('Select an employee','error');return}
+      const role_ids=[...document.querySelectorAll('#lf-roles input:checked')].map(i=>i.value)
+      const mp_ids=getItemPicked('lf-mps');const cp_ids=getItemPicked('lf-cps')
+      await api.post(`/api/emp_links/${eid2}`,{role_ids,mp_ids,cp_ids})
+      toast('Assignment saved','ok');closeModal();await loadAll()
+    }}],true
+  )
+  if(eid)onLinkEmpChange(eid)
+}
+function onLinkEmpChange(eid){
+  if(!eid)return;q('#lf-rest').style.display=''
+  const emp=getEmp(eid);if(!emp)return
+  ;(emp.role_ids||[]).forEach(rid=>{const cb=q(`#lr-${rid}`);if(cb)cb.checked=true})
+  setItemPicked('lf-mps',emp.mp_ids||[]);setItemPicked('lf-cps',emp.cp_ids||[])
+}
+function onRoleCheck(rid){
+  const role=getRole(rid);if(!role)return
+  if(q(`#lr-${rid}`)?.checked){
+    setItemPicked('lf-mps',[...new Set([...getItemPicked('lf-mps'),...role.mp_ids])])
+    setItemPicked('lf-cps',[...new Set([...getItemPicked('lf-cps'),...role.cp_ids])])
+  }
+}
+async function removeLink(eid){
+  if(!confirm('Remove all role/MP/CP assignments?'))return
+  await api.post(`/api/emp_links/${eid}`,{role_ids:[],mp_ids:[],cp_ids:[]});toast('Removed');await loadAll()
+}
+
+// ── DATA MANAGER ─────────────────────────────────────────────────────────────
+function renderData() {
+  if(S.dataSub==='cache') renderCacheManager()
+  else renderPerfData()
+}
+
+function renderPerfData() {
+  const fyPerf=perfByFY(S.currentFY)
+  const {tot,comp,nc,pct_c,pct_nc}=complianceSummary(fyPerf)
+  const years=[...new Set(S.cache.map(c=>c.fy))].sort((a,b)=>b.localeCompare(a))
+
+  q('#data-content').innerHTML = `
+  <div class="sample-banner">
+    <h4>📥 CSV Upload — Performance Data</h4>
+    <p>Upload monthly performance records using BS (Bikram Samwat) month names. Each row captures: FY, BS_Month, Emp_Code, MP_Ref, CP_Ref, Metric, <strong>Total / Compliant / Non_Compliant counts</strong> + percentages.<br>
+    The system auto-calculates Status. Both BS month names (Shrawan, Bhadra…) and AD month names (Jul, Aug…) are accepted.</p>
+    <div class="sample-files">
+      <a href="/api/samples/perf" class="sample-link">⬇ Sample_Performance.csv</a>
+      <a href="/api/perf/template" class="sample-link">⬇ Blank Template CSV</a>
+      <a href="/api/perf/export?fy=${encodeURIComponent(S.currentFY)}" class="sample-link">⬇ Export FY ${S.currentFY}</a>
+      <a href="/api/perf/export" class="sample-link">⬇ Export All FYs</a>
+    </div>
+  </div>
+
+  <div class="section-head">
+    <div><h2>Performance Records</h2>
+      <p>Working FY: <strong style="color:var(--blue)">FY ${S.currentFY}</strong> · ${fyPerf.length} records · ${S.perf.length} total across all FYs</p></div>
+    <div class="flex gap-8">
+      <label class="upload-zone">⬆ Upload CSV<input type="file" accept=".csv" onchange="uploadPerf(this)"></label>
+      <button class="btn btn-primary btn-sm" onclick="openPerfForm()">+ Add Record</button>
+    </div>
+  </div>
+  <div id="upload-msg" class="hidden mb-16" style="padding:12px 16px;border-radius:10px;font-size:12px;font-weight:600"></div>
+
+  <!-- Compliance Summary -->
+  <div class="grid-5 mb-20">
+    ${compCard({title:'FY '+S.currentFY+' Data Performance',tot,comp,nc,pct_c,pct_nc})}
+    <div class="stat-box"><div class="val" style="color:var(--blue)">${tot.toLocaleString()}</div><div class="lbl">Total</div></div>
+    <div class="stat-box"><div class="val" style="color:var(--green)">${comp.toLocaleString()}</div><div class="lbl">✓ Compliant</div><div class="sub">${pct_c}%</div></div>
+    <div class="stat-box"><div class="val" style="color:var(--red)">${nc.toLocaleString()}</div><div class="lbl">✗ Non-Compliant</div><div class="sub">${pct_nc}%</div></div>
+    <div class="stat-box"><div class="val" style="color:var(--violet)">${fyPerf.length}</div><div class="lbl">Rows</div></div>
+  </div>
+
+  <!-- Filters -->
+  <div class="flex gap-8 mb-12" style="flex-wrap:wrap">
+    <div class="search-wrap flex-1" style="min-width:140px"><span class="search-icon">🔍</span>
+      <input class="form-input" id="pf-search" placeholder="Search records…" oninput="filterPerf()"></div>
+    <select class="form-select" id="pf-fy" style="width:120px" onchange="filterPerf()">
+      <option value="">All FYs</option>${years.map(y=>`<option ${y===S.currentFY?'selected':''}>${y}</option>`).join('')}
+    </select>
+    <select class="form-select" id="pf-month" style="width:130px" onchange="filterPerf()">
+      <option value="">All Months</option>${BS_MONTHS.map(m=>`<option>${m}</option>`).join('')}
+    </select>
+    <select class="form-select" id="pf-emp" style="width:170px" onchange="filterPerf()">
+      <option value="">All Employees</option>${S.employees.map(e=>`<option value="${e.emp_code||e.id}">${esc(e.name)} (${e.emp_code||''})</option>`).join('')}
+    </select>
+    <select class="form-select" id="pf-mp" style="width:130px" onchange="filterPerf()">
+      <option value="">All MPs</option>${S.mps.map(m=>`<option value="${m.ref}">${esc(m.ref)}</option>`).join('')}
+    </select>
+    <button class="btn btn-ghost btn-sm" onclick="clearPerfFilters()">Clear</button>
+  </div>
+
+  <div class="tbl-wrap"><table>
+    <thead><tr>
+      <th>FY</th><th>Month</th><th>Q</th><th>Emp Code</th><th>MP</th><th>CP</th><th>Metric</th>
+      <th style="text-align:right">Total</th>
+      <th style="text-align:right">✓ C</th>
+      <th style="text-align:right">% C</th>
+      <th style="text-align:right">✗ NC</th>
+      <th style="text-align:right">% NC</th>
+      <th>Unit</th><th>Status</th><th>Notes</th><th></th>
+    </tr></thead>
+    <tbody id="perf-tbody">
+      ${S.perf.slice(0,200).map(p=>perfRow(p)).join('')}
+    </tbody>
+  </table></div>
+  ${S.perf.length>200?`<p class="text-xs text-muted mt-8">Showing 200 of ${S.perf.length} records. Use filters.</p>`:''}`
+}
+function perfRow(p){
+  const emp=getEmp(p.emp_id)
+  return `<tr data-fy="${p.fy}" data-mo="${p.bs_month}" data-ec="${p.emp_code||''}" data-mp="${p.mp_ref}"
+    data-s="${esc((emp?.name||'')+' '+p.emp_code+' '+p.mp_ref+' '+p.cp_ref+' '+p.metric)}">
+    <td class="font-bold">${p.fy}</td>
+    <td class="font-bold">${esc(p.bs_month)}</td>
+    <td class="text-muted">${p.quarter}</td>
+    <td><span class="emp-code">${esc(p.emp_code||'—')}</span></td>
+    <td><span class="ref-badge">${esc(p.mp_ref)}</span></td>
+    <td><span class="ref-badge ref-badge-blue">${esc(p.cp_ref)}</span></td>
+    <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.metric)}</td>
+    <td style="text-align:right;font-weight:700">${(p.total||0).toLocaleString()}</td>
+    <td style="text-align:right;color:var(--green);font-weight:700">${(p.compliant||0).toLocaleString()}</td>
+    <td style="text-align:right;color:var(--green);font-weight:700">${(p.pct_compliant||0).toFixed(2)}%</td>
+    <td style="text-align:right;color:var(--red)">${(p.non_compliant||0).toLocaleString()}</td>
+    <td style="text-align:right;color:var(--red)">${(p.pct_nc||0).toFixed(2)}%</td>
+    <td class="text-muted">${esc(p.unit)}</td>
+    <td>${statusBadge(p.status)}</td>
+    <td class="text-muted" style="max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.notes)}</td>
+    <td><div class="row-actions">
+      <button class="btn-icon" onclick="openPerfForm('${p.id}')">✏</button>
+      <button class="btn-icon" style="color:var(--red)" onclick="delPerf('${p.id}')">🗑</button>
+    </div></td>
+  </tr>`
+}
+function filterPerf(){
+  const s=(q('#pf-search')?.value||'').toLowerCase()
+  const fy=q('#pf-fy')?.value||'',mo=q('#pf-month')?.value||''
+  const ec=q('#pf-emp')?.value||'',mp=q('#pf-mp')?.value||''
+  qq('#perf-tbody tr').forEach(tr=>{
+    const ok=(!s||tr.dataset.s?.toLowerCase().includes(s))&&(!fy||tr.dataset.fy===fy)&&
+      (!mo||tr.dataset.mo===mo)&&(!ec||tr.dataset.ec===ec)&&(!mp||tr.dataset.mp===mp)
+    tr.style.display=ok?'':'none'
+  })
+}
+function clearPerfFilters(){['pf-search','pf-fy','pf-month','pf-emp','pf-mp'].forEach(id=>{const el=q(`#${id}`);if(el)el.value=el.tagName==='SELECT'?'':''});filterPerf()}
+
+function openPerfForm(id){
+  const rec=id?S.perf.find(p=>p.id===id):null
+  const UNITS=['%','Days','Hours','Nos','Amt','Units','Visits']
+  const FYS=[...new Set([...S.cache.map(c=>c.fy),'2081-82','2080-81'])].sort((a,b)=>b.localeCompare(a))
+  openModal(rec?'Edit Performance Record':'Add Performance Record',`
+    <div class="form-grid-3">
+      <div class="form-group"><label class="form-label">Fiscal Year</label>
+        <select class="form-select" id="pf-fy-in">${FYS.map(y=>`<option ${(rec?.fy||S.currentFY)===y?'selected':''}>${y}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label">BS Month</label>
+        <select class="form-select" id="pf-mo-in" onchange="autoQ()">${BS_MONTHS.map(m=>`<option ${rec?.bs_month===m?'selected':''}>${m}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label">Quarter (auto)</label>
+        <input class="form-input" id="pf-q-in" value="${rec?.quarter||'Q1'}" readonly style="background:#f1f5f9"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Employee (by code)</label>
+      <select class="form-select" id="pf-emp-in">
+        <option value="">— Select —</option>
+        ${S.employees.map(e=>`<option value="${e.emp_code||e.id}" ${(rec?.emp_code===e.emp_code||rec?.emp_id===e.id)?'selected':''}>${esc(e.name)} — ${esc(e.emp_code||'')}</option>`).join('')}
+      </select></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label class="form-label">MP Reference</label>
+        <select class="form-select" id="pf-mp-in">
+          <option value="">— Select MP —</option>
+          ${S.mps.map(m=>`<option value="${m.ref}" ${rec?.mp_ref===m.ref?'selected':''}>${esc(m.ref)}</option>`).join('')}
+        </select></div>
+      <div class="form-group"><label class="form-label">CP Reference</label>
+        <select class="form-select" id="pf-cp-in">
+          <option value="">— Select CP —</option>
+          ${S.cps.map(c=>`<option value="${c.ref}" ${rec?.cp_ref===c.ref?'selected':''}>${esc(c.ref)}</option>`).join('')}
+        </select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Metric Name</label><input class="form-input" id="pf-metric-in" value="${esc(rec?.metric||'')}"></div>
+    <p style="font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);border-top:1px dashed var(--border);padding-top:14px;margin-top:4px">Compliance Counts</p>
+    <div class="form-grid-3 mt-8">
+      <div class="form-group"><label class="form-label">Total Count</label><input class="form-input" type="number" id="pf-tot-in" value="${rec?.total||0}" oninput="autoCalcPct()"></div>
+      <div class="form-group"><label class="form-label">✓ Compliant</label><input class="form-input" type="number" id="pf-c-in" value="${rec?.compliant||0}" oninput="autoCalcPct()"></div>
+      <div class="form-group"><label class="form-label">✗ Non-Compliant</label><input class="form-input" type="number" id="pf-nc-in" value="${rec?.non_compliant||0}" oninput="autoCalcPct()"></div>
+    </div>
+    <div id="pct-preview" class="info-box" style="padding:10px 14px;margin-bottom:10px">
+      <p class="text-xs text-muted">Percentages auto-calculated: <span id="pct-c-preview" style="color:var(--green);font-weight:700"></span> compliant · <span id="pct-nc-preview" style="color:var(--red)"></span> NC</p>
+    </div>
+    <div class="form-grid-3">
+      <div class="form-group"><label class="form-label">Target Value</label><input class="form-input" type="number" step="0.1" id="pf-tgt-in" value="${rec?.target_val||0}"></div>
+      <div class="form-group"><label class="form-label">Actual Value</label><input class="form-input" type="number" step="0.1" id="pf-act-in" value="${rec?.actual_val||0}"></div>
+      <div class="form-group"><label class="form-label">Unit</label>
+        <select class="form-select" id="pf-unit-in">${UNITS.map(u=>`<option ${rec?.unit===u?'selected':''}>${u}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Notes</label><input class="form-input" id="pf-notes-in" value="${esc(rec?.notes||'')}"></div>`,
+    [{label:rec?'Save Changes':'Add Record',cls:'btn-primary',fn:async()=>{
+      const ec=q('#pf-emp-in').value
+      const tot=+q('#pf-tot-in').value, comp=+q('#pf-c-in').value, nc=+q('#pf-nc-in').value
+      const d={fy:q('#pf-fy-in').value, bs_month:q('#pf-mo-in').value,
+        emp_code:ec, mp_ref:q('#pf-mp-in').value, cp_ref:q('#pf-cp-in').value,
+        metric:q('#pf-metric-in').value, total:tot, compliant:comp, non_compliant:nc,
+        target_val:+q('#pf-tgt-in').value, actual_val:+q('#pf-act-in').value,
+        unit:q('#pf-unit-in').value, notes:q('#pf-notes-in').value}
+      if(!d.emp_code){toast('Select employee','error');return}
+      if(rec){d.id=rec.id;await api.put(`/api/perf/${rec.id}`,d)}
+      else await api.post('/api/perf',d)
+      toast(rec?'Updated':'Added','ok');closeModal();await loadAll()
+    }}],true
+  )
+  if(!rec){autoQ();autoCalcPct()}
+}
+function autoQ(){const m=q('#pf-mo-in')?.value;if(m&&q('#pf-q-in'))q('#pf-q-in').value=BS_Q[m]||'Q1'}
+function autoCalcPct(){
+  const tot=+q('#pf-tot-in')?.value||0, comp=+q('#pf-c-in')?.value||0, nc=+q('#pf-nc-in')?.value||0
+  const pctC=tot?+(comp/tot*100).toFixed(2):0, pctNC=tot?+(nc/tot*100).toFixed(2):0
+  const cp=q('#pct-c-preview'), cn=q('#pct-nc-preview')
+  if(cp)cp.textContent=pctC+'%'; if(cn)cn.textContent=pctNC+'%'
+}
+async function delPerf(id){if(!confirm('Delete this record?'))return;await api.del(`/api/perf/${id}`);toast('Deleted');await loadAll()}
+async function uploadPerf(input){
+  const fd=new FormData();fd.append('file',input.files[0])
+  const msg=q('#upload-msg');msg.className='mb-16';msg.style.cssText='padding:12px 16px;border-radius:10px;font-size:12px;font-weight:600;background:#dbeafe;color:#1e40af;margin-bottom:16px'
+  msg.textContent='Uploading…'
+  const r=await fetch('/api/perf/import',{method:'POST',body:fd}).then(r=>r.json())
+  if(r.imported!=null){
+    msg.style.background='#dcfce7';msg.style.color='#15803d'
+    msg.textContent=`✅ Imported ${r.imported} records successfully`
+  } else {
+    msg.style.background='#fee2e2';msg.style.color='#b91c1c'
+    msg.textContent=`❌ Import failed: ${r.error||'Unknown error'}`
+  }
+  setTimeout(()=>msg.className='mb-16 hidden',5000)
+  await loadAll();input.value=''
+}
+
+// ── FY CACHE MANAGER ─────────────────────────────────────────────────────────
+function renderCacheManager(){
+  let html=`
+  <div class="sample-banner">
+    <h4>📦 Fiscal Year Data Cache</h4>
+    <p>Each Nepali fiscal year (e.g. 2081-82) is a separate data profile. You can clear and re-upload data for any FY independently.
+    Lock a FY to prevent accidental changes. Historical data remains available for year-on-year comparison at any time.</p>
+  </div>
+  <div class="section-head">
+    <div><h2>FY Cache Manager</h2><p>${S.cache.length} fiscal years registered</p></div>
+    <button class="btn btn-primary btn-sm" onclick="openNewFY()">+ Create FY Profile</button>
+  </div>
+  <div class="grid-3">`
+
+  S.cache.sort((a,b)=>b.fy.localeCompare(a.fy)).forEach(c=>{
+    const isCurrent=c.fy===S.currentFY
+    const locked=!!c.locked
+    html+=`<div class="fy-cache-card ${isCurrent?'active':''} ${locked?'locked':''}">
+      <div class="flex items-start justify-between mb-12">
+        <div>
+          <p class="font-black" style="font-size:18px;color:${isCurrent?'var(--blue)':'var(--text)'}">FY ${esc(c.fy)}</p>
+          <p class="text-xs text-muted">${esc(c.label)}</p>
+        </div>
+        <div class="flex gap-4">
+          ${locked?'<span class="badge badge-amber">🔒 Locked</span>':''}
+          ${isCurrent?'<span class="badge badge-blue">Active</span>':''}
+        </div>
+      </div>
+      <div class="flex gap-12 mb-12">
+        <div class="stat-box flex-1" style="padding:10px"><div class="val" style="font-size:20px;color:var(--blue)">${c.record_count}</div><div class="lbl">Records</div></div>
+        ${(()=>{const p=perfByFY(c.fy);const {tot,comp,nc,pct_c}=complianceSummary(p);return tot>0?`<div class="stat-box flex-1" style="padding:10px"><div class="val" style="font-size:20px;color:${pc(pct_c)}">${pct_c}%</div><div class="lbl">Compliance</div></div>`:''})()}
+      </div>
+      ${c.updated_at?`<p class="text-xxs text-muted mb-12">Updated: ${new Date(c.updated_at).toLocaleDateString()}</p>`:''}
+      <div class="flex gap-6" style="flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm flex-1" onclick="S.currentFY='${c.fy}';updateHeader();renderCurrent();toast('Switched to FY ${c.fy}','ok')">
+          ${isCurrent?'✓ Current':'Switch to'}
+        </button>
+        <button class="btn btn-sm ${locked?'btn-amber':'btn-ghost'}" onclick="toggleFYLock('${c.fy}')">
+          ${locked?'🔓 Unlock':'🔒 Lock'}
+        </button>
+        ${!locked?`<button class="btn btn-ghost btn-sm" onclick="clearFY('${c.fy}')">Clear Data</button>
+        <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="deleteFY('${c.fy}')">Delete</button>`:''}
+      </div>
+    </div>`
+  })
+  html+='</div>'
+  q('#data-content').innerHTML=html
+}
+function openNewFY(){
+  openModal('Create New FY Cache Profile',`
+    <div class="form-group"><label class="form-label">Fiscal Year (BS)</label>
+      <input class="form-input" id="new-fy" placeholder="e.g. 2082-83">
+      <p class="text-xs text-muted mt-8">Format: 4-digit BS year followed by next year e.g. 2082-83 for Shrawan 2082 – Ashadh 2083</p>
+    </div>
+    <div class="form-group"><label class="form-label">Label (optional)</label>
+      <input class="form-input" id="new-fy-label" placeholder="e.g. FY 2082-83 (2025-26)"></div>`,
+    [{label:'Create FY Profile',cls:'btn-primary',fn:async()=>{
+      const fy=q('#new-fy').value.trim()
+      if(!fy){toast('FY required','error');return}
+      const label=q('#new-fy-label').value||`FY ${fy}`
+      await api.post('/api/cache',{fy,label})
+      toast(`FY ${fy} profile created`,'ok');closeModal();await loadAll()
+    }}]
+  )
+}
+function openCachePanel(){switchTab('data');S.dataSub='cache';qq('#tab-data .sub-tab').forEach((t,i)=>{t.classList.toggle('active',i===1)});renderData()}
+async function toggleFYLock(fy){
+  const r=await api.post(`/api/cache/${encodeURIComponent(fy)}/lock`,{})
+  toast(r.locked?`FY ${fy} locked`:`FY ${fy} unlocked`,'ok');await loadAll()
+}
+async function clearFY(fy){
+  if(!confirm(`Clear ALL performance data for FY ${fy}? The FY profile stays. You can re-upload data.`))return
+  await api.post(`/api/cache/${encodeURIComponent(fy)}/clear`,{})
+  toast(`FY ${fy} data cleared`,'ok');await loadAll()
+}
+async function deleteFY(fy){
+  if(!confirm(`Delete FY ${fy} profile AND all its data permanently?`))return
+  await api.del(`/api/cache/${encodeURIComponent(fy)}`)
+  if(S.currentFY===fy&&S.cache.length>0)S.currentFY=S.cache[0]?.fy||''
+  toast(`FY ${fy} deleted`,'ok');await loadAll()
+}
+
+// ── REPORTS ──────────────────────────────────────────────────────────────────
+async function renderReport(){
+  if(S.reportSub==='overview') renderOverviewReport()
+  else if(S.reportSub==='yoy') await renderYoYReport()
+  else if(S.reportSub==='employee') renderEmpReport()
+  else renderMPCPReport()
+}
+
+function renderOverviewReport(){
+  const fyPerf=perfByFY(S.currentFY)
+  const years=[...new Set(S.cache.map(c=>c.fy))].sort((a,b)=>b.localeCompare(a))
+
+  // Per-MP compliance cards
+  const mpCards=S.mps.map(mp=>{
+    const rows=fyPerf.filter(p=>p.mp_ref===mp.ref)
+    const {tot,comp,nc,pct_c,pct_nc}=complianceSummary(rows)
+    if(!tot)return null
+    return {ref:mp.ref,title:mp.title,tot,comp,nc,pct_c,pct_nc}
+  }).filter(Boolean)
+
+  // Monthly breakdown
+  const monthData=BS_MONTHS.map(m=>{
+    const rows=fyPerf.filter(p=>p.bs_month===m)
+    if(!rows.length)return null
+    const {tot,comp,nc,pct_c}=complianceSummary(rows)
+    return {month:m,tot,comp,nc,pct:pct_c}
+  }).filter(Boolean)
+
+  let html=`
+  <div class="flex gap-8 items-center mb-20">
+    <span class="font-bold text-sm">Fiscal Year:</span>
+    <select class="form-select" id="rep-fy" style="width:130px" onchange="S.currentFY=this.value;updateHeader();renderReport()">
+      ${years.map(y=>`<option ${y===S.currentFY?'selected':''}>${y}</option>`).join('')}
+    </select>
+  </div>`
+
+  const {tot,comp,nc,pct_c,pct_nc}=complianceSummary(fyPerf)
+  html+=`<div class="mb-16">${compCard({title:'FY '+S.currentFY+' — Overall Performance',tot,comp,nc,pct_c,pct_nc})}</div>`
+
+  if(monthData.length){
+    html+=`<div class="card mb-20">
+      <div class="card-head"><p>Monthly Compliance Trend — FY ${S.currentFY} (BS Calendar)</p></div>
+      <div class="card-body"><canvas id="rep-trend-chart" height="100"></canvas></div>
+    </div>`
+  }
+
+  html+=`<div class="card mb-20">
+    <div class="card-head"><p>MP-wise Compliance Summary — FY ${S.currentFY}</p></div>
+    <div class="card-body">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
+        ${mpCards.map(m=>compCard(m)).join('')}
+        ${!mpCards.length?'<p class="text-sm text-muted italic">No performance data for this FY. Upload records in Data Manager.</p>':''}
+      </div>
+    </div>
+  </div>`
+
+  // Full table
+  html+=`<div class="card">
+    <div class="card-head"><p>MP Compliance Table</p></div>
+    <div class="card-body"><div class="tbl-wrap"><table>
+      <thead><tr><th>MP Ref</th><th>Managing Point</th><th>Total</th><th>✓ Compliant</th><th>% C</th><th>✗ NC</th><th>% NC</th><th>KPI Rate</th></tr></thead>
+      <tbody>${S.mps.map(mp=>{
+        const rows=fyPerf.filter(p=>p.mp_ref===mp.ref)
+        const {tot:mt,comp:mc,nc:mn,pct_c:mpc,pct_nc:mpnc}=complianceSummary(rows)
+        return `<tr>
+          <td><span class="ref-badge">${esc(mp.ref)}</span></td>
+          <td style="max-width:260px">${esc(mp.title.slice(0,60))}</td>
+          <td style="text-align:right;font-weight:700">${mt>0?mt.toLocaleString():'—'}</td>
+          <td style="text-align:right;color:var(--green);font-weight:700">${mc>0?mc.toLocaleString():'—'}</td>
+          <td style="text-align:right"><span style="font-weight:900;color:${pc(mpc)};font-family:'Syne',sans-serif">${mt>0?mpc+'%':'—'}</span></td>
+          <td style="text-align:right;color:var(--red)">${mn>0?mn.toLocaleString():'—'}</td>
+          <td style="text-align:right;color:var(--red)">${mn>0?mpnc+'%':'—'}</td>
+          <td>${mp.pct!=null?`<span class="badge ${mp.pct>=95?'badge-pct-green':mp.pct>=80?'badge-pct-amber':'badge-pct-red'}">${mp.pct}%</span>`:'—'}</td>
+        </tr>`}).join('')}
+      </tbody>
+    </table></div></div>
+  </div>`
+
+  q('#report-content').innerHTML=html
+  destroyChart('rep-trend-chart')
+  if(monthData.length){
+    charts['rep-trend-chart']=new Chart(q('#rep-trend-chart'),{
+      type:'line',
+      data:{labels:monthData.map(d=>d.month),
+        datasets:[
+          {label:'Total',data:monthData.map(d=>d.tot),borderColor:'#94a3b8',tension:.3,borderDash:[4,4]},
+          {label:'Compliant',data:monthData.map(d=>d.comp),borderColor:'#16a34a',backgroundColor:'#16a34a20',fill:true,tension:.3},
+          {label:'Non-Compliant',data:monthData.map(d=>d.nc),borderColor:'#dc2626',tension:.3}
+        ]},
+      options:{responsive:true,plugins:{legend:{position:'top'}}}
+    })
+  }
+}
+
+async function renderYoYReport(){
+  const data=await api.get('/api/analytics/summary')
+  const fys=Object.keys(data).sort((a,b)=>b.localeCompare(a))
+  if(!fys.length){q('#report-content').innerHTML='<p class="text-sm text-muted italic" style="padding:40px;text-align:center">No performance data. Upload records in Data Manager.</p>';return}
+
+  const yA=fys[1]||fys[0], yB=fys[0]
+  const dA=data[yA]||{}, dB=data[yB]||{}
+  const diff=dA.pct_c!=null&&dB.pct_c!=null?+(dB.pct_c-dA.pct_c).toFixed(2):null
+  const allMPRefs=[...new Set([...Object.keys(dA.by_mp||{}),...Object.keys(dB.by_mp||{})])]
+
+  const trendData={labels:BS_MONTHS,
+    datasets:[
+      {label:yA,data:BS_MONTHS.map(m=>{const d=dA.by_month?.[m];return d?.total?+(d.compliant/d.total*100).toFixed(2):null}),borderColor:'#94a3b8',borderDash:[5,4],tension:.3,spanGaps:true},
+      {label:yB,data:BS_MONTHS.map(m=>{const d=dB.by_month?.[m];return d?.total?+(d.compliant/d.total*100).toFixed(2):null}),borderColor:'#1d4ed8',borderWidth:2.5,tension:.3,spanGaps:true}
+    ]}
+
+  let html=`
+  <div class="flex gap-8 items-center mb-20">
+    <span class="font-bold text-sm">Compare:</span>
+    <select class="form-select" id="yoy-a" style="width:120px" onchange="renderReport()">${fys.map(y=>`<option ${y===yA?'selected':''}>${y}</option>`).join('')}</select>
+    <span class="text-muted font-bold">vs</span>
+    <select class="form-select" id="yoy-b" style="width:120px" onchange="renderReport()">${fys.map(y=>`<option ${y===yB?'selected':''}>${y}</option>`).join('')}</select>
+  </div>
+
+  <div class="grid-4 mb-20">
+    ${compCard({title:'FY '+yA,tot:dA.total||0,comp:dA.compliant||0,nc:dA.nc||0,pct_c:dA.pct_c||0,pct_nc:dA.pct_nc||0})}
+    ${compCard({title:'FY '+yB,tot:dB.total||0,comp:dB.compliant||0,nc:dB.nc||0,pct_c:dB.pct_c||0,pct_nc:dB.pct_nc||0})}
+    <div class="stat-box"><div class="val" style="color:${diff!=null?(diff>0?'var(--green)':diff<0?'var(--red)':'var(--muted)'):'var(--muted)'}">${diff!=null?(diff>0?'+':'')+diff+'%':'—'}</div><div class="lbl">YoY Change</div></div>
+    <div class="stat-box"><div class="val" style="color:var(--violet)">${(dA.total||0)} → ${(dB.total||0)}</div><div class="lbl">Volume Change</div></div>
+  </div>
+
+  <div class="grid-2 mb-20">
+    <div class="card"><div class="card-head"><p>Monthly Trend: ${yA} vs ${yB}</p></div><div class="card-body"><canvas id="yoy-trend" height="140"></canvas></div></div>
+    <div class="card"><div class="card-head"><p>MP-wise YoY</p></div><div class="card-body"><canvas id="yoy-mp" height="140"></canvas></div></div>
+  </div>
+
+  <div class="card"><div class="card-head"><p>MP-wise Year-on-Year Detail</p></div><div class="card-body">
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>MP Ref</th><th>Managing Point</th>
+        <th style="text-align:right">${yA} Total</th><th style="text-align:right">${yA} C%</th>
+        <th style="text-align:right">${yB} Total</th><th style="text-align:right">${yB} C%</th>
+        <th style="text-align:right">Change</th>
+      </tr></thead>
+      <tbody>${allMPRefs.map(ref=>{
+        const m=getMPByRef(ref)
+        const dMa=dA.by_mp?.[ref]||{}, dMb=dB.by_mp?.[ref]||{}
+        const chg=dMa.pct_c!=null&&dMb.pct_c!=null?+(dMb.pct_c-dMa.pct_c).toFixed(2):null
+        return `<tr>
+          <td><span class="ref-badge">${esc(ref)}</span></td>
+          <td style="max-width:220px">${esc(m?.title?.slice(0,55)||ref)}</td>
+          <td style="text-align:right">${dMa.total>0?dMa.total.toLocaleString():'—'}</td>
+          <td style="text-align:right;font-weight:900;color:${pc(dMa.pct_c)};font-family:'Syne',sans-serif">${dMa.pct_c!=null?dMa.pct_c+'%':'—'}</td>
+          <td style="text-align:right">${dMb.total>0?dMb.total.toLocaleString():'—'}</td>
+          <td style="text-align:right;font-weight:900;color:${pc(dMb.pct_c)};font-family:'Syne',sans-serif">${dMb.pct_c!=null?dMb.pct_c+'%':'—'}</td>
+          <td style="text-align:right">${chg!=null?`<span style="font-weight:900;color:${chg>0?'var(--green)':chg<0?'var(--red)':'var(--muted)'}">
+            ${chg>0?'+':''}${chg}%</span>`:'—'}</td>
+        </tr>`}).join('')}
+      </tbody>
+    </table></div>
+  </div></div>`
+
+  q('#report-content').innerHTML=html
+  destroyChart('yoy-trend');destroyChart('yoy-mp')
+  charts['yoy-trend']=new Chart(q('#yoy-trend'),{type:'line',data:trendData,options:{responsive:true,plugins:{legend:{position:'top'}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'}}}}})
+  const mpLabels=allMPRefs
+  charts['yoy-mp']=new Chart(q('#yoy-mp'),{type:'bar',data:{
+    labels:mpLabels,
+    datasets:[{label:yA,data:mpLabels.map(r=>dA.by_mp?.[r]?.pct_c??null),backgroundColor:'#94a3b8cc'},
+              {label:yB,data:mpLabels.map(r=>dB.by_mp?.[r]?.pct_c??null),backgroundColor:'#1d4ed8cc'}]},
+    options:{responsive:true,plugins:{legend:{position:'top'}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'}},x:{ticks:{font:{family:'monospace',size:9}}}}}})
+}
+
+function renderEmpReport(){
+  const fyPerf=perfByFY(S.currentFY)
+  const empStats=S.employees.map(emp=>{
+    const ec=emp.emp_code
+    const rows=fyPerf.filter(p=>p.emp_code===ec||p.emp_id===emp.id)
+    if(!rows.length)return null
+    const {tot,comp,nc,pct_c,pct_nc}=complianceSummary(rows)
+    const byMP=[...new Set(rows.map(r=>r.mp_ref))].filter(Boolean).map(ref=>{
+      const mr=rows.filter(r=>r.mp_ref===ref)
+      const {tot:mt,comp:mc,nc:mn,pct_c:mpc,pct_nc:mpnc}=complianceSummary(mr)
+      return {ref,tot:mt,comp:mc,nc:mn,pct_c:mpc,pct_nc:mpnc}
+    })
+    return {...emp,tot,comp,nc,pct_c,pct_nc,byMP}
+  }).filter(Boolean).sort((a,b)=>(b.pct_c||0)-(a.pct_c||0))
+
+  const years=[...new Set(S.cache.map(c=>c.fy))].sort((a,b)=>b.localeCompare(a))
+
+  let html=`<div class="flex gap-8 items-center mb-20">
+    <span class="font-bold text-sm">FY:</span>
+    <select class="form-select" id="emp-fy" style="width:120px" onchange="S.currentFY=this.value;updateHeader();renderReport()">
+      ${years.map(y=>`<option ${y===S.currentFY?'selected':''}>${y}</option>`).join('')}
+    </select>
+  </div>`
+
+  if(!empStats.length){html+='<p class="text-sm text-muted italic" style="padding:40px;text-align:center">No data for this FY.</p>';q('#report-content').innerHTML=html;return}
+
+  html+=`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px">`
+  empStats.forEach(emp=>{
+    html+=`<div class="card" style="padding:14px;border-left:3px solid ${dc(emp.dept)}">
+      <div class="flex gap-10 items-center mb-10">
+        <div class="avatar avatar-md" style="background:${dc(emp.dept)}">${av(emp.name)}</div>
+        <div class="flex-1 truncate">
+          <p class="font-bold truncate">${esc(emp.name)}</p>
+          <div class="flex gap-8 mt-4"><span class="emp-code">${esc(emp.emp_code||'')}</span>${deptBadge(emp.dept)}</div>
+        </div>
+      </div>
+      ${compCard({title:emp.name+' — FY '+S.currentFY,tot:emp.tot,comp:emp.comp,nc:emp.nc,pct_c:emp.pct_c,pct_nc:emp.pct_nc})}
+      ${emp.byMP.length?`<div style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px">
+        ${emp.byMP.map(m=>`<div class="flex gap-8 items-center mb-4 text-xs">
+          <span class="ref-badge">${esc(m.ref)}</span>
+          <span class="flex-1"></span>
+          <span style="color:var(--green);font-weight:700">✓${m.comp}</span>
+          <span style="color:var(--red)">✗${m.nc}</span>
+          <span style="font-weight:900;color:${pc(m.pct_c)};font-family:'Syne',sans-serif">${m.pct_c}%</span>
+        </div>`).join('')}
+      </div>`:''}
+    </div>`
+  })
+  html+='</div>'
+  q('#report-content').innerHTML=html
+}
+
+function renderMPCPReport(){
+  const fyPerf=perfByFY(S.currentFY)
+  const years=[...new Set(S.cache.map(c=>c.fy))].sort((a,b)=>b.localeCompare(a))
+
+  let html=`<div class="flex gap-8 items-center mb-20">
+    <span class="font-bold text-sm">FY:</span>
+    <select class="form-select" id="mpcp-fy" style="width:120px" onchange="S.currentFY=this.value;updateHeader();renderReport()">
+      ${years.map(y=>`<option ${y===S.currentFY?'selected':''}>${y}</option>`).join('')}
+    </select>
+  </div>`
+
+  html+=`<div style="space-y:12px">`
+  S.mps.forEach(mp=>{
+    const mpRows=fyPerf.filter(p=>p.mp_ref===mp.ref)
+    if(!mpRows.length)return
+    const {tot,comp,nc,pct_c,pct_nc}=complianceSummary(mpRows)
+    const cpData=S.cps.filter(c=>c.mp_id===mp.id).map(cp=>{
+      const cpRows=fyPerf.filter(p=>p.cp_ref===cp.ref)
+      if(!cpRows.length)return null
+      const {tot:ct,comp:cc,nc:cn,pct_c:cpc,pct_nc:cpnc}=complianceSummary(cpRows)
+      return {cp,tot:ct,comp:cc,nc:cn,pct_c:cpc,pct_nc:cpnc}
+    }).filter(Boolean)
+
+    html+=`<div class="card mb-12">
+      <div class="card-head" style="background:#f8fafc">
+        <div class="flex gap-10 items-center flex-1">
+          <span class="ref-badge" style="font-size:11px;font-weight:900">${esc(mp.ref)}</span>
+          <p class="flex-1 font-bold" style="font-size:13px">${esc(mp.title)}</p>
+        </div>
+        <div class="flex gap-12 items-center">
+          <span style="font-size:11px;color:var(--green);font-weight:700">✓${comp.toLocaleString()}</span>
+          <span style="font-size:11px;color:var(--red)">✗${nc.toLocaleString()}</span>
+          <span style="font-size:11px;color:var(--muted)">/${tot.toLocaleString()}</span>
+          <span style="font-size:18px;font-weight:900;color:${pc(pct_c)};font-family:'Syne',sans-serif">${pct_c}%</span>
+        </div>
+      </div>
+      <div class="card-body" style="padding:12px 18px">
+        <div class="kpi-bar mb-12"><div class="kpi-bar-fill" style="width:${Math.min(pct_c,100)}%;background:${pc(pct_c)}"></div></div>
+        ${cpData.length?cpData.map(({cp,tot:ct,comp:cc,nc:cn,pct_c:cpc,pct_nc:cpnc})=>`
+        <div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px">
+          <span class="text-muted">└</span>
+          <span class="ref-badge ref-badge-blue">${esc(cp.ref)}</span>
+          <span class="flex-1" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(cp.title)}</span>
+          <span style="color:var(--green);font-weight:700;white-space:nowrap">✓${cc.toLocaleString()} (${cpc}%)</span>
+          <span style="color:var(--red);white-space:nowrap">✗${cn.toLocaleString()} (${cpnc}%)</span>
+          <span style="color:var(--muted);white-space:nowrap">/${ct.toLocaleString()}</span>
+        </div>`).join(''):'<p class="text-xs text-muted italic">No CP data for this FY.</p>'}
+      </div>
+    </div>`
+  })
+  html+='</div>'
+  if(!S.mps.some(mp=>fyPerf.some(p=>p.mp_ref===mp.ref))){
+    html='<p class="text-sm text-muted italic" style="padding:40px;text-align:center">No performance data for this FY. Upload records in Data Manager.</p>'
+  }
+  q('#report-content').innerHTML=html
+}
+
+// ── EMPLOYEE BULK UPLOAD ──────────────────────────────────────────────────────
+// (handled via Team tab upload zone)
+
+// ── INIT ─────────────────────────────────────────────────────────────────────
+loadAll()
+</script>
+</body>
+</html>

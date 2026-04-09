@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS employees(
 CREATE TABLE IF NOT EXISTS mps(
   id TEXT PRIMARY KEY, ref TEXT NOT NULL, title TEXT NOT NULL,
   target TEXT DEFAULT '', freq TEXT DEFAULT 'Monthly',
-  kpi_c INTEGER DEFAULT 0, kpi_nc INTEGER DEFAULT 0, kpi_total INTEGER DEFAULT 0);
+  kpi_c INTEGER DEFAULT 0, kpi_nc INTEGER DEFAULT 0, kpi_total INTEGER DEFAULT 0,
+  parent_cp_id TEXT DEFAULT '', emp_level INTEGER DEFAULT 1);
 CREATE TABLE IF NOT EXISTS mp_owners(mp_id TEXT, emp_id TEXT, PRIMARY KEY(mp_id,emp_id));
 CREATE TABLE IF NOT EXISTS cps(
   id TEXT PRIMARY KEY, ref TEXT NOT NULL, title TEXT NOT NULL,
@@ -67,10 +68,15 @@ CREATE TABLE IF NOT EXISTS cps(
 CREATE TABLE IF NOT EXISTS cp_owners(cp_id TEXT, emp_id TEXT, PRIMARY KEY(cp_id,emp_id));
 CREATE TABLE IF NOT EXISTS roles(
   id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL,
-  description TEXT DEFAULT '', color TEXT DEFAULT '#1d4ed8');
+  description TEXT DEFAULT '', color TEXT DEFAULT '#1d4ed8',
+  emp_level INTEGER DEFAULT 1, parent_role_id TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS role_mps(role_id TEXT, mp_id TEXT, PRIMARY KEY(role_id,mp_id));
 CREATE TABLE IF NOT EXISTS role_cps(role_id TEXT, cp_id TEXT, PRIMARY KEY(role_id,cp_id));
 CREATE TABLE IF NOT EXISTS emp_roles(emp_id TEXT, role_id TEXT, PRIMARY KEY(emp_id,role_id));
+CREATE TABLE IF NOT EXISTS cascade_links(
+  id TEXT PRIMARY KEY,
+  parent_emp_id TEXT NOT NULL, parent_cp_id TEXT NOT NULL,
+  child_emp_id  TEXT NOT NULL, child_mp_id   TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS emp_mps(emp_id TEXT, mp_id TEXT, PRIMARY KEY(emp_id,mp_id));
 CREATE TABLE IF NOT EXISTS emp_cps(emp_id TEXT, cp_id TEXT, PRIMARY KEY(emp_id,cp_id));
 CREATE TABLE IF NOT EXISTS perf(
@@ -324,15 +330,19 @@ def emp_links(eid):
 # ── MPs ────────────────────────────────────────────────────────────────────
 def enrich_mp(m,db):
     r=dict(m); r['owner_ids']=[x['emp_id'] for x in db.execute("SELECT emp_id FROM mp_owners WHERE mp_id=?",(r['id'],))]
-    r['pct']=round(r['kpi_c']/r['kpi_total']*100,1) if r['kpi_total'] else None; return r
+    r['pct']=round(r['kpi_c']/r['kpi_total']*100,1) if r['kpi_total'] else None
+    r['parent_cp_id']=r.get('parent_cp_id','')
+    r['emp_level']=r.get('emp_level',1)
+    r['cascade_children']=[dict(x) for x in db.execute("SELECT cl.*,e.name as child_name,e.emp_code as child_code FROM cascade_links cl LEFT JOIN employees e ON cl.child_emp_id=e.id WHERE cl.parent_cp_id IN (SELECT id FROM cps WHERE mp_id=?)", (r['id'],))]
+    return r
 
 @app.route('/api/mps',methods=['GET','POST'])
 def mps_api():
     db=get_db()
     if request.method=='GET': return jsonify([enrich_mp(m,db) for m in db.execute("SELECT * FROM mps ORDER BY ref")])
     d=request.json; mid=d.get('id') or uid()
-    db.execute("INSERT OR REPLACE INTO mps VALUES(?,?,?,?,?,?,?,?)",
-        (mid,d['ref'],d['title'],d.get('target',''),d.get('freq','Monthly'),d.get('kpi_c',0),d.get('kpi_nc',0),d.get('kpi_total',0)))
+    db.execute("INSERT OR REPLACE INTO mps VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (mid,d['ref'],d['title'],d.get('target',''),d.get('freq','Monthly'),d.get('kpi_c',0),d.get('kpi_nc',0),d.get('kpi_total',0),d.get('parent_cp_id',''),d.get('emp_level',1)))
     db.execute("DELETE FROM mp_owners WHERE mp_id=?",(mid,))
     for eid in d.get('owner_ids',[]): db.execute("INSERT OR IGNORE INTO mp_owners VALUES(?,?)",(mid,eid))
     db.commit(); return jsonify({'id':mid})
@@ -344,8 +354,8 @@ def mp_api(mid):
         db.execute("DELETE FROM mps WHERE id=?",(mid,)); db.execute("DELETE FROM mp_owners WHERE mp_id=?",(mid,))
         db.execute("UPDATE cps SET mp_id='' WHERE mp_id=?",(mid,)); db.commit(); return jsonify({'ok':True})
     d=request.json
-    db.execute("UPDATE mps SET ref=?,title=?,target=?,freq=?,kpi_c=?,kpi_nc=?,kpi_total=? WHERE id=?",
-        (d['ref'],d['title'],d.get('target',''),d.get('freq','Monthly'),d.get('kpi_c',0),d.get('kpi_nc',0),d.get('kpi_total',0),mid))
+    db.execute("UPDATE mps SET ref=?,title=?,target=?,freq=?,kpi_c=?,kpi_nc=?,kpi_total=?,parent_cp_id=?,emp_level=? WHERE id=?",
+        (d['ref'],d['title'],d.get('target',''),d.get('freq','Monthly'),d.get('kpi_c',0),d.get('kpi_nc',0),d.get('kpi_total',0),d.get('parent_cp_id',''),d.get('emp_level',1),mid))
     db.execute("DELETE FROM mp_owners WHERE mp_id=?",(mid,))
     for eid in d.get('owner_ids',[]): db.execute("INSERT OR IGNORE INTO mp_owners VALUES(?,?)",(mid,eid))
     db.commit(); return jsonify({'ok':True})
@@ -484,7 +494,7 @@ def roles_api():
             res.append(role)
         return jsonify(res)
     d=request.json; rid=d.get('id') or uid()
-    db.execute("INSERT OR REPLACE INTO roles VALUES(?,?,?,?,?)",(rid,d['code'],d['name'],d.get('description',''),d.get('color','#1d4ed8')))
+    db.execute("INSERT OR REPLACE INTO roles VALUES(?,?,?,?,?,?,?)",(rid,d['code'],d['name'],d.get('description',''),d.get('color','#1d4ed8'),d.get('emp_level',1),d.get('parent_role_id','')))
     db.execute("DELETE FROM role_mps WHERE role_id=?",(rid,)); db.execute("DELETE FROM role_cps WHERE role_id=?",(rid,))
     for mid in d.get('mp_ids',[]): db.execute("INSERT OR IGNORE INTO role_mps VALUES(?,?)",(rid,mid))
     for cid in d.get('cp_ids',[]): db.execute("INSERT OR IGNORE INTO role_cps VALUES(?,?)",(rid,cid))
@@ -498,7 +508,7 @@ def role_api(rid):
             db.execute(f"DELETE FROM {t} WHERE {c}=?",(rid,))
         db.commit(); return jsonify({'ok':True})
     d=request.json
-    db.execute("UPDATE roles SET code=?,name=?,description=?,color=? WHERE id=?",(d['code'],d['name'],d.get('description',''),d.get('color','#1d4ed8'),rid))
+    db.execute("UPDATE roles SET code=?,name=?,description=?,color=?,emp_level=?,parent_role_id=? WHERE id=?",(d['code'],d['name'],d.get('description',''),d.get('color','#1d4ed8'),d.get('emp_level',1),d.get('parent_role_id',''),rid))
     db.execute("DELETE FROM role_mps WHERE role_id=?",(rid,)); db.execute("DELETE FROM role_cps WHERE role_id=?",(rid,))
     for mid in d.get('mp_ids',[]): db.execute("INSERT OR IGNORE INTO role_mps VALUES(?,?)",(rid,mid))
     for cid in d.get('cp_ids',[]): db.execute("INSERT OR IGNORE INTO role_cps VALUES(?,?)",(rid,cid))
@@ -780,6 +790,94 @@ def analytics_by_location():
             'pct_nc': round(nc/tot*100,   2) if tot else 0,
         }
     return jsonify(result)
+
+
+# ── CASCADE ────────────────────────────────────────────────────────────────────
+@app.route('/api/cascade', methods=['GET','POST'])
+def cascade_api():
+    db = get_db()
+    if request.method == 'GET':
+        rows = db.execute("""
+            SELECT cl.*,
+                   pe.name as parent_name, pe.emp_code as parent_code,
+                   ce.name as child_name,  ce.emp_code as child_code,
+                   cp.ref as cp_ref, cp.title as cp_title,
+                   mp.ref as mp_ref, mp.title as mp_title
+            FROM cascade_links cl
+            LEFT JOIN employees pe ON cl.parent_emp_id = pe.id
+            LEFT JOIN employees ce ON cl.child_emp_id  = ce.id
+            LEFT JOIN cps cp ON cl.parent_cp_id = cp.id
+            LEFT JOIN mps mp ON cl.child_mp_id  = mp.id
+            ORDER BY pe.level, pe.name
+        """).fetchall()
+        return jsonify([dict(r) for r in rows])
+    d = request.json
+    lid = d.get('id') or uid()
+    db.execute("INSERT OR REPLACE INTO cascade_links VALUES(?,?,?,?,?)",
+               (lid, d['parent_emp_id'], d['parent_cp_id'],
+                d['child_emp_id'],  d['child_mp_id']))
+    # Also update the child MP's parent_cp_id field
+    db.execute("UPDATE mps SET parent_cp_id=? WHERE id=?",
+               (d['parent_cp_id'], d['child_mp_id']))
+    db.commit()
+    return jsonify({'id': lid})
+
+@app.route('/api/cascade/<lid>', methods=['DELETE'])
+def cascade_delete(lid):
+    db = get_db()
+    # Clear parent_cp_id on the child MP
+    row = db.execute("SELECT child_mp_id FROM cascade_links WHERE id=?", (lid,)).fetchone()
+    if row:
+        db.execute("UPDATE mps SET parent_cp_id='' WHERE id=?", (row['child_mp_id'],))
+    db.execute("DELETE FROM cascade_links WHERE id=?", (lid,))
+    db.commit()
+    return jsonify({'ok': True})
+
+@app.route('/api/cascade/tree')
+def cascade_tree():
+    """Returns the full cascade tree from any employee downward"""
+    db = get_db()
+    emp_id = request.args.get('emp_id','')
+    def build_node(eid, depth=0):
+        if depth > 6: return []   # safety limit
+        emp = db.execute("SELECT * FROM employees WHERE id=?", (eid,)).fetchone()
+        if not emp: return []
+        emp = dict(emp)
+        # Get this employee's role
+        roles = [dict(r) for r in db.execute(
+            "SELECT r.* FROM roles r JOIN emp_roles er ON r.id=er.role_id WHERE er.emp_id=?", (eid,))]
+        # Get MPs owned by this employee
+        mps = [dict(m) for m in db.execute(
+            "SELECT m.* FROM mps m JOIN mp_owners mo ON m.id=mo.mp_id WHERE mo.emp_id=?", (eid,))]
+        for mp in mps:
+            # Get CPs under this MP
+            mp['cps'] = [dict(c) for c in db.execute(
+                "SELECT c.* FROM cps c WHERE c.mp_id=?", (mp['id'],))]
+            for cp in mp['cps']:
+                cp['owners'] = [dict(e) for e in db.execute(
+                    "SELECT e.* FROM employees e JOIN cp_owners co ON e.id=co.emp_id WHERE co.cp_id=?",
+                    (cp['id'],))]
+                # Find cascade children — sub-employees whose MP derives from this CP
+                links = db.execute(
+                    "SELECT * FROM cascade_links WHERE parent_cp_id=?", (cp['id'],)).fetchall()
+                cp['cascade_children'] = []
+                for lnk in links:
+                    child_nodes = build_node(lnk['child_emp_id'], depth+1)
+                    cp['cascade_children'].extend(child_nodes)
+        emp['roles'] = roles
+        emp['mps']   = mps
+        return [emp]
+
+    if emp_id:
+        tree = build_node(emp_id)
+    else:
+        # Start from top-level employees (no manager)
+        roots = db.execute(
+            "SELECT id FROM employees WHERE manager_id IS NULL OR manager_id=''").fetchall()
+        tree = []
+        for r in roots:
+            tree.extend(build_node(r['id']))
+    return jsonify(tree)
 
 @app.route('/')
 def index():

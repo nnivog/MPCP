@@ -337,6 +337,17 @@ tbody td{padding:10px 14px;vertical-align:middle}
 .text-muted{color:var(--muted)}.font-bold{font-weight:700}.font-black{font-weight:900;font-family:'Syne',sans-serif}
 .truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.italic{font-style:italic}
 .hidden{display:none!important}
+.cascade-node{border-left:3px solid var(--border);padding-left:16px;margin-left:8px}
+.cascade-role-box{background:linear-gradient(135deg,#0a1628,#0f2540);color:#fff;border-radius:12px;padding:12px 16px;margin-bottom:10px}
+.cascade-mp-box{background:#f0f9ff;border:1.5px solid #bae6fd;border-radius:10px;padding:10px 14px;margin-bottom:8px}
+.cascade-cp-row{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:#fff;cursor:pointer;transition:.15s}
+.cascade-cp-row:hover{border-color:#60a5fa;background:#f0f9ff}
+.cascade-cp-row.linked{border-color:#16a34a;background:#f0fdf4}
+.cascade-arrow{font-size:20px;color:#94a3b8;text-align:center;margin:4px 0}
+.level-badge{display:inline-block;font-size:9px;font-weight:900;padding:2px 7px;border-radius:20px;font-family:'Syne',sans-serif;letter-spacing:.4px;text-transform:uppercase}
+.level-1{background:#0f2540;color:#fff}
+.level-2{background:#1d4ed8;color:#fff}
+.level-3{background:#6d28d9;color:#fff}
 .row-actions{display:flex;gap:6px;opacity:0;transition:.15s}
 tbody tr:hover .row-actions{opacity:1}
 .color-swatch{width:20px;height:20px;border-radius:50%;display:inline-block;vertical-align:middle;flex-shrink:0}
@@ -374,6 +385,7 @@ tbody tr:hover .row-actions{opacity:1}
     <button class="nav-tab" onclick="switchTab('master')">🔧 Master Setup</button>
     <button class="nav-tab" onclick="switchTab('data')">📁 Data Manager</button>
     <button class="nav-tab" onclick="switchTab('reports')">📈 Reports</button>
+      <button class="nav-tab" onclick="switchTab('cascade')">🔗 Cascade</button>
   </div>
 </div>
 
@@ -419,6 +431,14 @@ tbody tr:hover .row-actions{opacity:1}
   </div>
 </div>
 
+<div id="tab-cascade" class="tab-panel">
+  <div class="sub-tabs" id="cascade-tabs">
+    <button class="sub-tab active" onclick="switchCascade('builder')">🔗 Cascade Builder</button>
+    <button class="sub-tab" onclick="switchCascade('tree')">🌳 Full Tree View</button>
+  </div>
+  <div id="cascade-content"><div class="spinner"></div></div>
+</div>
+
 <div class="modal-overlay hidden" id="modal-overlay" onclick="closeModal(event)">
   <div class="modal" id="modal-box">
     <div class="modal-head">
@@ -434,7 +454,7 @@ tbody tr:hover .row-actions{opacity:1}
 <script>
 // ── STATE ────────────────────────────────────────────────────────────────────
 const S = {
-  employees:[], mps:[], cps:[], roles:[], perf:[], cache:[],
+  employees:[], mps:[], cps:[], roles:[], perf:[], cache:[], cascade:[],
   locations:[], currentTab:'dashboard', teamView:'cards', masterSub:'mps',
   dataSub:'perf', reportSub:'overview', currentFY:'2081-82'
 }
@@ -452,12 +472,13 @@ const api = {
 }
 
 async function loadAll() {
-  const [e,m,c,r,p,ca,locs] = await Promise.all([
+  const [e,m,c,r,p,ca,locs,casc] = await Promise.all([
     api.get('/api/employees'), api.get('/api/mps'), api.get('/api/cps'),
     api.get('/api/roles'), api.get('/api/perf'), api.get('/api/cache'),
-    api.get('/api/locations')
+    api.get('/api/locations'),
+    api.get('/api/cascade')
   ])
-  S.employees=e; S.mps=m; S.cps=c; S.roles=r; S.perf=p; S.cache=ca; S.locations=locs
+  S.employees=e; S.mps=m; S.cps=c; S.roles=r; S.perf=p; S.cache=ca; S.locations=locs; S.cascade=casc
   // Set currentFY from most recent active cache
   const latest = ca.sort((a,b)=>b.fy.localeCompare(a.fy))[0]
   if (latest && !S.cache.find(x=>x.fy===S.currentFY)) S.currentFY = latest.fy
@@ -553,6 +574,7 @@ function renderCurrent() {
   else if(S.currentTab==='master') renderMaster()
   else if(S.currentTab==='data') renderData()
   else if(S.currentTab==='reports') renderReport()
+  else if(S.currentTab==='cascade') renderCascadeTab()
 }
 function switchMaster(s) { S.masterSub=s; qq('#master-tabs .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderMaster() }
 function switchData(s) { S.dataSub=s; qq('#tab-data .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderData() }
@@ -2108,6 +2130,316 @@ async function renderLocationReport() {
                 scales:{y:{min:0,max:100,ticks:{callback:function(v){return v+'%'}},grid:{color:'#f1f5f9'}},x:{grid:{display:false}}}}
         })
     }
+}
+
+
+// ── CASCADE BUILDER ───────────────────────────────────────────────────────────
+let cascadeSub = 'builder'
+function switchCascade(s) {
+    cascadeSub = s
+    qq('#cascade-tabs .sub-tab').forEach(t=>t.classList.remove('active'))
+    event.target.classList.add('active')
+    renderCascadeTab()
+}
+function renderCascadeTab() {
+    if (cascadeSub==='tree') renderCascadeTree()
+    else renderCascadeBuilder()
+}
+
+// ── BUILDER VIEW ──────────────────────────────────────────────────────────────
+function renderCascadeBuilder() {
+    const levels = [1,2,3]
+    let html = `
+    <div class="info-box mb-16">
+      <p><strong>How the cascade works:</strong> Your <strong>CP</strong> becomes your subordinate's <strong>MP</strong>.
+      Select a parent employee, pick one of their CPs, then select which subordinate's MP it maps to.
+      The system will draw the full chain automatically.</p>
+    </div>
+    <div class="section-head">
+      <div><h2>Cascade Builder</h2>
+      <p>Link a superior's CP to a subordinate's MP to build the performance cascade chain</p></div>
+      <button class="btn btn-primary btn-sm" onclick="openCascadeForm()">+ New Cascade Link</button>
+    </div>`
+
+    // Show existing links grouped by parent
+    const byParent = {}
+    S.cascade.forEach(function(lnk) {
+        if (!byParent[lnk.parent_emp_id]) byParent[lnk.parent_emp_id] = []
+        byParent[lnk.parent_emp_id].push(lnk)
+    })
+
+    if (S.cascade.length === 0) {
+        html += `<div class="card"><div class="card-body">
+            <p class="text-sm text-muted italic" style="text-align:center;padding:20px">
+            No cascade links yet. Click <strong>+ New Cascade Link</strong> to start mapping the hierarchy.</p>
+        </div></div>`
+    } else {
+        html += '<div style="display:flex;flex-direction:column;gap:12px">'
+        Object.entries(byParent).forEach(function(kv) {
+            const parentId = kv[0]; const links = kv[1]
+            const parent = getEmp(parentId)
+            if (!parent) return
+            const col = dc(parent.dept)
+            html += `<div class="card">
+              <div class="card-head" style="background:${col}10;border-bottom-color:${col}40">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <div class="avatar avatar-sm" style="background:${col}">${av(parent.name)}</div>
+                  <div>
+                    <p style="font-weight:900;font-family:'Syne',sans-serif">${esc(parent.name)}</p>
+                    <p class="text-xs text-muted">${esc(parent.role)} &middot; ${esc(parent.emp_code||'')}</p>
+                  </div>
+                  <span class="level-badge level-${parent.level}">Level ${parent.level}</span>
+                </div>
+              </div>
+              <div class="card-body">`
+
+            links.forEach(function(lnk) {
+                const childEmp = getEmp(lnk.child_emp_id)
+                const childCol = childEmp ? dc(childEmp.dept) : '#475569'
+                html += `<div style="display:flex;align-items:flex-start;gap:0;margin-bottom:10px">
+                  <div style="flex:1">
+                    <div class="cascade-cp-row linked" style="cursor:default">
+                      <span class="ref-badge ref-badge-blue">${esc(lnk.cp_ref||'CP')}</span>
+                      <span class="text-sm font-bold flex-1">${esc(lnk.cp_title||'')}</span>
+                      <span class="badge badge-c text-xxs">CP</span>
+                    </div>
+                    <div class="cascade-arrow">&#8595; becomes MP for &#8595;</div>
+                    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px">
+                      ${childEmp?`<div class="avatar avatar-sm" style="background:${childCol}">${av(childEmp.name)}</div>
+                      <div>
+                        <p class="text-xs font-bold">${esc(childEmp.name)}</p>
+                        <p class="text-xxs text-muted">${esc(childEmp.emp_code||'')} &middot; ${esc(childEmp.role||'')}</p>
+                      </div>`:'<span class="text-xs text-muted">Unknown employee</span>'}
+                      <div style="flex:1">
+                        <span class="ref-badge">${esc(lnk.mp_ref||'MP')}</span>
+                        <span class="text-xs font-bold ml-4">${esc(lnk.mp_title||'')}</span>
+                      </div>
+                      <span class="badge" style="background:#dcfce7;color:#15803d">MP</span>
+                    </div>
+                  </div>
+                  <button class="btn-icon ml-8" style="color:var(--red);margin-left:8px;margin-top:4px" onclick="delCascadeLink('${lnk.id}')" title="Remove link">&#128465;</button>
+                </div>`
+            })
+
+            html += '</div></div>'
+        })
+        html += '</div>'
+    }
+    q('#cascade-content').innerHTML = html
+}
+
+function openCascadeForm() {
+    // Step 1: pick parent employee
+    const empOpts = S.employees.map(function(e) {
+        return `<option value="${e.id}">${esc(e.name)} (${esc(e.emp_code||'')}) — L${e.level} ${esc(e.dept)}</option>`
+    }).join('')
+
+    const body = `
+    <div class="info-box mb-12">
+      <p>Select the <strong>superior</strong> employee, then pick which of their <strong>CPs</strong> cascades down.
+      Then select the <strong>subordinate</strong> and which of their <strong>MPs</strong> it maps to.</p>
+    </div>
+    <div class="form-group">
+      <label class="form-label">&#8593; Superior Employee (CP owner)</label>
+      <select class="form-select" id="cl-parent" onchange="refreshCascadeCP()">
+        <option value="">— Select superior —</option>${empOpts}
+      </select>
+    </div>
+    <div class="form-group" id="cl-cp-group" style="display:none">
+      <label class="form-label">Their CP (this will cascade down)</label>
+      <select class="form-select" id="cl-cp">
+        <option value="">— Select CP —</option>
+      </select>
+    </div>
+    <div class="form-group" id="cl-child-group" style="display:none">
+      <label class="form-label">&#8595; Subordinate Employee (MP owner)</label>
+      <select class="form-select" id="cl-child" onchange="refreshCascadeMP()">
+        <option value="">— Select subordinate —</option>${empOpts}
+      </select>
+    </div>
+    <div class="form-group" id="cl-mp-group" style="display:none">
+      <label class="form-label">Their MP (derived from superior's CP)</label>
+      <select class="form-select" id="cl-mp">
+        <option value="">— Select MP —</option>
+      </select>
+    </div>
+    <div id="cl-preview" style="display:none;margin-top:12px"></div>`
+
+    openModal('New Cascade Link', body, [{
+        label: 'Create Link', cls: 'btn-primary', fn: async function() {
+            const pid = q('#cl-parent').value
+            const cid = q('#cl-cp').value
+            const eid = q('#cl-child').value
+            const mid = q('#cl-mp').value
+            if (!pid||!cid||!eid||!mid) { toast('All fields required','error'); return }
+            await api.post('/api/cascade', {
+                parent_emp_id: pid, parent_cp_id: cid,
+                child_emp_id:  eid, child_mp_id:  mid
+            })
+            toast('Cascade link created','ok')
+            closeModal(); await loadAll()
+        }
+    }], true)
+
+    // show child group immediately
+    q('#cl-child-group').style.display = ''
+}
+
+function refreshCascadeCP() {
+    const pid = q('#cl-parent').value
+    const sel = q('#cl-cp')
+    if (!pid) { q('#cl-cp-group').style.display='none'; return }
+    const myCPs = S.cps.filter(function(c) {
+        return (c.owner_ids||[]).includes(pid)
+    })
+    sel.innerHTML = '<option value="">— Select CP —</option>' +
+        myCPs.map(function(c) {
+            const mp = S.mps.find(function(m){return m.id===c.mp_id})
+            return `<option value="${c.id}">[${esc(c.ref)}] ${esc(c.title)} ${mp?'(under '+esc(mp.ref)+')':''}</option>`
+        }).join('')
+    q('#cl-cp-group').style.display = ''
+}
+
+function refreshCascadeMP() {
+    const eid = q('#cl-child').value
+    const sel = q('#cl-mp')
+    if (!eid) { q('#cl-mp-group').style.display='none'; return }
+    const myMPs = S.mps.filter(function(m) {
+        return (m.owner_ids||[]).includes(eid)
+    })
+    sel.innerHTML = '<option value="">— Select MP —</option>' +
+        myMPs.map(function(m) {
+            return `<option value="${m.id}">[${esc(m.ref)}] ${esc(m.title)}</option>`
+        }).join('')
+    q('#cl-mp-group').style.display = ''
+    updateCascadePreview()
+}
+
+function updateCascadePreview() {
+    const pid = q('#cl-parent')?.value
+    const cid = q('#cl-cp')?.value
+    const eid = q('#cl-child')?.value
+    const mid = q('#cl-mp')?.value
+    const prev = q('#cl-preview')
+    if (!prev) return
+    if (pid&&cid&&eid&&mid) {
+        const pe = getEmp(pid); const cp = S.cps.find(function(c){return c.id===cid})
+        const ce = getEmp(eid); const mp = S.mps.find(function(m){return m.id===mid})
+        prev.style.display=''
+        prev.innerHTML = `<div style="background:#f8fafc;border:1.5px solid var(--border);border-radius:10px;padding:12px">
+            <p class="text-xxs text-muted font-bold" style="text-transform:uppercase;margin-bottom:8px">Preview</p>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+              <div class="avatar avatar-sm" style="background:${pe?dc(pe.dept):'#475569'}">${pe?av(pe.name):'?'}</div>
+              <span class="text-sm font-bold">${pe?esc(pe.name):''}</span>
+              <span class="text-xxs text-muted">CP:</span>
+              <span class="ref-badge ref-badge-blue">${cp?esc(cp.ref):''}</span>
+              <span class="text-xs">${cp?esc(cp.title.slice(0,40)):''}</span>
+            </div>
+            <div class="cascade-arrow">&#8595; cascades to &#8595;</div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <div class="avatar avatar-sm" style="background:${ce?dc(ce.dept):'#475569'}">${ce?av(ce.name):'?'}</div>
+              <span class="text-sm font-bold">${ce?esc(ce.name):''}</span>
+              <span class="text-xxs text-muted">MP:</span>
+              <span class="ref-badge">${mp?esc(mp.ref):''}</span>
+              <span class="text-xs">${mp?esc(mp.title.slice(0,40)):''}</span>
+            </div>
+        </div>`
+    } else { prev.style.display='none' }
+}
+
+async function delCascadeLink(id) {
+    if (!confirm('Remove this cascade link?')) return
+    await api.del('/api/cascade/'+id)
+    toast('Link removed','ok'); await loadAll()
+}
+
+// ── TREE VIEW ─────────────────────────────────────────────────────────────────
+async function renderCascadeTree() {
+    setSpinner('cascade-content')
+    // Pick starting employee (default: Level 1)
+    const roots = S.employees.filter(function(e){return e.level===1})
+    const empOpts = S.employees.map(function(e){
+        return `<option value="${e.id}">${esc(e.name)} (L${e.level} ${esc(e.dept)})</option>`
+    }).join('')
+
+    let html = `<div class="section-head mb-16">
+        <div><h2>Full Cascade Tree</h2><p>Visualise the complete CP&#8594;MP chain from any employee downward</p></div>
+        <div style="display:flex;gap:8px;align-items:center">
+            <select class="form-select" id="tree-root" style="width:220px">
+                <option value="">All top-level</option>${empOpts}
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="loadTree()">View Tree</button>
+        </div>
+    </div>
+    <div id="tree-output"><div class="info-box"><p>Select an employee above and click <strong>View Tree</strong>, or leave blank to see the full organisation tree.</p></div></div>`
+
+    q('#cascade-content').innerHTML = html
+}
+
+async function loadTree() {
+    const eid = q('#tree-root').value
+    setSpinner('tree-output')
+    const url = '/api/cascade/tree' + (eid ? '?emp_id='+eid : '')
+    const tree = await api.get(url)
+    q('#tree-output').innerHTML = tree.length
+        ? '<div style="overflow-x:auto">'+renderTreeNodes(tree, 0)+'</div>'
+        : '<p class="text-sm text-muted italic">No data found.</p>'
+}
+
+function renderTreeNodes(nodes, depth) {
+    if (!nodes||!nodes.length) return ''
+    return nodes.map(function(emp) {
+        const col = dc(emp.dept||'Ops')
+        const lvlBadge = `<span class="level-badge level-${emp.level||1}">Level ${emp.level||1}</span>`
+        const roles = (emp.roles||[]).map(function(r){
+            return `<span class="badge" style="background:${r.color||'#1d4ed8'};color:#fff;margin:2px">${esc(r.code)}</span>`
+        }).join('')
+
+        let mpHtml = ''
+        ;(emp.mps||[]).forEach(function(mp) {
+            const mpPct = mp.kpi_total ? (mp.kpi_c/mp.kpi_total*100).toFixed(1) : null
+            mpHtml += `<div class="cascade-mp-box">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                    <span class="ref-badge" style="background:#0f2540;color:#fff;font-weight:900">${esc(mp.ref)}</span>
+                    <span class="font-bold text-sm flex-1">${esc(mp.title)}</span>
+                    ${mpPct!==null?`<span class="badge" style="background:${mpPct>=95?'#dcfce7':mpPct>=80?'#fef3c7':'#fee2e2'};color:${mpPct>=95?'#15803d':mpPct>=80?'#92400e':'#b91c1c'}">${mpPct}%</span>`:''}
+                    <span class="badge badge-blue">⌖ ${esc(mp.target||'')}</span>
+                </div>`
+
+            ;(mp.cps||[]).forEach(function(cp) {
+                const hasCascade = cp.cascade_children && cp.cascade_children.length > 0
+                mpHtml += `<div class="cascade-cp-row${hasCascade?' linked':''}">
+                    <span class="ref-badge ref-badge-blue">${esc(cp.ref)}</span>
+                    <span class="text-sm flex-1">${esc(cp.title)}</span>
+                    <span class="badge badge-gray">${esc(cp.target||'')}</span>
+                    ${hasCascade?'<span class="badge badge-c text-xxs">&#8595; cascades</span>':''}
+                </div>`
+                if (hasCascade) {
+                    mpHtml += `<div class="cascade-arrow">&#8595; CP becomes MP for:</div>`
+                    mpHtml += renderTreeNodes(cp.cascade_children, depth+1)
+                }
+            })
+            mpHtml += '</div>'
+        })
+
+        return `<div style="margin-bottom:${depth===0?'24':'12'}px">
+            <div class="cascade-role-box" style="border-left:4px solid ${col}">
+                <div style="display:flex;align-items:center;gap:12px">
+                    <div class="avatar avatar-md" style="background:${col}">${av(emp.name)}</div>
+                    <div style="flex:1">
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                            <span style="font-size:15px;font-weight:900;font-family:'Syne',sans-serif">${esc(emp.name)}</span>
+                            ${lvlBadge}
+                            <span class="emp-code" style="background:rgba(255,255,255,.15);color:#fff;border-color:transparent">${esc(emp.emp_code||'')}</span>
+                        </div>
+                        <p style="font-size:11px;color:#93c5fd;margin-top:2px">${esc(emp.role||'')}</p>
+                        ${roles?`<div style="margin-top:6px">${roles}</div>`:''}
+                    </div>
+                </div>
+            </div>
+            ${mpHtml ? `<div class="cascade-node">${mpHtml}</div>` : ''}
+        </div>`
+    }).join('')
 }
 
 // ── INIT ─────────────────────────────────────────────────────────────────────

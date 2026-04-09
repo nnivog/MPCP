@@ -14,29 +14,76 @@ except ImportError:
 app = Flask(__name__)
 DB  = os.path.join(os.path.dirname(__file__), "scm.db")
 
-# ── NEPALI CALENDAR ────────────────────────────────────────────────────────
-BS_MONTHS = ["Shrawan","Bhadra","Ashwin","Kartik","Mangsir","Poush",
-             "Magh","Falgun","Chaitra","Baisakh","Jestha","Ashadh"]
-BS_Q = {"Shrawan":"Q1","Bhadra":"Q1","Ashwin":"Q1","Kartik":"Q2","Mangsir":"Q2","Poush":"Q2",
-        "Magh":"Q3","Falgun":"Q3","Chaitra":"Q3","Baisakh":"Q4","Jestha":"Q4","Ashadh":"Q4"}
-AD_TO_BS = {
-    "Jul":"Shrawan","Aug":"Bhadra","Sep":"Ashwin","Oct":"Kartik","Nov":"Mangsir","Dec":"Poush",
-    "Jan":"Magh","Feb":"Falgun","Mar":"Chaitra","Apr":"Baisakh","May":"Jestha","Jun":"Ashadh",
-    "July":"Shrawan","August":"Bhadra","September":"Ashwin","October":"Kartik",
-    "November":"Mangsir","December":"Poush","January":"Magh","February":"Falgun",
-    "March":"Chaitra","April":"Baisakh","June":"Ashadh"}
+# -- BIKRAM SAMWAT CALENDAR (precise dates) -----------------------------------
+BS_MONTHS = ['Baisakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin',
+             'Kartik','Mangsir','Poush','Magh','Falgun','Chaitra']
+BS_MONTH_DAYS = {
+    2078:[31,31,32,32,31,30,30,29,30,29,30,30],
+    2079:[31,32,31,32,31,30,30,30,29,29,30,30],
+    2080:[31,32,31,32,31,30,30,30,29,30,29,31],
+    2081:[31,31,32,32,31,30,30,30,29,30,30,30],
+    2082:[31,32,31,32,31,30,30,30,29,30,29,31],
+}
+BS_DEFAULT_DAYS=[31,32,31,32,31,30,30,30,29,30,29,31]
+BS_FY_Q={'Shrawan':'Q1','Bhadra':'Q1','Ashwin':'Q1',
+         'Kartik':'Q2','Mangsir':'Q2','Poush':'Q2',
+         'Magh':'Q3','Falgun':'Q3','Chaitra':'Q3',
+         'Baisakh':'Q4','Jestha':'Q4','Ashadh':'Q4'}
+AD_TO_BS={
+    'Jul':'Shrawan','Aug':'Bhadra','Sep':'Ashwin','Oct':'Kartik','Nov':'Mangsir','Dec':'Poush',
+    'Jan':'Magh','Feb':'Falgun','Mar':'Chaitra','Apr':'Baisakh','May':'Jestha','Jun':'Ashadh',
+    'July':'Shrawan','August':'Bhadra','September':'Ashwin','October':'Kartik',
+    'November':'Mangsir','December':'Poush','January':'Magh','February':'Falgun',
+    'March':'Chaitra','April':'Baisakh','June':'Ashadh'}
+
+def bs_days_in_month(year,month_idx):
+    return (BS_MONTH_DAYS.get(year,BS_DEFAULT_DAYS))[month_idx]
+
+def bs_month_idx(mn):
+    try: return BS_MONTHS.index(mn)
+    except: return 0
 
 def norm_month(m):
-    m = str(m or '').strip()
+    m=str(m or '').strip()
     if m in BS_MONTHS: return m
     if m in AD_TO_BS: return AD_TO_BS[m]
     for bs in BS_MONTHS:
-        if m.lower() == bs.lower(): return bs
+        if m.lower()==bs.lower(): return bs
     for ad,bs in AD_TO_BS.items():
-        if m.lower() == ad.lower(): return bs
-    return m or "Shrawan"
+        if m.lower()==ad.lower(): return bs
+    try:
+        idx=int(m)-1
+        if 0<=idx<12: return BS_MONTHS[idx]
+    except: pass
+    return m or 'Shrawan'
 
-def bs_q(month): return BS_Q.get(month,"Q1")
+def bs_date_str(year,month_name,day):
+    idx=bs_month_idx(month_name)
+    return f'{year}-{idx+1:02d}-{int(day):02d}'
+
+def today_bs():
+    import datetime
+    ad=datetime.date.today()
+    bs_year=ad.year+56
+    ad_to_bs_m=[
+        (1,1,'Poush'),(2,1,'Magh'),(3,1,'Falgun'),
+        (4,1,'Chaitra'),(4,14,'Baisakh'),(5,15,'Jestha'),
+        (6,16,'Ashadh'),(7,1,'Shrawan'),(8,1,'Bhadra'),
+        (9,1,'Ashwin'),(10,1,'Kartik'),(11,1,'Mangsir'),(12,1,'Poush')
+    ]
+    bs_month='Shrawan'
+    for (m,d,bsm) in reversed(ad_to_bs_m):
+        if (ad.month,ad.day)>=(m,d): bs_month=bsm; break
+    return bs_date_str(bs_year,bs_month,ad.day)
+
+def current_bs_fy():
+    import datetime
+    ad=datetime.date.today()
+    bs_year=ad.year+56
+    if ad.month<4 or (ad.month==4 and ad.day<14): bs_year-=1
+    return f'{bs_year}-{str(bs_year+1)[-2:]}'
+
+def bs_q(month): return BS_FY_Q.get(month,'Q1')
 
 def uid(): return ''.join(random.choices(string.ascii_lowercase+string.digits,k=8))
 def get_db():
@@ -87,7 +134,8 @@ CREATE TABLE IF NOT EXISTS perf(
   non_compliant INTEGER DEFAULT 0,
   pct_compliant REAL DEFAULT 0, pct_nc REAL DEFAULT 0,
   target_val REAL DEFAULT 0, actual_val REAL DEFAULT 0,
-  unit TEXT DEFAULT '%', status TEXT DEFAULT 'C', notes TEXT DEFAULT '', location TEXT DEFAULT '');
+  unit TEXT DEFAULT '%', status TEXT DEFAULT 'C', notes TEXT DEFAULT '',
+  location TEXT DEFAULT '', bs_date TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS locations(
   id TEXT PRIMARY KEY, code TEXT UNIQUE NOT NULL,
   name TEXT NOT NULL, type TEXT DEFAULT 'Office',
@@ -878,6 +926,124 @@ def cascade_tree():
         for r in roots:
             tree.extend(build_node(r['id']))
     return jsonify(tree)
+
+
+# -- BS DATE & ORG TREE API ----------------------------------------------------
+@app.route('/api/bs_today')
+def bs_today():
+    return jsonify({'date':today_bs(),'fy':current_bs_fy(),
+        'months':BS_MONTHS,'quarter_map':BS_FY_Q,
+        'month_days':{str(k):v for k,v in BS_MONTH_DAYS.items()}})
+
+@app.route('/api/bs_calendar/<int:year>')
+def bs_calendar(year):
+    return jsonify({'year':year,'months':[
+        {'name':m,'index':i+1,'days':bs_days_in_month(year,i),'quarter':BS_FY_Q.get(m,'Q1')}
+        for i,m in enumerate(BS_MONTHS)]})
+
+@app.route('/api/org/tree')
+def org_tree():
+    db=get_db()
+    fy=request.args.get('fy',''); loc=request.args.get('loc',''); sect=request.args.get('sect','')
+    def get_perf(eid,ec):
+        q2="SELECT * FROM perf WHERE (emp_id=? OR emp_code=?)"; args=[eid,ec]
+        if fy: q2+=" AND fy=?"; args.append(fy)
+        if loc: q2+=" AND location=?"; args.append(loc)
+        rows=db.execute(q2,args).fetchall()
+        tot=sum(r['total'] or 1 for r in rows)
+        comp=sum(r['compliant'] or (1 if r['status']=='C' else 0) for r in rows)
+        return {'tot':tot,'comp':comp,'nc':tot-comp,
+                'pct':round(comp/tot*100,2) if tot else None,'records':len(rows)}
+    def build(eid,depth=0,visited=None):
+        if visited is None: visited=set()
+        if eid in visited or depth>10: return None
+        visited.add(eid)
+        emp=db.execute("SELECT * FROM employees WHERE id=?",(eid,)).fetchone()
+        if not emp: return None
+        emp=dict(emp)
+        if sect and emp.get('dept','')!=sect: return None
+        own=get_perf(eid,emp.get('emp_code',''))
+        roles=[dict(r) for r in db.execute(
+            "SELECT r.* FROM roles r JOIN emp_roles er ON r.id=er.role_id WHERE er.emp_id=?",(eid,))]
+        mps=[]
+        for mp in db.execute(
+            "SELECT m.* FROM mps m JOIN mp_owners mo ON m.id=mo.mp_id WHERE mo.emp_id=?",(eid,)).fetchall():
+            mp=dict(mp); mp['cps']=[dict(c) for c in db.execute("SELECT * FROM cps WHERE mp_id=?",(mp['id'],))]
+            mps.append(mp)
+        locs=[dict(l) for l in db.execute(
+            "SELECT lo.* FROM locations lo JOIN emp_locations el ON lo.id=el.loc_id WHERE el.emp_id=?",(eid,))]
+        subs=db.execute("SELECT id FROM employees WHERE manager_id=?",(eid,)).fetchall()
+        children=[]; sub_tot=0; sub_comp=0
+        for s in subs:
+            node=build(s['id'],depth+1,visited)
+            if node:
+                children.append(node)
+                sub_tot+=node['rollup']['tot']; sub_comp+=node['rollup']['comp']
+        rt=own['tot']+sub_tot; rc=own['comp']+sub_comp
+        return {'id':emp['id'],'name':emp['name'],'emp_code':emp.get('emp_code',''),
+                'role':emp.get('role',''),'dept':emp.get('dept','Ops'),'level':emp.get('level',3),
+                'roles':roles,'mps':mps,'locations':locs,'own':own,
+                'rollup':{'tot':rt,'comp':rc,'nc':rt-rc,'pct':round(rc/rt*100,2) if rt else None},
+                'children':children,'depth':depth}
+    roots=db.execute("SELECT id FROM employees WHERE manager_id IS NULL OR manager_id=''").fetchall()
+    tree=[build(r['id']) for r in roots]; tree=[t for t in tree if t]
+    return jsonify(tree)
+
+@app.route('/api/org/move',methods=['POST'])
+def org_move():
+    db=get_db(); d=request.json
+    eid=d.get('emp_id'); new_mgr=d.get('new_manager_id') or None
+    if not eid: return jsonify({'error':'emp_id required'}),400
+    def is_sub(root,target):
+        subs=db.execute("SELECT id FROM employees WHERE manager_id=?",(root,)).fetchall()
+        for s in subs:
+            if s['id']==target: return True
+            if is_sub(s['id'],target): return True
+        return False
+    if new_mgr and is_sub(eid,new_mgr): return jsonify({'error':'Cannot assign subordinate as manager'}),400
+    db.execute("UPDATE employees SET manager_id=? WHERE id=?",(new_mgr,eid))
+    db.commit(); return jsonify({'ok':True})
+
+@app.route('/api/org/assign_mp',methods=['POST'])
+def org_assign_mp():
+    db=get_db(); d=request.json
+    eid=d.get('emp_id'); mid=d.get('mp_id'); loc_id=d.get('loc_id','')
+    if not eid or not mid: return jsonify({'error':'emp_id and mp_id required'}),400
+    db.execute("INSERT OR IGNORE INTO mp_owners VALUES(?,?)",(mid,eid))
+    db.execute("INSERT OR IGNORE INTO emp_mps VALUES(?,?)",(eid,mid))
+    if loc_id: db.execute("INSERT OR IGNORE INTO mp_locations VALUES(?,?)",(mid,loc_id))
+    db.commit(); return jsonify({'ok':True})
+
+@app.route('/api/org/assign_cp',methods=['POST'])
+def org_assign_cp():
+    db=get_db(); d=request.json
+    eid=d.get('emp_id'); cid=d.get('cp_id'); loc_id=d.get('loc_id','')
+    if not eid or not cid: return jsonify({'error':'emp_id and cp_id required'}),400
+    db.execute("INSERT OR IGNORE INTO cp_owners VALUES(?,?)",(cid,eid))
+    db.execute("INSERT OR IGNORE INTO emp_cps VALUES(?,?)",(eid,cid))
+    if loc_id: db.execute("INSERT OR IGNORE INTO cp_locations VALUES(?,?)",(cid,loc_id))
+    db.commit(); return jsonify({'ok':True})
+
+@app.route('/api/org/cascade_assign',methods=['POST'])
+def org_cascade_assign():
+    db=get_db(); d=request.json
+    parent_cp_id=d.get('parent_cp_id'); child_emp_id=d.get('child_emp_id')
+    child_mp_id=d.get('child_mp_id')
+    if not parent_cp_id or not child_emp_id: return jsonify({'error':'parent_cp_id and child_emp_id required'}),400
+    cp=db.execute("SELECT * FROM cps WHERE id=?",(parent_cp_id,)).fetchone()
+    if not cp: return jsonify({'error':'CP not found'}),404
+    if not child_mp_id:
+        mid=uid()
+        db.execute("INSERT OR IGNORE INTO mps VALUES(?,?,?,?,?,?,?,?,?,?)",
+                   (mid,cp['ref'],cp['title'],cp['target'],'Monthly',0,0,0,parent_cp_id,2))
+        child_mp_id=mid
+    else:
+        db.execute("UPDATE mps SET parent_cp_id=? WHERE id=?",(parent_cp_id,child_mp_id))
+    link_id=uid()
+    db.execute("INSERT OR REPLACE INTO cascade_links VALUES(?,?,?,?,?)",
+               (link_id,d.get('parent_emp_id',''),parent_cp_id,child_emp_id,child_mp_id))
+    db.execute("INSERT OR IGNORE INTO mp_owners VALUES(?,?)",(child_mp_id,child_emp_id))
+    db.commit(); return jsonify({'ok':True,'mp_id':child_mp_id,'link_id':link_id})
 
 @app.route('/')
 def index():

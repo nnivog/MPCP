@@ -245,7 +245,7 @@ def _seed(db):
       P("p32","2081-82","Kartik","e2","EMP-002","HODL-1","LM-VEH-1","Vehicle Border Tracking",390,374,100,96,"%",""),
       P("p33","2081-82","Kartik","e11","EMP-011","HODL-9","LM-WH-3-A","Goods SLA Delivery",98,94,2,2.1,"Days","Slight over"),
     ]
-    db.executemany("INSERT OR IGNORE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",perf)
+    db.executemany("INSERT OR IGNORE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",perf)
     locs=[
         ("loc1","HQ","Head Office - Sipradi","Office","Kathmandu"),
         ("loc2","BORDER","Border Clearance Station","Border","Birgunj"),

@@ -4,7 +4,121 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Sipradi SC-MPCP System</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
+// ── LOCATIONS ─────────────────────────────────────────────────────────────────
+const LOC_COLORS = {Office:'#1d4ed8',Border:'#b45309',Warehouse:'#047857',Depot:'#6d28d9',Branch:'#0891b2'}
+
+function renderLocations() {
+    let html = '<div class="section-head"><div><h2>Workstation Locations</h2><p>'+S.locations.length+' locations &middot; staff can belong to multiple workstations</p></div>'
+    html += '<button class="btn btn-primary btn-sm" onclick="openLocForm()">+ New Location</button></div><div class="grid-3">'
+    S.locations.forEach(loc => {
+        const emps = (loc.emp_ids||[]).map(getEmp).filter(Boolean)
+        const color = LOC_COLORS[loc.type]||'#475569'
+        html += '<div class="card" style="border-top:3px solid '+color+';padding:16px">'
+        html += '<div class="flex justify-between items-start mb-8">'
+        html += '<span class="ref-badge" style="font-size:12px;font-weight:900">'+esc(loc.code)+'</span>'
+        html += '<span class="badge" style="background:'+color+'20;color:'+color+';font-weight:700">'+esc(loc.type)+'</span></div>'
+        html += '<p class="font-black" style="font-size:14px">'+esc(loc.name)+'</p>'
+        if(loc.address) html += '<p class="text-xs text-muted mt-4">&#128205; '+esc(loc.address)+'</p>'
+        html += '<div class="mt-12 flex gap-4" style="flex-wrap:wrap">'
+        if(emps.length) emps.forEach(e=>{ html += '<span class="owner-chip" style="background:'+dc(e.dept)+'" onclick="openProfile(''+e.id+'',event)">'+e.name.split(' ')[0]+'</span>' })
+        else html += '<span class="text-xs text-muted italic">No staff assigned</span>'
+        html += '</div><p class="text-xxs text-muted mt-8">'+emps.length+' staff assigned</p>'
+        html += '<div class="flex gap-6 mt-12" style="border-top:1px solid var(--border);padding-top:10px">'
+        html += '<button class="btn btn-ghost btn-sm flex-1" onclick="openLocForm(''+loc.id+'')">Edit</button>'
+        html += '<button class="btn btn-sm flex-1" style="background:#fee2e2;color:#b91c1c" onclick="delLoc(''+loc.id+'')">Delete</button>'
+        html += '</div></div>'
+    })
+    html += '</div>'
+    q('#master-content').innerHTML = html
+}
+
+function openLocForm(id) {
+    const loc = id ? S.locations.find(function(l){return l.id===id}) : null
+    const TYPES = ['Office','Border','Warehouse','Depot','Branch']
+    const typeOpts = TYPES.map(function(t){return '<option'+(loc&&loc.type===t?' selected':'')+'>'+t+'</option>'}).join('')
+    const body = '<div class="form-grid-2">'
+        + '<div class="form-group"><label class="form-label">Location Code</label>'
+        + '<input class="form-input" id="lf-code" value="'+(loc?esc(loc.code):'')+'" placeholder="e.g. BORDER, WH-KTM"></div>'
+        + '<div class="form-group"><label class="form-label">Type</label>'
+        + '<select class="form-select" id="lf-type">'+typeOpts+'</select></div></div>'
+        + '<div class="form-group"><label class="form-label">Location Name</label>'
+        + '<input class="form-input" id="lf-name" value="'+(loc?esc(loc.name):'')+'"></div>'
+        + '<div class="form-group"><label class="form-label">Address / Description</label>'
+        + '<input class="form-input" id="lf-addr" value="'+(loc?esc(loc.address||''):'')+'"></div>'
+        + '<div class="form-group"><label class="form-label">Staff at this Location</label>'
+        + buildOwnerPicker('lf-emps', loc?loc.emp_ids||[]:[])+' </div>'
+    openModal(loc?'Edit Location':'Add Workstation Location', body,
+    [{label: loc?'Save Changes':'Create Location', cls:'btn-primary', fn: async function(){
+        const d = {code:q('#lf-code').value.trim(), name:q('#lf-name').value.trim(),
+                   type:q('#lf-type').value, address:q('#lf-addr').value.trim(),
+                   emp_ids: getOwnerPicked('lf-emps')}
+        if(!d.code||!d.name){toast('Code and name required','error');return}
+        if(loc){d.id=loc.id; await api.put('/api/locations/'+loc.id,d)}
+        else await api.post('/api/locations',d)
+        toast(loc?'Location updated':'Location created','ok'); closeModal(); await loadAll()
+    }}], true)
+}
+
+async function delLoc(id){
+    if(!confirm('Delete this location? Staff assignments will be removed.'))return
+    await api.del('/api/locations/'+id); toast('Deleted','ok'); await loadAll()
+}
+
+async function renderLocationReport() {
+    setSpinner('report-content')
+    const data = await api.get('/api/analytics/by_location?fy='+encodeURIComponent(S.currentFY))
+    const entries = Object.entries(data)
+    let html = '<div class="section-head mb-20"><div>'
+    html += '<h2>Performance by Location &mdash; FY '+esc(S.currentFY)+'</h2>'
+    html += '<p>Compliance rates aggregated by workstation. Staff may appear in multiple locations.</p>'
+    html += '</div></div>'
+    html += '<div class="grid-3 mb-20">'
+    entries.forEach(function(kv){
+        const loc = kv[1]
+        html += compCard({ref:kv[0], title:loc.name+' · '+loc.type,
+            tot:loc.total, comp:loc.compliant, nc:loc.nc,
+            pct_c:loc.pct_c, pct_nc:loc.pct_nc,
+            color: LOC_COLORS[loc.type]||'#475569'})
+    })
+    html += '</div>'
+    html += '<div class="card mb-20"><div class="card-head"><p>Staff Assignments by Location</p></div><div class="card-body">'
+    html += '<div class="tbl-wrap"><table><thead><tr>'
+    html += '<th>Location</th><th>Type</th><th>Address</th><th>Staff</th><th>Compliance</th>'
+    html += '</tr></thead><tbody>'
+    entries.forEach(function(kv){
+        const code=kv[0]; const loc=kv[1]
+        const color = LOC_COLORS[loc.type]||'#475569'
+        const emps = (loc.emp_ids||[]).map(getEmp).filter(Boolean)
+        html += '<tr>'
+        html += '<td><span class="ref-badge" style="font-weight:900">'+esc(code)+'</span> <span class="font-bold">'+esc(loc.name)+'</span></td>'
+        html += '<td><span class="badge" style="background:'+color+'20;color:'+color+'">'+esc(loc.type)+'</span></td>'
+        html += '<td class="text-muted text-xs">'+esc(loc.address||'&mdash;')+'</td>'
+        html += '<td>'+emps.map(function(e){return '<span class="owner-chip" style="background:'+dc(e.dept)+'" onclick="openProfile(''+e.id+'',event)">'+e.name.split(' ')[0]+'</span>'}).join('')+'</td>'
+        if(loc.total>0){
+            const col = loc.pct_c>=95?'var(--green)':loc.pct_c>=80?'var(--amber)':'var(--red)'
+            html += '<td><span class="font-black" style="color:'+col+'">'+loc.pct_c+'%</span> <span class="text-xs text-muted">('+loc.compliant+'/'+loc.total+')</span></td>'
+        } else { html += '<td><span class="text-muted text-xs">No data</span></td>' }
+        html += '</tr>'
+    })
+    html += '</tbody></table></div></div></div>'
+    html += '<div class="card"><div class="card-head"><p>Location Compliance Chart</p></div>'
+    html += '<div class="card-body"><canvas id="loc-chart" height="80"></canvas></div></div>'
+    q('#report-content').innerHTML = html
+    destroyChart('loc-chart')
+    const labels = entries.map(function(kv){return kv[1].name})
+    const pcts   = entries.map(function(kv){return kv[1].pct_c})
+    const bgs    = entries.map(function(kv){return LOC_COLORS[kv[1].type]||'#475569'})
+    charts['loc-chart'] = new Chart(q('#loc-chart'), {
+        type:'bar',
+        data:{labels:labels, datasets:[{label:'Compliance %', data:pcts, backgroundColor:bgs, borderRadius:8}]},
+        options:{responsive:true, plugins:{legend:{display:false}},
+            scales:{y:{min:0,max:100,ticks:{callback:function(v){return v+'%'}},grid:{color:'#f1f5f9'}},
+                    x:{grid:{display:false}}}}
+    })
+}
+
+</script>
 <style>
 :root{
   --bg:#f0f2f7;--surface:#fff;--border:#e2e6ef;--text:#0f1a2e;--muted:#6b7a99;
@@ -282,6 +396,7 @@ tbody tr:hover .row-actions{opacity:1}
       <button class="sub-tab" onclick="switchMaster('cps')">Checking Points</button>
       <button class="sub-tab" onclick="switchMaster('roles')">Role Templates</button>
       <button class="sub-tab" onclick="switchMaster('links')">Role Assignments</button>
+			<button class="sub-tab" onclick="switchMaster('locations')">&#128205; Locations</button>
     </div>
     <div id="master-content"><div class="spinner"></div></div>
   </div>
@@ -298,6 +413,7 @@ tbody tr:hover .row-actions{opacity:1}
       <button class="sub-tab" onclick="switchReport('yoy')">📅 Year-on-Year</button>
       <button class="sub-tab" onclick="switchReport('employee')">👤 Employee-wise</button>
       <button class="sub-tab" onclick="switchReport('mpcp')">🎯 MP / CP Drill-down</button>
+			<button class="sub-tab" onclick="switchReport('location')">&#128205; By Location</button>
     </div>
     <div id="report-content"><div class="spinner"></div></div>
   </div>
@@ -319,7 +435,7 @@ tbody tr:hover .row-actions{opacity:1}
 // ── STATE ────────────────────────────────────────────────────────────────────
 const S = {
   employees:[], mps:[], cps:[], roles:[], perf:[], cache:[],
-  currentTab:'dashboard', teamView:'cards', masterSub:'mps',
+  locations:[], currentTab:'dashboard', teamView:'cards', masterSub:'mps',
   dataSub:'perf', reportSub:'overview', currentFY:'2081-82'
 }
 const DC = { HOD:'#0f2540',Vehicle:'#1d4ed8',Registration:'#6d28d9',Warehouse:'#047857',Stock:'#b45309',Ops:'#475569',Finance:'#0e7490',HR:'#be185d' }
@@ -336,11 +452,12 @@ const api = {
 }
 
 async function loadAll() {
-  const [e,m,c,r,p,ca] = await Promise.all([
+  const [e,m,c,r,p,ca,locs] = await Promise.all([
     api.get('/api/employees'), api.get('/api/mps'), api.get('/api/cps'),
-    api.get('/api/roles'), api.get('/api/perf'), api.get('/api/cache')
+    api.get('/api/roles'), api.get('/api/perf'), api.get('/api/cache'),
+    api.get('/api/locations')
   ])
-  S.employees=e; S.mps=m; S.cps=c; S.roles=r; S.perf=p; S.cache=ca
+  S.employees=e; S.mps=m; S.cps=c; S.roles=r; S.perf=p; S.cache=ca; S.locations=locs
   // Set currentFY from most recent active cache
   const latest = ca.sort((a,b)=>b.fy.localeCompare(a.fy))[0]
   if (latest && !S.cache.find(x=>x.fy===S.currentFY)) S.currentFY = latest.fy
@@ -774,6 +891,7 @@ function renderMaster() {
   if(S.masterSub==='mps') renderMPs()
   else if(S.masterSub==='cps') renderCPs()
   else if(S.masterSub==='roles') renderRoles()
+  else if(S.masterSub==='locations') renderLocations()
   else renderLinks()
 }
 
@@ -1381,6 +1499,7 @@ async function deleteFY(fy){
 
 // ── REPORTS ──────────────────────────────────────────────────────────────────
 async function renderReport(){
+  if(S.reportSub==='location'){ renderLocationReport(); return }
   if(S.reportSub==='overview') renderOverviewReport()
   else if(S.reportSub==='yoy') await renderYoYReport()
   else if(S.reportSub==='employee') renderEmpReport()

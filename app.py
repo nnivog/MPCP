@@ -81,7 +81,21 @@ CREATE TABLE IF NOT EXISTS perf(
   non_compliant INTEGER DEFAULT 0,
   pct_compliant REAL DEFAULT 0, pct_nc REAL DEFAULT 0,
   target_val REAL DEFAULT 0, actual_val REAL DEFAULT 0,
-  unit TEXT DEFAULT '%', status TEXT DEFAULT 'C', notes TEXT DEFAULT '');
+  unit TEXT DEFAULT '%', status TEXT DEFAULT 'C', notes TEXT DEFAULT '', location TEXT DEFAULT '');
+CREATE TABLE IF NOT EXISTS locations(
+  id TEXT PRIMARY KEY, code TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL, type TEXT DEFAULT 'Office',
+  address TEXT DEFAULT '');
+
+CREATE TABLE IF NOT EXISTS emp_locations(
+  emp_id TEXT, loc_id TEXT, PRIMARY KEY(emp_id, loc_id));
+
+CREATE TABLE IF NOT EXISTS cp_locations(
+  cp_id TEXT, loc_id TEXT, PRIMARY KEY(cp_id, loc_id));
+
+CREATE TABLE IF NOT EXISTS mp_locations(
+  mp_id TEXT, loc_id TEXT, PRIMARY KEY(mp_id, loc_id));
+
 CREATE TABLE IF NOT EXISTS perf_cache(
   fy TEXT PRIMARY KEY, label TEXT NOT NULL,
   record_count INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT, locked INTEGER DEFAULT 0);
@@ -232,6 +246,21 @@ def _seed(db):
       P("p33","2081-82","Kartik","e11","EMP-011","HODL-9","LM-WH-3-A","Goods SLA Delivery",98,94,2,2.1,"Days","Slight over"),
     ]
     db.executemany("INSERT OR IGNORE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",perf)
+    locs=[
+        ("loc1","HQ","Head Office - Sipradi","Office","Kathmandu"),
+        ("loc2","BORDER","Border Clearance Station","Border","Birgunj"),
+        ("loc3","WH-KTM","Kathmandu Warehouse","Warehouse","Kathmandu"),
+        ("loc4","REG-KTM","Registration Office","Office","Kathmandu"),
+        ("loc5","WH-BRG","Birgunj Warehouse","Warehouse","Birgunj"),
+    ]
+    db.executemany("INSERT OR IGNORE INTO locations VALUES(?,?,?,?,?)",locs)
+    emp_locs=[
+        ("e1","loc1"),("e2","loc1"),("e2","loc2"),("e3","loc2"),("e4","loc4"),
+        ("e5","loc4"),("e6","loc4"),("e7","loc2"),("e8","loc1"),("e9","loc1"),
+        ("e10","loc1"),("e11","loc3"),("e12","loc3"),("e13","loc3"),("e14","loc3"),
+        ("e15","loc2"),("e16","loc1"),
+    ]
+    db.executemany("INSERT OR IGNORE INTO emp_locations VALUES(?,?)",emp_locs)
     for fy in ["2080-81","2081-82"]: _upd_cache(db,fy)
 
 # ── EMPLOYEES ──────────────────────────────────────────────────────────────
@@ -683,9 +712,78 @@ def analytics_summary():
 def calendar_api():
     return jsonify({'bs_months':BS_MONTHS,'quarter_map':BS_Q})
 
+
+# -- LOCATIONS -----------------------------------------------------------------
+@app.route('/api/locations', methods=['GET','POST'])
+def locations_api():
+    db = get_db()
+    if request.method == 'GET':
+        res = []
+        for loc in db.execute("SELECT * FROM locations ORDER BY code"):
+            l = dict(loc)
+            l['emp_ids'] = [r['emp_id'] for r in db.execute(
+                "SELECT emp_id FROM emp_locations WHERE loc_id=?", (l['id'],))]
+            res.append(l)
+        return jsonify(res)
+    d = request.json; lid = d.get('id') or uid()
+    db.execute("INSERT OR REPLACE INTO locations VALUES(?,?,?,?,?)",
+               (lid, d['code'], d['name'], d.get('type','Office'), d.get('address','')))
+    db.execute("DELETE FROM emp_locations WHERE loc_id=?", (lid,))
+    for eid in d.get('emp_ids', []):
+        db.execute("INSERT OR IGNORE INTO emp_locations VALUES(?,?)", (eid, lid))
+    db.commit(); return jsonify({'id': lid})
+
+@app.route('/api/locations/<lid>', methods=['PUT','DELETE'])
+def location_api(lid):
+    db = get_db()
+    if request.method == 'DELETE':
+        for t,c in [('locations','id'),('emp_locations','loc_id'),
+                    ('cp_locations','loc_id'),('mp_locations','loc_id')]:
+            db.execute(f"DELETE FROM {t} WHERE {c}=?", (lid,))
+        db.commit(); return jsonify({'ok': True})
+    d = request.json
+    db.execute("UPDATE locations SET code=?,name=?,type=?,address=? WHERE id=?",
+               (d['code'], d['name'], d.get('type','Office'), d.get('address',''), lid))
+    db.execute("DELETE FROM emp_locations WHERE loc_id=?", (lid,))
+    for eid in d.get('emp_ids', []):
+        db.execute("INSERT OR IGNORE INTO emp_locations VALUES(?,?)", (eid, lid))
+    db.commit(); return jsonify({'ok': True})
+
+@app.route('/api/analytics/by_location')
+def analytics_by_location():
+    db = get_db(); fy = request.args.get('fy','')
+    locs = db.execute("SELECT * FROM locations ORDER BY code").fetchall()
+    result = {}
+    for loc in locs:
+        emp_ids = [r['emp_id'] for r in db.execute(
+            "SELECT emp_id FROM emp_locations WHERE loc_id=?", (loc['id'],))]
+        if emp_ids:
+            emp_codes = [r['emp_code'] for r in db.execute(
+                "SELECT emp_code FROM employees WHERE id IN ({})".format(
+                    ','.join('?'*len(emp_ids))), emp_ids)]
+        else:
+            emp_codes = []
+        q2 = "SELECT * FROM perf WHERE 1=1"; args = []
+        if fy: q2 += " AND fy=?"; args.append(fy)
+        if emp_codes:
+            q2 += " AND emp_code IN ({})".format(','.join('?'*len(emp_codes)))
+            args += emp_codes
+        rows = db.execute(q2, args).fetchall()
+        tot  = sum(r['total'] or 1 for r in rows)
+        comp = sum(r['compliant'] or (1 if r['status']=='C' else 0) for r in rows)
+        nc   = tot - comp
+        result[loc['code']] = {
+            'id': loc['id'], 'name': loc['name'], 'type': loc['type'],
+            'address': loc['address'], 'emp_count': len(emp_ids), 'emp_ids': emp_ids,
+            'total': tot, 'compliant': comp, 'nc': nc,
+            'pct_c':  round(comp/tot*100, 2) if tot else 0,
+            'pct_nc': round(nc/tot*100,   2) if tot else 0,
+        }
+    return jsonify(result)
+
 @app.route('/')
 def index():
-    with open(os.path.join(os.path.dirname(__file__),'index.html'),'r') as f: return f.read()
+    with open(os.path.join(os.path.dirname(__file__),'index.html'),'r', encoding='utf-8') as f: return f.read()
 
 if __name__=='__main__':
     init_db()

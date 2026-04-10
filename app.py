@@ -154,6 +154,12 @@ CREATE TABLE IF NOT EXISTS mp_locations(
 CREATE TABLE IF NOT EXISTS perf_cache(
   fy TEXT PRIMARY KEY, label TEXT NOT NULL,
   record_count INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT, locked INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS dashboard_layouts(
+  id TEXT PRIMARY KEY, name TEXT NOT NULL,
+  user TEXT DEFAULT 'default',
+  layout_json TEXT DEFAULT '[]',
+  created_at TEXT, updated_at TEXT);
+
 """
 
 def init_db():
@@ -202,7 +208,9 @@ def _seed(db):
       ("mp11","HODL-11","Employee motivation and process capability","Per Calendar","Quarterly",0,0,0),
       ("mp12","HODL-12","Strengthen monitoring and review mechanism","Fortnightly","Fortnightly",0,0,0),
     ]
-    db.executemany("INSERT OR IGNORE INTO mps VALUES(?,?,?,?,?,?,?,?)",mps)
+    # mps seed: pad with empty parent_cp_id and default emp_level=1
+    mps_padded = [m+('',1) if len(m)==8 else m for m in mps]
+    db.executemany("INSERT OR IGNORE INTO mps VALUES(?,?,?,?,?,?,?,?,?,?)",mps_padded)
     mpo=[("mp1","e2"),("mp1","e3"),("mp2","e2"),("mp2","e3"),("mp3","e2"),("mp3","e4"),
          ("mp4","e4"),("mp4","e2"),("mp5","e2"),("mp5","e3"),("mp5","e10"),("mp6","e2"),
          ("mp6","e3"),("mp6","e10"),("mp7","e4"),("mp8","e4"),("mp8","e8"),("mp9","e2"),
@@ -248,7 +256,8 @@ def _seed(db):
            ("r3","ROLE-REG","Registration Manager","Vehicle registration, ownership transfer and WOW updates","#6d28d9"),
            ("r4","ROLE-WH","Warehouse & Goods Manager","Goods clearance, GRN, dispatch and discrepancy closure","#047857"),
            ("r5","ROLE-STCK","Stock Verification Officer","Physical vehicle stock verification and reporting","#b45309")]
-    db.executemany("INSERT OR IGNORE INTO roles VALUES(?,?,?,?,?)",roles)
+    roles_padded = [r+(1,'') if len(r)==5 else r for r in roles]
+    db.executemany("INSERT OR IGNORE INTO roles VALUES(?,?,?,?,?,?,?)",roles_padded)
     role_mps=[("r1","mp1"),("r1","mp2"),("r2","mp5"),("r2","mp6"),("r3","mp3"),("r3","mp4"),
               ("r3","mp7"),("r4","mp9"),("r4","mp10"),("r5","mp8")]
     db.executemany("INSERT OR IGNORE INTO role_mps VALUES(?,?)",role_mps)
@@ -1063,6 +1072,161 @@ def org_cascade_assign():
                (link_id,d.get('parent_emp_id',''),parent_cp_id,child_emp_id,child_mp_id))
     db.execute("INSERT OR IGNORE INTO mp_owners VALUES(?,?)",(child_mp_id,child_emp_id))
     db.commit(); return jsonify({'ok':True,'mp_id':child_mp_id,'link_id':link_id})
+
+
+# ── DASHBOARD LAYOUTS ──────────────────────────────────────────────────────────
+@app.route('/api/dashboard_layouts', methods=['GET','POST'])
+def dashboard_layouts_api():
+    db = get_db()
+    if request.method == 'GET':
+        user = request.args.get('user','default')
+        rows = db.execute("SELECT * FROM dashboard_layouts WHERE user=? ORDER BY name",(user,)).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            try: d['layout'] = json.loads(d['layout_json'])
+            except: d['layout'] = []
+            result.append(d)
+        return jsonify(result)
+    d = request.json
+    lid = d.get('id') or uid()
+    now = datetime.datetime.now().isoformat()
+    layout_json = json.dumps(d.get('layout',[]))
+    user = d.get('user','default')
+    existing = db.execute("SELECT id FROM dashboard_layouts WHERE id=?",(lid,)).fetchone()
+    if existing:
+        db.execute("UPDATE dashboard_layouts SET name=?,layout_json=?,updated_at=? WHERE id=?",
+                   (d['name'], layout_json, now, lid))
+    else:
+        db.execute("INSERT INTO dashboard_layouts VALUES(?,?,?,?,?,?)",
+                   (lid, d['name'], user, layout_json, now, now))
+    db.commit()
+    return jsonify({'id': lid})
+
+@app.route('/api/dashboard_layouts/<lid>', methods=['PUT','DELETE'])
+def dashboard_layout_api(lid):
+    db = get_db()
+    if request.method == 'DELETE':
+        db.execute("DELETE FROM dashboard_layouts WHERE id=?",(lid,))
+        db.commit(); return jsonify({'ok':True})
+    d = request.json
+    now = datetime.datetime.now().isoformat()
+    db.execute("UPDATE dashboard_layouts SET name=?,layout_json=?,updated_at=? WHERE id=?",
+               (d['name'], json.dumps(d.get('layout',[])), now, lid))
+    db.commit(); return jsonify({'ok':True})
+
+@app.route('/api/analytics/widget', methods=['GET'])
+def analytics_widget():
+    """Flexible analytics endpoint for dashboard widgets"""
+    db = get_db()
+    metric  = request.args.get('metric','overall')  # overall|by_mp|by_cp|by_emp|by_location|by_month|by_sector
+    fy      = request.args.get('fy','')
+    loc     = request.args.get('loc','')
+    emp_id  = request.args.get('emp_id','')
+    sector  = request.args.get('sector','')
+    mp_ref  = request.args.get('mp_ref','')
+
+    q2 = "SELECT p.*, e.dept FROM perf p LEFT JOIN employees e ON p.emp_id=e.id WHERE 1=1"
+    args = []
+    if fy:     q2 += " AND p.fy=?";       args.append(fy)
+    if emp_id: q2 += " AND p.emp_id=?";   args.append(emp_id)
+    if mp_ref: q2 += " AND p.mp_ref=?";   args.append(mp_ref)
+    if loc:
+        emp_codes = [r['emp_code'] for r in db.execute(
+            "SELECT e.emp_code FROM employees e JOIN emp_locations el ON e.id=el.emp_id "
+            "JOIN locations l ON el.loc_id=l.id WHERE l.code=?", (loc,))]
+        if emp_codes:
+            q2 += " AND p.emp_code IN ({})".format(','.join('?'*len(emp_codes)))
+            args += emp_codes
+        else:
+            return jsonify({'labels':[],'values':[],'compliant':[],'nc':[],'total':[],'pct':[]})
+    if sector:
+        emp_codes2 = [r['emp_code'] for r in db.execute(
+            "SELECT emp_code FROM employees WHERE dept=?", (sector,))]
+        if emp_codes2:
+            q2 += " AND p.emp_code IN ({})".format(','.join('?'*len(emp_codes2)))
+            args += emp_codes2
+
+    rows = db.execute(q2, args).fetchall()
+
+    def agg(rows):
+        tot  = sum(r['total'] or 1 for r in rows)
+        comp = sum(r['compliant'] or (1 if r['status']=='C' else 0) for r in rows)
+        nc   = tot - comp
+        return {'tot':tot,'comp':comp,'nc':nc,'pct':round(comp/tot*100,2) if tot else 0}
+
+    if metric == 'overall':
+        a = agg(rows)
+        return jsonify({'labels':['Compliant','Non-Compliant'],
+                        'values':[a['comp'],a['nc']],
+                        'summary': a})
+
+    elif metric == 'by_month':
+        buckets = {}
+        for r in rows:
+            m = r['bs_month'] or 'Unknown'
+            buckets.setdefault(m,[]).append(r)
+        BS_ORDER = ['Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra','Baisakh','Jestha','Ashadh']
+        keys = sorted(buckets.keys(), key=lambda x: BS_ORDER.index(x) if x in BS_ORDER else 99)
+        result = {'labels':[],'values':[],'compliant':[],'nc':[],'total':[]}
+        for k in keys:
+            a = agg(buckets[k])
+            result['labels'].append(k); result['values'].append(a['pct'])
+            result['compliant'].append(a['comp']); result['nc'].append(a['nc']); result['total'].append(a['tot'])
+        return jsonify(result)
+
+    elif metric == 'by_mp':
+        buckets = {}
+        for r in rows:
+            m = r['mp_ref'] or 'Unknown'
+            buckets.setdefault(m,[]).append(r)
+        result = {'labels':[],'values':[],'compliant':[],'nc':[],'total':[]}
+        for k in sorted(buckets.keys()):
+            a = agg(buckets[k])
+            result['labels'].append(k); result['values'].append(a['pct'])
+            result['compliant'].append(a['comp']); result['nc'].append(a['nc']); result['total'].append(a['tot'])
+        return jsonify(result)
+
+    elif metric == 'by_emp':
+        buckets = {}
+        for r in rows:
+            ec = r['emp_code'] or r['emp_id'] or 'Unknown'
+            buckets.setdefault(ec,[]).append(r)
+        emps = {e['emp_code']:e['name'] for e in db.execute("SELECT emp_code,name FROM employees")}
+        result = {'labels':[],'values':[],'compliant':[],'nc':[],'total':[]}
+        for k in sorted(buckets.keys()):
+            a = agg(buckets[k])
+            result['labels'].append(emps.get(k,k)); result['values'].append(a['pct'])
+            result['compliant'].append(a['comp']); result['nc'].append(a['nc']); result['total'].append(a['tot'])
+        return jsonify(result)
+
+    elif metric == 'by_location':
+        locs = db.execute("SELECT * FROM locations").fetchall()
+        result = {'labels':[],'values':[],'compliant':[],'nc':[],'total':[]}
+        for loc_row in locs:
+            eids = [r['emp_id'] for r in db.execute("SELECT emp_id FROM emp_locations WHERE loc_id=?",(loc_row['id'],))]
+            ecodes = [r['emp_code'] for r in db.execute(
+                "SELECT emp_code FROM employees WHERE id IN ({})".format(','.join('?'*len(eids))),eids)] if eids else []
+            loc_rows = [r for r in rows if r['emp_code'] in ecodes] if ecodes else []
+            if not loc_rows: continue
+            a = agg(loc_rows)
+            result['labels'].append(loc_row['name']); result['values'].append(a['pct'])
+            result['compliant'].append(a['comp']); result['nc'].append(a['nc']); result['total'].append(a['tot'])
+        return jsonify(result)
+
+    elif metric == 'by_sector':
+        buckets = {}
+        for r in rows:
+            dept = r['dept'] or 'Unknown'
+            buckets.setdefault(dept,[]).append(r)
+        result = {'labels':[],'values':[],'compliant':[],'nc':[],'total':[]}
+        for k in sorted(buckets.keys()):
+            a = agg(buckets[k])
+            result['labels'].append(k); result['values'].append(a['pct'])
+            result['compliant'].append(a['comp']); result['nc'].append(a['nc']); result['total'].append(a['tot'])
+        return jsonify(result)
+
+    return jsonify({'labels':[],'values':[],'compliant':[],'nc':[],'total':[]})
 
 @app.route('/')
 def index():

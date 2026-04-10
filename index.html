@@ -424,6 +424,7 @@ tbody tr:hover .row-actions{opacity:1}
       <button class="sub-tab" onclick="switchMaster('roles')">Role Templates</button>
       <button class="sub-tab" onclick="switchMaster('links')">Role Assignments</button>
 			<button class="sub-tab" onclick="switchMaster('locations')">&#128205; Locations</button>
+      <button class="sub-tab" onclick="switchMaster('dashboard_builder')">&#128196; Dashboard Builder</button>
     </div>
     <div id="master-content"><div class="spinner"></div></div>
   </div>
@@ -444,17 +445,14 @@ tbody tr:hover .row-actions{opacity:1}
     </div>
     <div id="report-content"><div class="spinner"></div></div>
   </div>
-</div>
-
-<div id="tab-org" class="tab-panel">
-  <div class="sub-tabs" id="org-tabs">
-    <button class="sub-tab active" onclick="switchOrg('tree')">Live Org Tree</button>
-    <button class="sub-tab" onclick="switchOrg('builder')">Cascade Builder</button>
-    <button class="sub-tab" onclick="switchOrg('assign')">Assign MP/CP</button>
+  <div id="tab-org" class="tab-panel">
+    <div class="sub-tabs" id="org-tabs">
+      <button class="sub-tab active" onclick="switchOrg('tree')">Live Org Tree</button>
+      <button class="sub-tab" onclick="switchOrg('builder')">Cascade Builder</button>
+      <button class="sub-tab" onclick="switchOrg('assign')">Assign MP/CP</button>
+    </div>
+    <div id="org-content"><div class="spinner"></div></div>
   </div>
-  <div id="org-content"><div class="spinner"></div></div>
-</div>
-
 </div>
 
 <div class="modal-overlay hidden" id="modal-overlay" onclick="closeModal(event)">
@@ -472,7 +470,7 @@ tbody tr:hover .row-actions{opacity:1}
 <script>
 // ── STATE ────────────────────────────────────────────────────────────────────
 const S = {
-  employees:[], mps:[], cps:[], roles:[], perf:[], cache:[], cascade:[], bsToday:{},
+  employees:[], mps:[], cps:[], roles:[], perf:[], cache:[], cascade:[], bsToday:{}, dashLayouts:[],
   locations:[], currentTab:'dashboard', teamView:'cards', masterSub:'mps',
   dataSub:'perf', reportSub:'overview', currentFY:'2081-82'
 }
@@ -490,14 +488,16 @@ const api = {
 }
 
 async function loadAll() {
-  const [e,m,c,r,p,ca,locs,casc] = await Promise.all([
+  const [e,m,c,r,p,ca,locs,casc,bst,layouts] = await Promise.all([
     api.get('/api/employees'), api.get('/api/mps'), api.get('/api/cps'),
     api.get('/api/roles'), api.get('/api/perf'), api.get('/api/cache'),
     api.get('/api/locations'),
     api.get('/api/cascade'),
-    api.get('/api/bs_today')
+    api.get('/api/bs_today'),
+    api.get('/api/dashboard_layouts?user=default')
   ])
-  S.employees=e; S.mps=m; S.cps=c; S.roles=r; S.perf=p; S.cache=ca; S.locations=locs; S.cascade=casc; S.bsToday=bst
+  S.employees=e; S.mps=m; S.cps=c; S.roles=r; S.perf=p; S.cache=ca;
+  S.locations=locs; S.cascade=casc; S.bsToday=bst; S.dashLayouts=layouts||[]
   // Set currentFY from most recent active cache
   const latest = ca.sort((a,b)=>b.fy.localeCompare(a.fy))[0]
   if (latest && !S.cache.find(x=>x.fy===S.currentFY)) S.currentFY = latest.fy
@@ -647,106 +647,6 @@ function buildItemPicker(pid, items, sel, lf) {
 function getItemPicked(pid) { return [...document.querySelectorAll(`#${pid} input:checked`)].map(i=>i.value) }
 function setItemPicked(pid, ids) { document.querySelectorAll(`#${pid} input`).forEach(cb=>{cb.checked=ids.includes(cb.value)}) }
 
-// ── DASHBOARD ────────────────────────────────────────────────────────────────
-function renderDashboard() {
-  const hod = S.employees.find(e=>e.level===1)
-  const fyPerf = perfByFY(S.currentFY)
-  const {tot,comp,nc,pct_c,pct_nc} = complianceSummary(fyPerf)
-  const allPcts = S.mps.map(m=>m.pct).filter(p=>p!=null)
-  const avgKPI = allPcts.length ? (allPcts.reduce((s,p)=>s+p,0)/allPcts.length).toFixed(1) : '—'
-
-  let html = ''
-  if (hod) html += `
-  <div class="hod-banner">
-    <div class="avatar avatar-lg" style="background:${dc(hod.dept)}">${av(hod.name)}</div>
-    <div>
-      <p style="font-size:10px;color:#93c5fd;font-weight:700;text-transform:uppercase;letter-spacing:1px">Head of Department</p>
-      <p style="font-size:22px;font-weight:900;color:#fff;font-family:'Syne',sans-serif">${esc(hod.name)}</p>
-      <p style="font-size:12px;color:#93c5fd">${esc(hod.role)}</p>
-    </div>
-    <div class="hod-stats">
-      ${[['MPs',S.mps.length],['CPs',S.cps.length],['Team',S.employees.length-1],['Roles',S.roles.length]].map(([l,v])=>`<div class="hod-stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('')}
-      <div class="hod-stat"><div class="v" style="color:${pc(Number(avgKPI))}">${avgKPI}%</div><div class="l">KPI Rate</div></div>
-      <div class="hod-stat"><div class="v" style="color:${pc(pct_c)}">${pct_c}%</div><div class="l">FY ${S.currentFY}</div></div>
-    </div>
-  </div>`
-
-  // Overall compliance card
-  html += `<div class="card mb-20">
-    <div class="card-head"><p>FY ${esc(S.currentFY)} — Overall Performance</p></div>
-    <div class="card-body">
-      <div class="grid-4 mb-16">
-        ${compCard({title:'FY '+S.currentFY+' Overall',tot,comp,nc,pct_c,pct_nc})}
-        <div class="stat-box"><div class="val" style="color:var(--blue)">${tot.toLocaleString()}</div><div class="lbl">Total</div></div>
-        <div class="stat-box"><div class="val" style="color:var(--green)">${comp.toLocaleString()}</div><div class="lbl">✓ Compliant</div><div class="sub">${pct_c}%</div></div>
-        <div class="stat-box"><div class="val" style="color:var(--red)">${nc.toLocaleString()}</div><div class="lbl">✗ Non-Compliant</div><div class="sub">${pct_nc}%</div></div>
-      </div>
-    </div>
-  </div>`
-
-  html += `<p class="text-xs text-muted italic mb-12">Click any MP card to expand Checking Points. Click name chips to view employee profile.</p>`
-  html += '<div class="grid-2" id="mp-cards-grid">'
-  S.mps.forEach(mp => {
-    const mpPerf = fyPerf.filter(p=>p.mp_ref===mp.ref)
-    const {tot:mt,comp:mc,nc:mn,pct_c:mpc,pct_nc:mpnc} = complianceSummary(mpPerf)
-    const linkedCPs = S.cps.filter(c=>c.mp_id===mp.id)
-    html += `
-    <div class="mp-card" id="mpc-${mp.id}" onclick="toggleMP('${mp.id}')">
-      <div class="mp-card-head">
-        <div style="min-width:70px;text-align:center">
-          <span class="mp-ref">${esc(mp.ref)}</span>
-          <div class="mp-pct" style="color:${pc(mp.pct)}">${mp.pct!=null?mp.pct+'%':'—'}</div>
-          ${mt>0?`<div class="text-xxs" style="color:${pc(mpc)}">data:${mpc}%</div>`:''}
-        </div>
-        <div class="mp-body">
-          <div class="mp-title">${esc(mp.title)}</div>
-          <div class="mp-tags mt-8">
-            <span class="tag">${esc(mp.freq)}</span>
-            <span class="tag tag-blue">⌖ ${esc(mp.target)}</span>
-            <span class="tag tag-violet">${linkedCPs.length} CPs</span>
-          </div>
-          ${mt>0?`<div class="mp-tags mt-4">
-            <span class="tag tag-green">✓${mc.toLocaleString()} (${mpc}%)</span>
-            <span class="tag tag-red">✗${mn.toLocaleString()} (${mpnc}%)</span>
-            <span class="tag">/${mt.toLocaleString()} total</span>
-          </div>`:''}
-          <div class="mp-owners mt-8">${ownerChips(mp.owner_ids||[])}</div>
-        </div>
-        <span style="color:#94a3b8;font-size:12px" id="arr-${mp.id}">▼</span>
-      </div>
-      <div class="mp-expand" id="mpx-${mp.id}">
-        <p style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:#1e40af;margin-bottom:10px">Checking Points — ${linkedCPs.length}</p>
-        <div class="cp-grid">${linkedCPs.length ? linkedCPs.map(cp=>{
-          const cpP = fyPerf.filter(p=>p.cp_ref===cp.ref)
-          const {tot:ct,comp:cc,nc:cn,pct_c:cpc,pct_nc:cpnc} = complianceSummary(cpP)
-          return `<div class="cp-card">
-            <div class="flex gap-8 items-center mb-8">
-              <span class="cp-ref">${esc(cp.ref)}</span>
-              <span class="tag">${esc(cp.freq)}</span>
-              ${cp.source?`<span class="tag" style="background:#d1fae5;color:#065f46">${esc(cp.source)}</span>`:''}
-            </div>
-            <p class="text-sm font-bold" style="line-height:1.4">${esc(cp.title)}</p>
-            <p class="text-xxs text-muted mt-8">Target: <strong>${esc(cp.target)}</strong></p>
-            ${ct>0?`<div class="kpi-bar mt-8"><div class="kpi-bar-fill" style="width:${Math.min(cpc,100)}%;background:${pc(cpc)}"></div></div>
-            <div class="flex gap-8 mt-4 text-xxs">
-              <span style="color:var(--green);font-weight:700">✓${cc} (${cpc}%)</span>
-              <span style="color:var(--red)">✗${cn} (${cpnc}%)</span>
-              <span class="text-muted">/${ct}</span>
-            </div>`:''}
-            <div class="mp-owners mt-8">${ownerChips(cp.owner_ids||[])}</div>
-          </div>`}).join('') : '<p class="text-sm text-muted italic">No CPs linked yet.</p>'}</div>
-      </div>
-    </div>`
-  })
-  html += '</div>'
-  q('#tab-dashboard').innerHTML = html
-
-  const chartMPs = S.mps.filter(m=>m.pct!=null)
-  if (chartMPs.length) {
-    const c = document.createElement('canvas'); c.id='kpi-chart-mini'; c.height=100
-    // Inject mini chart if we have space - it's optional here
-  }
-}
 function toggleMP(id) {
   const card=q(`#mpc-${id}`),exp=q(`#mpx-${id}`),arr=q(`#arr-${id}`)
   const open=exp.classList.toggle('open')
@@ -933,6 +833,7 @@ function renderMaster() {
   else if(S.masterSub==='cps') renderCPs()
   else if(S.masterSub==='roles') renderRoles()
   else if(S.masterSub==='locations') renderLocations()
+  else if(S.masterSub==='dashboard_builder') renderDashboardBuilder()
   else renderLinks()
 }
 
@@ -2879,6 +2780,487 @@ async function saveAssignments(empId){
   toast('Assignments saved','ok'); await loadAll()
   selectAssignEmp(empId)
 }
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DYNAMIC DASHBOARD ENGINE
+// ══════════════════════════════════════════════════════════════════════════════
+const WIDGET_TYPES = [
+  {id:'kpi_overall',  label:'Overall KPI Gauge',    icon:'🎯', desc:'Big compliance % with donut'},
+  {id:'bar_month',    label:'Monthly Trend',         icon:'📅', desc:'Bar chart by BS month'},
+  {id:'bar_mp',       label:'MP Compliance Bars',    icon:'📊', desc:'Each Managing Point compliance'},
+  {id:'bar_emp',      label:'Employee Comparison',   icon:'👤', desc:'Bar chart per employee'},
+  {id:'bar_location', label:'Location Compliance',   icon:'📍', desc:'By workstation/location'},
+  {id:'bar_sector',   label:'Sector Compliance',     icon:'🏢', desc:'By department/sector'},
+  {id:'pie_status',   label:'C vs NC Pie',           icon:'🥧', desc:'Compliant vs Non-Compliant pie'},
+  {id:'line_trend',   label:'Trend Line',            icon:'📈', desc:'Compliance trend over months'},
+  {id:'stat_box',     label:'Stat Summary Box',      icon:'🔢', desc:'Key numbers at a glance'},
+  {id:'mp_cards',     label:'MP Card Grid',          icon:'🗂️', desc:'Managing points as cards'},
+]
+
+const CHART_COLORS = ['#1d4ed8','#16a34a','#d97706','#dc2626','#6d28d9','#0891b2','#047857','#b45309','#be185d','#0e7490']
+
+let activeDashLayout = null   // currently loaded layout
+let dashWidgetCharts = {}     // chart.js instances keyed by widget id
+
+// ── Dashboard renderer ───────────────────────────────────────────────────────
+function renderDashboard() {
+  // If there's a saved layout, render it; otherwise render default
+  const saved = S.dashLayouts && S.dashLayouts.length ? S.dashLayouts[0] : null
+  if (saved && saved.layout && saved.layout.length) {
+    activeDashLayout = saved
+    renderDashboardFromLayout(saved.layout)
+  } else {
+    renderDefaultDashboard()
+  }
+}
+
+function renderDefaultDashboard() {
+  const hod = S.employees.find(e=>e.level===1)
+  const fyPerf = perfByFY(S.currentFY)
+  const {tot,comp,nc,pct_c,pct_nc} = complianceSummary(fyPerf)
+  const allPcts = S.mps.map(m=>m.pct).filter(p=>p!=null)
+  const avgKPI = allPcts.length ? (allPcts.reduce((s,p)=>s+p,0)/allPcts.length).toFixed(1) : '—'
+
+  let html = ''
+  if (hod) html += `
+  <div class="hod-banner">
+    <div class="avatar avatar-lg" style="background:${dc(hod.dept)}">${av(hod.name)}</div>
+    <div>
+      <p style="font-size:10px;color:#93c5fd;font-weight:700;text-transform:uppercase;letter-spacing:1px">Head of Department</p>
+      <p style="font-size:22px;font-weight:900;color:#fff;font-family:'Syne',sans-serif">${esc(hod.name)}</p>
+      <p style="font-size:12px;color:#93c5fd">${esc(hod.role)}</p>
+    </div>
+    <div class="hod-stats">
+      ${[['MPs',S.mps.length],['CPs',S.cps.length],['Team',S.employees.length-1],['Roles',S.roles.length]].map(([l,v])=>`<div class="hod-stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('')}
+      <div class="hod-stat"><div class="v" style="color:${pc(Number(avgKPI))}">${avgKPI}%</div><div class="l">KPI Rate</div></div>
+      <div class="hod-stat"><div class="v" style="color:${pc(pct_c)}">${pct_c}%</div><div class="l">FY ${S.currentFY}</div></div>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:8px">
+    <button class="btn btn-ghost btn-sm" onclick="switchTab('master');switchMaster('dashboard_builder')">⚙ Customize Dashboard</button>
+  </div>`
+
+  html += `<div class="card mb-20">
+    <div class="card-head"><p>FY ${esc(S.currentFY)} — Overall Performance</p></div>
+    <div class="card-body">
+      <div class="grid-4 mb-16">
+        ${compCard({title:'FY '+S.currentFY+' Overall',tot,comp,nc,pct_c,pct_nc})}
+        <div class="stat-box"><div class="val" style="color:var(--blue)">${tot.toLocaleString()}</div><div class="lbl">Total</div></div>
+        <div class="stat-box"><div class="val" style="color:var(--green)">${comp.toLocaleString()}</div><div class="lbl">✓ Compliant</div><div class="sub">${pct_c}%</div></div>
+        <div class="stat-box"><div class="val" style="color:var(--red)">${nc.toLocaleString()}</div><div class="lbl">✗ Non-Compliant</div><div class="sub">${pct_nc}%</div></div>
+      </div>
+    </div>
+  </div>`
+
+  html += `<p class="text-xs text-muted italic mb-12">Click any MP card to expand Checking Points.</p>`
+  html += '<div class="grid-2" id="mp-cards-grid">'
+  S.mps.forEach(mp => {
+    const mpPerf = fyPerf.filter(p=>p.mp_ref===mp.ref)
+    const {tot:mt,comp:mc,nc:mn,pct_c:mpc,pct_nc:mpnc} = complianceSummary(mpPerf)
+    const linkedCPs = S.cps.filter(c=>c.mp_id===mp.id)
+    html += `<div class="mp-card" id="mpc-${mp.id}" onclick="toggleMP('${mp.id}')">
+      <div class="mp-card-head">
+        <div style="min-width:70px;text-align:center">
+          <span class="mp-ref">${esc(mp.ref)}</span>
+          <div class="mp-pct" style="color:${pc(mp.pct)}">${mp.pct!=null?mp.pct+'%':'—'}</div>
+          ${mt>0?`<div class="text-xxs" style="color:${pc(mpc)}">data:${mpc}%</div>`:''}
+        </div>
+        <div class="mp-body">
+          <div class="mp-title">${esc(mp.title)}</div>
+          <div class="mp-tags mt-8">
+            <span class="tag">${esc(mp.freq)}</span>
+            <span class="tag tag-blue">⌖ ${esc(mp.target)}</span>
+            <span class="tag tag-violet">${linkedCPs.length} CPs</span>
+          </div>
+          ${mt>0?`<div class="mp-tags mt-4">
+            <span class="tag tag-green">✓${mc.toLocaleString()} (${mpc}%)</span>
+            <span class="tag tag-red">✗${mn.toLocaleString()} (${mpnc}%)</span>
+            <span class="tag">/${mt.toLocaleString()} total</span>
+          </div>`:''}
+          <div class="mp-owners mt-8">${ownerChips(mp.owner_ids||[])}</div>
+        </div>
+        <span style="color:#94a3b8;font-size:12px" id="arr-${mp.id}">▼</span>
+      </div>
+      <div class="mp-expand" id="mpx-${mp.id}">
+        <p style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:#1e40af;margin-bottom:10px">Checking Points — ${linkedCPs.length}</p>
+        <div class="cp-grid">${linkedCPs.length ? linkedCPs.map(cp=>{
+          const cpP = fyPerf.filter(p=>p.cp_ref===cp.ref)
+          const {tot:ct,comp:cc,nc:cn,pct_c:cpc,pct_nc:cpnc} = complianceSummary(cpP)
+          return `<div class="cp-card">
+            <div class="flex gap-8 items-center mb-8">
+              <span class="cp-ref">${esc(cp.ref)}</span>
+              <span class="tag">${esc(cp.freq)}</span>
+              ${cp.source?`<span class="tag" style="background:#d1fae5;color:#065f46">${esc(cp.source)}</span>`:''}
+            </div>
+            <p class="text-sm font-bold" style="line-height:1.4">${esc(cp.title)}</p>
+            <p class="text-xxs text-muted mt-8">Target: <strong>${esc(cp.target)}</strong></p>
+            ${ct>0?`<div class="kpi-bar mt-8"><div class="kpi-bar-fill" style="width:${Math.min(cpc,100)}%;background:${pc(cpc)}"></div></div>
+            <div class="flex gap-8 mt-4 text-xxs">
+              <span style="color:var(--green);font-weight:700">✓${cc} (${cpc}%)</span>
+              <span style="color:var(--red)">✗${cn} (${cpnc}%)</span>
+              <span class="text-muted">/${ct}</span>
+            </div>`:''}
+            <div class="mp-owners mt-8">${ownerChips(cp.owner_ids||[])}</div>
+          </div>`}).join('') : '<p class="text-sm text-muted italic">No CPs linked yet.</p>'}</div>
+      </div>
+    </div>`
+  })
+  html += '</div>'
+  q('#tab-dashboard').innerHTML = html
+}
+
+function toggleMP(id) {
+  const card=q(`#mpc-${id}`),exp=q(`#mpx-${id}`),arr=q(`#arr-${id}`)
+  const open=exp.classList.toggle('open')
+  card.classList.toggle('expanded',open); arr.textContent=open?'▲':'▼'
+}
+
+// ── Render layout from saved config ─────────────────────────────────────────
+async function renderDashboardFromLayout(widgets) {
+  // Destroy old charts
+  Object.values(dashWidgetCharts).forEach(c=>{try{c.destroy()}catch(e){}})
+  dashWidgetCharts = {}
+
+  const hod = S.employees.find(e=>e.level===1)
+  const fyPerf = perfByFY(S.currentFY)
+  const {tot,comp,nc,pct_c} = complianceSummary(fyPerf)
+
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+    <div>
+      <h2 style="font-family:'Syne',sans-serif;font-size:18px">${activeDashLayout?esc(activeDashLayout.name):'Dashboard'}</h2>
+      <p class="text-xs text-muted">FY ${S.currentFY} · ${widgets.length} widgets</p>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost btn-sm" onclick="switchTab('master');switchMaster('dashboard_builder')">⚙ Edit Layout</button>
+      <button class="btn btn-ghost btn-sm" onclick="activeDashLayout=null;renderDefaultDashboard()">Default View</button>
+    </div>
+  </div>`
+
+  // Build grid based on widget sizes
+  html += '<div id="dash-widget-grid" style="display:grid;grid-template-columns:repeat(12,1fr);gap:14px">'
+  widgets.forEach((w,i) => {
+    const span = w.size==='full'?12:w.size==='half'?6:w.size==='third'?4:6
+    html += `<div style="grid-column:span ${span}" id="dw-wrap-${i}">
+      <div class="card" style="height:100%">
+        <div class="card-head" style="display:flex;justify-content:space-between">
+          <p>${esc(w.title||WIDGET_TYPES.find(t=>t.id===w.type)?.label||w.type)}</p>
+          <span style="font-size:18px">${WIDGET_TYPES.find(t=>t.id===w.type)?.icon||'📊'}</span>
+        </div>
+        <div class="card-body" id="dw-body-${i}"><div class="spinner"></div></div>
+      </div>
+    </div>`
+  })
+  html += '</div>'
+  q('#tab-dashboard').innerHTML = html
+
+  // Load each widget asynchronously
+  for (let i=0; i<widgets.length; i++) {
+    await loadWidget(i, widgets[i])
+  }
+}
+
+async function loadWidget(idx, cfg) {
+  const el = q(`#dw-body-${idx}`)
+  if (!el) return
+  const fy = cfg.fy || S.currentFY
+  const params = new URLSearchParams({metric: cfg.metric||'overall', fy})
+  if (cfg.loc)    params.set('loc', cfg.loc)
+  if (cfg.emp_id) params.set('emp_id', cfg.emp_id)
+  if (cfg.sector) params.set('sector', cfg.sector)
+  if (cfg.mp_ref) params.set('mp_ref', cfg.mp_ref)
+
+  let data
+  try { data = await api.get('/api/analytics/widget?'+params.toString()) }
+  catch(e) { el.innerHTML='<p class="text-sm text-muted italic">Error loading widget.</p>'; return }
+
+  const wtype = cfg.type
+  const canvasId = `dwc-${idx}`
+
+  if (wtype === 'stat_box') {
+    const s = data.summary||{}
+    el.innerHTML = `<div class="grid-3">
+      <div class="stat-box"><div class="val" style="color:var(--blue)">${(s.tot||0).toLocaleString()}</div><div class="lbl">Total</div></div>
+      <div class="stat-box"><div class="val" style="color:var(--green)">${(s.comp||0).toLocaleString()}</div><div class="lbl">Compliant</div><div class="sub">${s.pct||0}%</div></div>
+      <div class="stat-box"><div class="val" style="color:var(--red)">${(s.nc||0).toLocaleString()}</div><div class="lbl">Non-Compliant</div></div>
+    </div>`
+    return
+  }
+
+  if (wtype === 'kpi_overall') {
+    const s = data.summary||{}
+    const pctVal = s.pct||0
+    const col = pctVal>=95?'#16a34a':pctVal>=80?'#d97706':'#dc2626'
+    el.innerHTML = `<div style="text-align:center;padding:16px">
+      <canvas id="${canvasId}" height="120" style="max-width:180px;margin:0 auto"></canvas>
+      <div style="font-size:32px;font-weight:900;font-family:'Syne',sans-serif;color:${col};margin-top:-50px">${pctVal}%</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:48px">${(s.comp||0).toLocaleString()} / ${(s.tot||0).toLocaleString()} compliant</div>
+    </div>`
+    const cv = q(`#${canvasId}`)
+    if (cv) dashWidgetCharts[canvasId] = new Chart(cv, {
+      type:'doughnut',
+      data:{labels:['Compliant','Non-Compliant'],datasets:[{data:[s.comp||0,s.nc||0],backgroundColor:[col,'#f1f5f9'],borderWidth:0,borderRadius:4}]},
+      options:{cutout:'78%',plugins:{legend:{display:false}},animation:{animateRotate:true}}
+    })
+    return
+  }
+
+  if (wtype === 'mp_cards') {
+    const fyPerf = perfByFY(fy)
+    let html = '<div class="grid-auto">'
+    S.mps.forEach(mp => {
+      const mpPerf = fyPerf.filter(p=>p.mp_ref===mp.ref)
+      const {pct_c:mpc} = complianceSummary(mpPerf)
+      const col = pc(mp.pct!=null?mp.pct:mpc)
+      html += `<div class="compliance-card">
+        <div class="cc-title"><span class="cc-ref">${esc(mp.ref)}</span><span class="cc-pct" style="color:${col}">${mp.pct!=null?mp.pct:mpc}%</span></div>
+        <div class="cc-bar"><span class="cc-bar-c" style="width:${Math.min(mp.pct||mpc,100)}%;background:${col}"></span></div>
+        <p class="text-xxs text-muted mt-4">${esc(mp.title.slice(0,50))}</p>
+      </div>`
+    })
+    html += '</div>'
+    el.innerHTML = html
+    return
+  }
+
+  // Chart-based widgets
+  if (!data.labels||!data.labels.length) {
+    el.innerHTML='<p class="text-sm text-muted italic" style="padding:12px">No data for selected filters.</p>'
+    return
+  }
+
+  el.innerHTML = `<canvas id="${canvasId}" height="${cfg.size==='full'?60:90}"></canvas>`
+  const cv = q(`#${canvasId}`)
+  if (!cv) return
+
+  const isLine = wtype==='line_trend'
+  const isPie  = wtype==='pie_status'
+  const chartType = isPie?'doughnut':isLine?'line':'bar'
+  const bgColors = isPie ? ['#16a34a','#dc2626'] : data.labels.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length])
+
+  dashWidgetCharts[canvasId] = new Chart(cv, {
+    type: chartType,
+    data: {
+      labels: data.labels,
+      datasets: [{
+        label: cfg.title||'Compliance %',
+        data: data.values,
+        backgroundColor: isLine?'rgba(29,78,216,0.1)':bgColors,
+        borderColor: isLine?'#1d4ed8':bgColors,
+        borderWidth: isLine?2:0,
+        borderRadius: isPie?0:8,
+        fill: isLine,
+        tension: 0.4,
+        pointBackgroundColor: '#1d4ed8',
+      }]
+    },
+    options: {
+      responsive:true,
+      plugins:{legend:{display:isPie},tooltip:{callbacks:{label:function(ctx){return ctx.parsed+(isPie?'':' %')}}}},
+      scales: isPie?{}:{
+        y:{min:0,max:100,ticks:{callback:v=>v+'%'},grid:{color:'#f1f5f9'}},
+        x:{grid:{display:false},ticks:{maxRotation:45}}
+      }
+    }
+  })
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// DASHBOARD BUILDER (lives in Master Setup)
+// ══════════════════════════════════════════════════════════════════════════════
+let builderWidgets = []   // working copy of widgets being configured
+let builderLayoutId = null
+let builderLayoutName = 'My Dashboard'
+let dragSrcIdx = null
+
+function renderDashboardBuilder() {
+  const layouts = S.dashLayouts || []
+  const fyOpts = S.cache.map(c=>`<option value="${c.fy}">${c.fy}</option>`).join('')
+  const locOpts = S.locations.map(l=>`<option value="${esc(l.code)}">${esc(l.name)}</option>`).join('')
+  const empOpts = S.employees.map(e=>`<option value="${e.id}">${esc(e.name)} (${esc(e.emp_code||'')})</option>`).join('')
+  const sectorOpts = [...new Set(S.employees.map(e=>e.dept))].map(d=>`<option value="${d}">${d}</option>`).join('')
+  const mpOpts = S.mps.map(m=>`<option value="${esc(m.ref)}">${esc(m.ref)} — ${esc(m.title.slice(0,40))}</option>`).join('')
+
+  // Layout selector
+  let layoutSelect = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:20px">
+    <select class="form-select" id="bldr-layout-sel" style="width:200px" onchange="loadBuilderLayout(this.value)">
+      <option value="">— New Layout —</option>
+      ${layouts.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('')}
+    </select>
+    <input class="form-input" id="bldr-name" value="${esc(builderLayoutName)}" placeholder="Layout name" style="width:200px">
+    <button class="btn btn-primary btn-sm" onclick="saveBuilderLayout()">💾 Save Layout</button>
+    <button class="btn btn-success btn-sm" onclick="applyBuilderLayout()">▶ Apply to Dashboard</button>
+    ${builderLayoutId?`<button class="btn btn-danger btn-sm" onclick="deleteBuilderLayout()">🗑 Delete</button>`:''}
+  </div>`
+
+  // Widget palette
+  let palette = `<div class="card mb-16"><div class="card-head"><p>Widget Palette — click to add</p></div><div class="card-body">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">`
+  WIDGET_TYPES.forEach(wt => {
+    palette += `<button class="btn btn-ghost btn-sm" style="border:1.5px solid var(--border)" onclick="addBuilderWidget('${wt.id}')">
+      ${wt.icon} ${wt.label}
+    </button>`
+  })
+  palette += `</div></div></div>`
+
+  // Widget canvas
+  let canvas = `<div class="card"><div class="card-head" style="display:flex;justify-content:space-between">
+    <p>Layout Canvas — ${builderWidgets.length} widgets</p>
+    <button class="btn btn-ghost btn-sm" onclick="builderWidgets=[];renderDashboardBuilder()">Clear All</button>
+  </div><div class="card-body">`
+
+  if (!builderWidgets.length) {
+    canvas += `<div style="text-align:center;padding:40px;color:var(--muted)">
+      <p style="font-size:32px">📐</p>
+      <p class="font-bold mt-8">No widgets yet</p>
+      <p class="text-sm mt-4">Click any widget type above to add it to the layout</p>
+    </div>`
+  } else {
+    canvas += `<div id="bldr-canvas" style="display:flex;flex-direction:column;gap:10px">`
+    builderWidgets.forEach((w,i) => {
+      const wt = WIDGET_TYPES.find(t=>t.id===w.type)||{icon:'📊',label:w.type}
+      canvas += `<div class="bldr-widget-row" id="bwr-${i}" draggable="true"
+        ondragstart="bldrDragStart(${i})" ondragover="bldrDragOver(event,${i})" ondrop="bldrDrop(event,${i})"
+        style="border:1.5px solid var(--border);border-radius:10px;padding:12px;background:#fff;cursor:grab">
+        <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
+          <span style="font-size:22px;flex-shrink:0">${wt.icon}</span>
+          <div style="flex:1;min-width:200px">
+            <p class="font-bold text-sm">${wt.label}</p>
+            <input class="form-input" style="margin-top:6px;font-size:12px" placeholder="Widget title (optional)"
+              value="${esc(w.title||'')}" oninput="builderWidgets[${i}].title=this.value">
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <div>
+              <label class="form-label" style="margin-bottom:2px">Size</label>
+              <select class="form-select" style="font-size:11px;padding:4px 8px" onchange="builderWidgets[${i}].size=this.value">
+                <option value="half" ${w.size==='half'?'selected':''}>Half (6/12)</option>
+                <option value="full" ${w.size==='full'?'selected':''}>Full Width</option>
+                <option value="third" ${w.size==='third'?'selected':''}>Third (4/12)</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label" style="margin-bottom:2px">FY</label>
+              <select class="form-select" style="font-size:11px;padding:4px 8px" onchange="builderWidgets[${i}].fy=this.value">
+                <option value="">Current FY</option>${fyOpts}
+              </select>
+            </div>
+            <div>
+              <label class="form-label" style="margin-bottom:2px">Metric</label>
+              <select class="form-select" style="font-size:11px;padding:4px 8px" onchange="builderWidgets[${i}].metric=this.value">
+                <option value="overall" ${(w.metric||'overall')==='overall'?'selected':''}>Overall</option>
+                <option value="by_month" ${w.metric==='by_month'?'selected':''}>By Month</option>
+                <option value="by_mp" ${w.metric==='by_mp'?'selected':''}>By MP</option>
+                <option value="by_emp" ${w.metric==='by_emp'?'selected':''}>By Employee</option>
+                <option value="by_location" ${w.metric==='by_location'?'selected':''}>By Location</option>
+                <option value="by_sector" ${w.metric==='by_sector'?'selected':''}>By Sector</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label" style="margin-bottom:2px">Filter Location</label>
+              <select class="form-select" style="font-size:11px;padding:4px 8px" onchange="builderWidgets[${i}].loc=this.value">
+                <option value="">All</option>${locOpts}
+              </select>
+            </div>
+            <div>
+              <label class="form-label" style="margin-bottom:2px">Filter Sector</label>
+              <select class="form-select" style="font-size:11px;padding:4px 8px" onchange="builderWidgets[${i}].sector=this.value">
+                <option value="">All</option>${sectorOpts}
+              </select>
+            </div>
+            <div>
+              <label class="form-label" style="margin-bottom:2px">Filter MP</label>
+              <select class="form-select" style="font-size:11px;padding:4px 8px" onchange="builderWidgets[${i}].mp_ref=this.value">
+                <option value="">All MPs</option>${mpOpts}
+              </select>
+            </div>
+            <button class="btn btn-danger btn-sm" style="margin-top:18px" onclick="removeBuilderWidget(${i})">✕</button>
+            <span style="margin-top:18px;color:var(--muted);font-size:18px;cursor:grab" title="Drag to reorder">⠿</span>
+          </div>
+        </div>
+      </div>`
+    })
+    canvas += `</div>`
+  }
+  canvas += `</div></div>`
+
+  q('#master-content').innerHTML = `<div class="section-head">
+    <div><h2>📊 Dashboard Builder</h2>
+    <p>Design your Power BI-style dashboard — choose widgets, filters, sizes, then save and apply.</p></div>
+  </div>` + layoutSelect + palette + canvas
+}
+
+function addBuilderWidget(type) {
+  builderWidgets.push({type, title:'', size:'half', fy:'', metric:'overall', loc:'', sector:'', emp_id:'', mp_ref:''})
+  renderDashboardBuilder()
+  // Scroll to bottom of canvas
+  const el = q('#bldr-canvas')
+  if (el) setTimeout(()=>el.lastElementChild?.scrollIntoView({behavior:'smooth'}), 100)
+}
+
+function removeBuilderWidget(idx) {
+  builderWidgets.splice(idx,1)
+  renderDashboardBuilder()
+}
+
+// Drag & drop reorder
+function bldrDragStart(idx) { dragSrcIdx=idx }
+function bldrDragOver(e,idx) { e.preventDefault(); qq('.bldr-widget-row').forEach(r=>r.style.background='#fff'); const el=q(`#bwr-${idx}`); if(el)el.style.background='#eff6ff' }
+function bldrDrop(e,idx) {
+  e.preventDefault()
+  if(dragSrcIdx===null||dragSrcIdx===idx)return
+  const moved=builderWidgets.splice(dragSrcIdx,1)[0]
+  builderWidgets.splice(idx,0,moved)
+  dragSrcIdx=null
+  renderDashboardBuilder()
+}
+
+function loadBuilderLayout(id) {
+  if (!id) { builderWidgets=[]; builderLayoutId=null; builderLayoutName='My Dashboard'; renderDashboardBuilder(); return }
+  const layout = S.dashLayouts.find(l=>l.id===id)
+  if (!layout) return
+  builderLayoutId = layout.id
+  builderLayoutName = layout.name
+  builderWidgets = JSON.parse(JSON.stringify(layout.layout||[]))
+  renderDashboardBuilder()
+  // Set the name field
+  const nameEl = q('#bldr-name')
+  if (nameEl) nameEl.value = layout.name
+  // Set the selector
+  const sel = q('#bldr-layout-sel')
+  if (sel) sel.value = id
+}
+
+async function saveBuilderLayout() {
+  const name = q('#bldr-name')?.value?.trim() || 'My Dashboard'
+  const payload = {name, layout: builderWidgets, user:'default'}
+  if (builderLayoutId) payload.id = builderLayoutId
+  const res = await api.post('/api/dashboard_layouts', payload)
+  if (res.id) {
+    builderLayoutId = res.id
+    toast('Layout saved: '+name,'ok')
+    await loadAll()
+    renderDashboardBuilder()
+  } else toast('Save failed','error')
+}
+
+async function applyBuilderLayout() {
+  await saveBuilderLayout()
+  // Set as active layout
+  const layout = S.dashLayouts.find(l=>l.id===builderLayoutId)
+  if (layout) { activeDashLayout=layout; switchTab('dashboard') }
+  else { switchTab('dashboard') }
+}
+
+async function deleteBuilderLayout() {
+  if (!builderLayoutId) return
+  if (!confirm('Delete this dashboard layout?')) return
+  await api.del('/api/dashboard_layouts/'+builderLayoutId)
+  builderLayoutId=null; builderWidgets=[]; builderLayoutName='My Dashboard'
+  toast('Layout deleted','ok')
+  await loadAll()
+  renderDashboardBuilder()
+}
+// ── END DYNAMIC DASHBOARD ENGINE ─────────────────────────────────────────────
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
 loadAll()

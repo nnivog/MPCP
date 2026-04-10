@@ -154,6 +154,10 @@ CREATE TABLE IF NOT EXISTS mp_locations(
 CREATE TABLE IF NOT EXISTS perf_cache(
   fy TEXT PRIMARY KEY, label TEXT NOT NULL,
   record_count INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT, locked INTEGER DEFAULT 0);
+CREATE TABLE IF NOT EXISTS sectors(
+  id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+  color TEXT DEFAULT '#475569', description TEXT DEFAULT '',
+  sort_order INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS dashboard_layouts(
   id TEXT PRIMARY KEY, name TEXT NOT NULL,
   user TEXT DEFAULT 'default',
@@ -267,6 +271,18 @@ def _seed(db):
               ("r4","cp20"),("r4","cp21"),("r4","cp22"),("r4","cp23"),("r4","cp24"),("r4","cp25"),
               ("r5","cp19")]
     db.executemany("INSERT OR IGNORE INTO role_cps VALUES(?,?)",role_cps)
+    # Seed default sectors from existing employee depts
+    default_sectors=[
+        ("sec-hod","HOD","#0f2540","Head of Department",0),
+        ("sec-veh","Vehicle","#1d4ed8","Vehicle Import & Logistics",1),
+        ("sec-reg","Registration","#6d28d9","Vehicle Registration",2),
+        ("sec-wh","Warehouse","#047857","Warehouse & Goods",3),
+        ("sec-stk","Stock","#b45309","Stock Verification",4),
+        ("sec-ops","Ops","#475569","Operations Support",5),
+        ("sec-fin","Finance","#0e7490","Finance",6),
+        ("sec-hr","HR","#be185d","Human Resources",7),
+    ]
+    db.executemany("INSERT OR IGNORE INTO sectors VALUES(?,?,?,?,?)",default_sectors)
     emp_roles=[("e2","r1"),("e2","r2"),("e3","r1"),("e4","r3"),("e11","r4"),("e8","r5")]
     db.executemany("INSERT OR IGNORE INTO emp_roles VALUES(?,?)",emp_roles)
 
@@ -655,7 +671,7 @@ def perf_record(pid):
          d.get('status','C'),d.get('notes',''),pid))
     db.commit(); return jsonify({'ok':True})
 
-PHDR=['FY','BS_Month','Emp_Code','MP_Ref','CP_Ref','Metric',
+PHDR=['FY','BS_Month','Emp_Code','Dept_Sector','Location','MP_Ref','CP_Ref','Metric',
       'Total','Compliant','Non_Compliant','Pct_Compliant','Pct_NC',
       'Target_Val','Actual_Val','Unit','Status','Notes']
 
@@ -663,10 +679,10 @@ PHDR=['FY','BS_Month','Emp_Code','MP_Ref','CP_Ref','Metric',
 def perf_template():
     out=io.StringIO(); w=csv.writer(out); w.writerow(PHDR)
     for s in [
-        ["2081-82","Shrawan","EMP-002","HODL-1","LM-VEH-1","Vehicle Border Tracking",410,398,12,97.07,2.93,100,97,"%","C","All tracked"],
-        ["2081-82","Shrawan","EMP-002","HODL-1","LM-VEH-2-B","CC within 3 Days",410,390,20,95.12,4.88,3,2.6,"Days","C","On track"],
-        ["2081-82","Bhadra","EMP-004","HODL-3","LM-VEH-5-A","Registration 15 Days",380,370,10,97.37,2.63,15,13,"Days","C","Improved"],
-        ["2081-82","Kartik","EMP-011","HODL-9","LM-WH-3-A","Goods SLA Delivery",98,94,4,95.92,4.08,2,2.1,"Days","NC","Slight over"],
+        ["2081-82","Shrawan","EMP-002","Vehicle","Border Clearance Station","HODL-1","LM-VEH-1","Vehicle Border Tracking",410,398,12,97.07,2.93,100,97,"%","C","All tracked"],
+        ["2081-82","Shrawan","EMP-002","Vehicle","Head Office - Sipradi","HODL-1","LM-VEH-2-B","CC within 3 Days",410,390,20,95.12,4.88,3,2.6,"Days","C","On track"],
+        ["2081-82","Bhadra","EMP-004","Registration","Registration Office","HODL-3","LM-VEH-5-A","Registration 15 Days",380,370,10,97.37,2.63,15,13,"Days","C","Improved"],
+        ["2081-82","Kartik","EMP-011","Warehouse","Kathmandu Warehouse","HODL-9","LM-WH-3-A","Goods SLA Delivery",98,94,4,95.92,4.08,2,2.1,"Days","NC","Slight over"],
     ]: w.writerow(s)
     out.seek(0)
     return send_file(io.BytesIO(out.getvalue().encode()),mimetype='text/csv',
@@ -680,11 +696,23 @@ def export_perf():
     if fy: q+=" WHERE p.fy=?"; args.append(fy)
     rows=db.execute(q+' ORDER BY p.fy DESC,p.bs_month',args).fetchall()
     out=io.StringIO(); w=csv.writer(out)
-    w.writerow(['FY','BS_Month','Quarter','Emp_Code','Emp_Name','MP_Ref','CP_Ref','Metric',
+    w.writerow(['FY','BS_Month','Quarter','Emp_Code','Emp_Name','Dept_Sector','Location','MP_Ref','CP_Ref','Metric',
                 'Total','Compliant','Non_Compliant','Pct_Compliant','Pct_NC',
                 'Target_Val','Actual_Val','Unit','Status','Notes'])
     for r in rows:
+        # Get employee dept and primary location for this record
+        emp_dept = ''
+        emp_loc  = ''
+        if r['emp_id']:
+            ed = db.execute("SELECT dept FROM employees WHERE id=?",(r['emp_id'],)).fetchone()
+            if ed: emp_dept = ed['dept']
+            el = db.execute(
+                "SELECT l.name FROM locations l JOIN emp_locations el ON l.id=el.loc_id WHERE el.emp_id=? LIMIT 1",
+                (r['emp_id'],)).fetchone()
+            if el: emp_loc = el['name']
+        loc_val = r['location'] or emp_loc
         w.writerow([r['fy'],r['bs_month'],r['quarter'],r['emp_code'],r['emp_name'] or '',
+                    emp_dept, loc_val,
                     r['mp_ref'],r['cp_ref'],r['metric'],r['total'],r['compliant'],r['non_compliant'],
                     r['pct_compliant'],r['pct_nc'],r['target_val'],r['actual_val'],r['unit'],r['status'],r['notes']])
     out.seek(0)
@@ -715,9 +743,17 @@ def import_perf():
             unit=str(row.get('Unit','%') or '%')
             st=str(row.get('Status','') or calc_status(act,tgt,unit))
             if st not in ('C','NC'): st=calc_status(act,tgt,unit)
-            db.execute("INSERT OR IGNORE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            loc_val = str(row.get('Location','') or row.get('location','') or '')
+            # Auto-resolve location from employee if not provided
+            if not loc_val and eid:
+                el = db.execute(
+                    "SELECT l.name FROM locations l JOIN emp_locations el ON l.id=el.loc_id WHERE el.emp_id=? LIMIT 1",
+                    (eid,)).fetchone()
+                if el: loc_val = el['name']
+            db.execute("INSERT OR IGNORE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (uid(),fy,bsm,bs_q(bsm),eid,ec,str(row.get('MP_Ref','') or ''),str(row.get('CP_Ref','') or ''),
-                 str(row.get('Metric','') or ''),tot,comp,nc,pct_c,pct_nc,tgt,act,unit,st,str(row.get('Notes','') or '')))
+                 str(row.get('Metric','') or ''),tot,comp,nc,pct_c,pct_nc,tgt,act,unit,st,
+                 str(row.get('Notes','') or ''),loc_val))
             count+=1
         except Exception as e: errs.append(f"Row {i}: {e}")
     for fy in fys_seen: _upd_cache(db,fy)
@@ -1319,6 +1355,48 @@ def bulk_delete_fy():
     _upd_cache(db, fy)
     db.commit()
     return jsonify({'deleted': cnt, 'fy': fy})
+
+
+# ── SECTORS ────────────────────────────────────────────────────────────────────
+@app.route('/api/sectors', methods=['GET','POST'])
+def sectors_api():
+    db = get_db()
+    if request.method == 'GET':
+        rows = db.execute("SELECT * FROM sectors ORDER BY sort_order, name").fetchall()
+        result = []
+        for s in rows:
+            d = dict(s)
+            d['emp_count'] = db.execute(
+                "SELECT COUNT(*) FROM employees WHERE dept=?", (s['name'],)).fetchone()[0]
+            result.append(d)
+        return jsonify(result)
+    d = request.json
+    sid = d.get('id') or uid()
+    db.execute("INSERT OR REPLACE INTO sectors VALUES(?,?,?,?,?)",
+               (sid, d['name'], d.get('color','#475569'),
+                d.get('description',''), d.get('sort_order',0)))
+    db.commit()
+    return jsonify({'id': sid})
+
+@app.route('/api/sectors/<sid>', methods=['PUT','DELETE'])
+def sector_api(sid):
+    db = get_db()
+    if request.method == 'DELETE':
+        row = db.execute("SELECT name FROM sectors WHERE id=?", (sid,)).fetchone()
+        if row:
+            # Move employees in this sector to Ops
+            db.execute("UPDATE employees SET dept='Ops' WHERE dept=?", (row['name'],))
+        db.execute("DELETE FROM sectors WHERE id=?", (sid,))
+        db.commit(); return jsonify({'ok': True})
+    d = request.json
+    old = db.execute("SELECT name FROM sectors WHERE id=?", (sid,)).fetchone()
+    db.execute("UPDATE sectors SET name=?,color=?,description=?,sort_order=? WHERE id=?",
+               (d['name'], d.get('color','#475569'),
+                d.get('description',''), d.get('sort_order',0), sid))
+    # If name changed, update all employees with the old dept name
+    if old and old['name'] != d['name']:
+        db.execute("UPDATE employees SET dept=? WHERE dept=?", (d['name'], old['name']))
+    db.commit(); return jsonify({'ok': True})
 
 @app.route('/')
 def index():

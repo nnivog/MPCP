@@ -471,7 +471,7 @@ tbody tr:hover .row-actions{opacity:1}
 <script>
 // ── STATE ────────────────────────────────────────────────────────────────────
 const S = {
-  employees:[], mps:[], cps:[], roles:[], perf:[], cache:[], cascade:[], bsToday:{}, dashLayouts:[],
+  employees:[], mps:[], cps:[], roles:[], perf:[], cache:[], cascade:[], bsToday:{}, dashLayouts:[], sectors:[],
   locations:[], currentTab:'dashboard', teamView:'cards', masterSub:'mps',
   dataSub:'perf', reportSub:'overview', currentFY:'2081-82'
 }
@@ -489,16 +489,17 @@ const api = {
 }
 
 async function loadAll() {
-  const [e,m,c,r,p,ca,locs,casc,bst,layouts] = await Promise.all([
+  const [e,m,c,r,p,ca,locs,casc,bst,layouts,sects] = await Promise.all([
     api.get('/api/employees'), api.get('/api/mps'), api.get('/api/cps'),
     api.get('/api/roles'), api.get('/api/perf'), api.get('/api/cache'),
     api.get('/api/locations'),
     api.get('/api/cascade'),
     api.get('/api/bs_today'),
-    api.get('/api/dashboard_layouts?user=default')
+    api.get('/api/dashboard_layouts?user=default'),
+    api.get('/api/sectors')
   ])
   S.employees=e; S.mps=m; S.cps=c; S.roles=r; S.perf=p; S.cache=ca;
-  S.locations=locs; S.cascade=casc; S.bsToday=bst; S.dashLayouts=layouts||[]
+  S.locations=locs; S.cascade=casc; S.bsToday=bst; S.dashLayouts=layouts||[]; S.sectors=sects||[]
   // Set currentFY from most recent active cache
   const latest = ca.sort((a,b)=>b.fy.localeCompare(a.fy))[0]
   if (latest && !S.cache.find(x=>x.fy===S.currentFY)) S.currentFY = latest.fy
@@ -519,7 +520,10 @@ const $ = id => document.getElementById(id)
 const q = sel => document.querySelector(sel)
 const qq = sel => [...document.querySelectorAll(sel)]
 const esc = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
-const dc = d => DC[d]||'#475569'
+const dc = d => {
+  if(S.sectors&&S.sectors.length){const s=S.sectors.find(x=>x.name===d);if(s)return s.color}
+  return DC[d]||'#475569'
+}
 const av = n => (n||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase()
 const pc = p => p==null?'#94a3b8':p>=95?'#16a34a':p>=80?'#d97706':'#dc2626'
 
@@ -729,7 +733,7 @@ function renderOrgChart() {
 
 function openEmpForm(id) {
   const emp = id?getEmp(id):null
-  const DEPTS = ['HOD','Vehicle','Registration','Warehouse','Stock','Ops','Finance','HR']
+  const DEPTS = S.sectors&&S.sectors.length ? S.sectors.map(s=>s.name) : ['HOD','Vehicle','Registration','Warehouse','Stock','Ops','Finance','HR']
   openModal(emp?'Edit Team Member':'Add Team Member', `
     <div class="form-group"><label class="form-label">Employee Code</label>
       <input class="form-input" id="ef-code" value="${esc(emp?.emp_code||'')}" placeholder="Auto-generated e.g. EMP-001">
@@ -834,6 +838,7 @@ function renderMaster() {
   else if(S.masterSub==='cps') renderCPs()
   else if(S.masterSub==='roles') renderRoles()
   else if(S.masterSub==='locations') renderLocations()
+  else if(S.masterSub==='sectors') renderSectors()
   else if(S.masterSub==='dashboard_builder') renderDashboardBuilder()
   else renderLinks()
 }
@@ -1918,7 +1923,7 @@ const LOC_COLORS = {
     Depot:     '#6d28d9',
     Branch:    '#0891b2'
 }
-const SECTOR_COLORS = {
+const SECTOR_COLORS_DEFAULT = {
     Vehicle:      '#1d4ed8',
     Registration: '#6d28d9',
     Warehouse:    '#047857',
@@ -1928,6 +1933,135 @@ const SECTOR_COLORS = {
     Finance:      '#0e7490',
     HR:           '#be185d'
 }
+function getSectorColor(name) {
+  if(S.sectors&&S.sectors.length){const s=S.sectors.find(x=>x.name===name);if(s)return s.color}
+  return SECTOR_COLORS_DEFAULT[name]||'#475569'
+}
+// Legacy alias for templates still using SECTOR_COLORS
+const SECTOR_COLORS = new Proxy(SECTOR_COLORS_DEFAULT,{get:(t,k)=>getSectorColor(k)||t[k]||'#475569'})
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SECTORS / DEPARTMENTS MANAGEMENT
+// ══════════════════════════════════════════════════════════════════════════════
+function renderSectors() {
+  const sectors = S.sectors || []
+  const empsBySector = {}
+  S.employees.forEach(e => {
+    empsBySector[e.dept] = empsBySector[e.dept] || []
+    empsBySector[e.dept].push(e)
+  })
+  let html = `<div class="section-head">
+    <div><h2>Sectors / Departments</h2>
+    <p>${sectors.length} sectors configured · Edit names, colors, and descriptions</p></div>
+    <button class="btn btn-primary btn-sm" onclick="openSectorForm()">+ New Sector</button>
+  </div>`
+  if (!sectors.length) {
+    html += `<div class="info-box"><p>No sectors configured. Click <strong>+ New Sector</strong> to add your first department.</p></div>`
+  } else {
+    html += '<div class="grid-3">'
+    sectors.forEach(s => {
+      const emps = empsBySector[s.name] || []
+      const fyPerf = S.perf.filter(p => p.fy===S.currentFY && emps.some(e=>e.emp_code===p.emp_code))
+      const tot  = fyPerf.reduce((a,r)=>a+(r.total||1),0)
+      const comp = fyPerf.reduce((a,r)=>a+(r.compliant||(r.status==='C'?1:0)),0)
+      const pct  = tot ? (comp/tot*100).toFixed(1) : null
+      const col  = s.color || '#475569'
+      const myMPs = S.mps.filter(m=>emps.some(e=>(m.owner_ids||[]).includes(e.id))).length
+      const myCPs = S.cps.filter(c=>emps.some(e=>(c.owner_ids||[]).includes(e.id))).length
+      html += `<div class="card" style="border-top:4px solid ${col}">
+        <div class="card-body">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+            <span class="dept-badge" style="background:${col};font-size:13px;padding:4px 12px">${esc(s.name)}</span>
+            <div style="display:flex;gap:6px">
+              <button class="btn-icon" onclick="openSectorForm('${s.id}')">✏</button>
+              <button class="btn-icon" style="color:var(--red)" onclick="delSector('${s.id}','${esc(s.name)}')">🗑</button>
+            </div>
+          </div>
+          ${s.description ? `<p class="text-xs text-muted mb-10">${esc(s.description)}</p>` : ''}
+          <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">
+            <span class="text-xs"><strong style="color:var(--blue)">${emps.length}</strong> staff</span>
+            <span class="text-xs"><strong>${myMPs}</strong> MPs &nbsp;<strong>${myCPs}</strong> CPs</span>
+          </div>
+          ${pct!==null ? `<div style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+              <span class="text-xxs text-muted">FY ${S.currentFY}</span>
+              <span style="font-weight:900;font-size:13px;color:${pct>=95?'var(--green)':pct>=80?'var(--amber)':'var(--red)'}">${pct}%</span>
+            </div>
+            <div class="cc-bar"><span class="cc-bar-c" style="width:${Math.min(pct,100)}%;background:${pct>=95?'var(--green)':pct>=80?'var(--amber)':'var(--red)'}"></span></div>
+          </div>` : '<p class="text-xxs text-muted italic mb-10">No data this FY</p>'}
+          <div style="display:flex;flex-wrap:wrap;gap:4px;min-height:24px">
+            ${emps.map(e=>`<span class="owner-chip" style="background:${col}" onclick="openProfile('${e.id}',event)">${e.name.split(' ')[0]}</span>`).join('')}
+            ${!emps.length?'<span class="text-xs text-muted italic">No staff</span>':''}
+          </div>
+          <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border);display:flex;align-items:center;gap:8px">
+            <div style="width:18px;height:18px;border-radius:50%;background:${col};flex-shrink:0"></div>
+            <span class="text-xxs text-muted font-mono">${col}</span>
+            <span class="text-xxs text-muted">· Order: ${s.sort_order}</span>
+          </div>
+        </div>
+      </div>`
+    })
+    html += '</div>'
+  }
+  const sectorNames = sectors.map(s=>s.name)
+  const unassigned = S.employees.filter(e=>!sectorNames.includes(e.dept))
+  if (unassigned.length) {
+    html += `<div class="card mt-20" style="border-left:4px solid var(--amber)">
+      <div class="card-head"><p>⚠ Employees with unrecognised sector (${unassigned.length})</p></div>
+      <div class="card-body"><p class="text-xs text-muted mb-12">Create the missing sector or edit these employees to reassign them.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${unassigned.map(e=>`<div style="display:flex;gap:6px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:6px 10px">
+          <div class="avatar avatar-sm" style="background:#94a3b8">${av(e.name)}</div>
+          <div><p class="text-xs font-bold">${esc(e.name)}</p>
+          <p class="text-xxs text-muted">${esc(e.emp_code||'')} · <strong>${esc(e.dept)}</strong></p></div>
+          <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="openEmpForm('${e.id}')">Fix →</button>
+        </div>`).join('')}
+      </div></div></div>`
+  }
+  q('#master-content').innerHTML = html
+}
+
+function openSectorForm(id) {
+  const sec = id ? (S.sectors||[]).find(s=>s.id===id) : null
+  const PRESET = ['#0f2540','#1d4ed8','#6d28d9','#047857','#b45309','#475569','#0e7490','#be185d','#dc2626','#d97706','#16a34a','#0891b2']
+  openModal(sec?`Edit Sector: ${sec.name}`:'New Sector / Department',
+    `<div class="form-grid-2">
+      <div class="form-group"><label class="form-label">Sector Name *</label>
+        <input class="form-input" id="sf-name" value="${sec?esc(sec.name):''}" placeholder="e.g. Vehicle, Finance"></div>
+      <div class="form-group"><label class="form-label">Sort Order</label>
+        <input class="form-input" type="number" id="sf-order" value="${sec?sec.sort_order:0}" min="0"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Description</label>
+      <input class="form-input" id="sf-desc" value="${sec?esc(sec.description||''):''}" placeholder="Brief description"></div>
+    <div class="form-group"><label class="form-label">Color</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px" id="sf-swatches">
+        ${PRESET.map(c=>`<div onclick="q('#sf-color').value='${c}';qq('#sf-swatches div').forEach(d=>d.style.outline='none');this.style.outline='3px solid ${c}';q('#sf-preview').style.background='${c}'"
+          style="width:28px;height:28px;border-radius:50%;background:${c};cursor:pointer;outline:${sec&&sec.color===c?'3px solid '+c:'none'}"></div>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="form-input" id="sf-color" value="${sec?sec.color:'#475569'}" style="width:120px;font-family:monospace" oninput="q('#sf-preview').style.background=this.value">
+        <div id="sf-preview" style="width:36px;height:36px;border-radius:50%;background:${sec?sec.color:'#475569'};border:2px solid var(--border)"></div>
+        <span class="text-xs text-muted">Hex color</span>
+      </div>
+    </div>`,
+  [{label:sec?'Save Changes':'Create Sector',cls:'btn-primary',fn:async function(){
+    const name=q('#sf-name').value.trim()
+    if(!name){toast('Name required','error');return}
+    const payload={name,color:q('#sf-color').value.trim()||'#475569',description:q('#sf-desc').value.trim(),sort_order:parseInt(q('#sf-order').value)||0}
+    if(sec){payload.id=sec.id;await api.put('/api/sectors/'+sec.id,payload);toast('Sector updated','ok')}
+    else{await api.post('/api/sectors',payload);toast('Sector created','ok')}
+    closeModal();await loadAll();renderSectors()
+  }}])
+}
+
+async function delSector(id,name){
+  const emps=S.employees.filter(e=>e.dept===name)
+  if(!confirm(`Delete sector "${name}"?${emps.length?'\n\n'+emps.length+' employee(s) will be moved to Ops.':''}\n\nThis cannot be undone.`))return
+  await api.del('/api/sectors/'+id)
+  toast(`Sector "${name}" deleted`,'ok');await loadAll();renderSectors()
+}
+// ── END SECTORS MANAGEMENT ────────────────────────────────────────────────────
+
 
 // ── RENDER LOCATIONS TAB ──────────────────────────────────────────────────────
 function renderLocations() {
@@ -1944,7 +2078,10 @@ function renderLocations() {
     <div class="section-head">
         <div><h2>Workstations &amp; Sectors</h2>
         <p>${S.locations.length} locations &middot; ${Object.keys(sectors).length} sectors &middot; ${S.employees.length} staff</p></div>
-        <button class="btn btn-primary btn-sm" onclick="openLocForm()">+ New Location</button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="switchMaster('sectors')">⚙ Manage Sectors</button>
+          <button class="btn btn-primary btn-sm" onclick="openLocForm()">+ New Location</button>
+        </div>
     </div>`
 
     // ── SECTOR OVERVIEW ──
@@ -2748,7 +2885,7 @@ function openOrgActions(id,e){
 }
 
 function openAddEmpToOrg(){
-  const DEPTS=['HOD','Vehicle','Registration','Warehouse','Stock','Ops','Finance','HR']
+  const DEPTS=S.sectors&&S.sectors.length?S.sectors.map(s=>s.name):['HOD','Vehicle','Registration','Warehouse','Stock','Ops','Finance','HR']
   const mgrOpts=S.employees.map(function(e){return '<option value="'+e.id+'">'+esc(e.name)+' (L'+e.level+' '+e.dept+')</option>'}).join('')
   openModal('Add Person to Org',
     '<div class="form-grid-2">'

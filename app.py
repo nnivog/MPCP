@@ -1261,6 +1261,65 @@ def analytics_widget():
 
     return jsonify({'labels':[],'values':[],'compliant':[],'nc':[],'total':[]})
 
+
+# ── BULK DELETE ────────────────────────────────────────────────────────────────
+@app.route('/api/perf/bulk_delete', methods=['POST'])
+def bulk_delete_perf():
+    """Delete performance records matching given filters"""
+    db = get_db()
+    d = request.json
+    fy       = d.get('fy','')
+    month    = d.get('month','')
+    emp_code = d.get('emp_code','')
+    mp_ref   = d.get('mp_ref','')
+    cp_ref   = d.get('cp_ref','')
+    preview  = d.get('preview', False)   # if True, just count — don't delete
+
+    q2 = "SELECT id,fy FROM perf WHERE 1=1"; args = []
+    if fy:       q2 += " AND fy=?";       args.append(fy)
+    if month:    q2 += " AND bs_month=?"; args.append(month)
+    if emp_code: q2 += " AND emp_code=?"; args.append(emp_code)
+    if mp_ref:   q2 += " AND mp_ref=?";   args.append(mp_ref)
+    if cp_ref:   q2 += " AND cp_ref=?";   args.append(cp_ref)
+
+    rows = db.execute(q2, args).fetchall()
+    count = len(rows)
+
+    if preview:
+        return jsonify({'count': count, 'preview': True})
+
+    if not count:
+        return jsonify({'deleted': 0})
+
+    # Check none of the FYs are locked
+    fys_affected = list(set(r['fy'] for r in rows))
+    for fy_chk in fys_affected:
+        locked = db.execute("SELECT locked FROM perf_cache WHERE fy=?", (fy_chk,)).fetchone()
+        if locked and locked['locked']:
+            return jsonify({'error': f'FY {fy_chk} is locked — unlock it first'}), 400
+
+    ids = [r['id'] for r in rows]
+    db.execute(f"DELETE FROM perf WHERE id IN ({','.join('?'*len(ids))})", ids)
+    for fy_upd in fys_affected:
+        _upd_cache(db, fy_upd)
+    db.commit()
+    return jsonify({'deleted': count, 'fys': fys_affected})
+
+@app.route('/api/perf/bulk_delete_fy', methods=['POST'])
+def bulk_delete_fy():
+    """Wipe all perf records for a given FY (respects lock)"""
+    db = get_db()
+    fy = (request.json or {}).get('fy','')
+    if not fy: return jsonify({'error': 'fy required'}), 400
+    row = db.execute("SELECT locked FROM perf_cache WHERE fy=?", (fy,)).fetchone()
+    if row and row['locked']:
+        return jsonify({'error': f'FY {fy} is locked — unlock it first in FY Cache Manager'}), 400
+    cnt = db.execute("SELECT COUNT(*) FROM perf WHERE fy=?", (fy,)).fetchone()[0]
+    db.execute("DELETE FROM perf WHERE fy=?", (fy,))
+    _upd_cache(db, fy)
+    db.commit()
+    return jsonify({'deleted': cnt, 'fy': fy})
+
 @app.route('/')
 def index():
     with open(os.path.join(os.path.dirname(__file__),'index.html'),'r', encoding='utf-8') as f: return f.read()

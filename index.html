@@ -432,6 +432,7 @@ tbody tr:hover .row-actions{opacity:1}
     <div class="sub-tabs">
       <button class="sub-tab active" onclick="switchData('perf')">Performance Records</button>
       <button class="sub-tab" onclick="switchData('cache')">FY Cache Manager</button>
+      <button class="sub-tab" onclick="switchData('bulk')">🗑 Bulk Delete</button>
     </div>
     <div id="data-content"><div class="spinner"></div></div>
   </div>
@@ -1158,8 +1159,198 @@ async function removeLink(eid){
 // ── DATA MANAGER ─────────────────────────────────────────────────────────────
 function renderData() {
   if(S.dataSub==='cache') renderCacheManager()
+  else if(S.dataSub==='bulk') renderBulkDelete()
   else renderPerfData()
 }
+
+// ── BULK DELETE ────────────────────────────────────────────────────────────────
+function renderBulkDelete() {
+  const fys   = [...new Set(S.perf.map(p=>p.fy))].sort((a,b)=>b.localeCompare(a))
+  const months = BS_MONTHS
+  const emps  = S.employees
+  const mps   = S.mps
+  const cps   = S.cps
+
+  const fyOpts  = fys.map(f=>`<option value="${f}">${f}</option>`).join('')
+  const moOpts  = months.map(m=>`<option value="${m}">${m}</option>`).join('')
+  const empOpts = emps.map(e=>`<option value="${esc(e.emp_code||'')}">` +
+    `${esc(e.name)} (${esc(e.emp_code||'')})</option>`).join('')
+  const mpOpts  = mps.map(m=>`<option value="${esc(m.ref)}">${esc(m.ref)} — ${esc(m.title.slice(0,40))}</option>`).join('')
+  const cpOpts  = cps.map(c=>`<option value="${esc(c.ref)}">${esc(c.ref)} — ${esc(c.title.slice(0,40))}</option>`).join('')
+
+  const fyStats = {}
+  S.perf.forEach(p=>{ fyStats[p.fy]=(fyStats[p.fy]||0)+1 })
+  const cacheMap = {}
+  S.cache.forEach(c=>{ cacheMap[c.fy]=c })
+
+  let html = `
+  <div class="info-box mb-16" style="border-color:#fcd34d;background:#fffbeb">
+    <p>⚠️ <strong>Bulk Delete removes performance records permanently.</strong>
+    MPs and CPs are master data and are NOT affected — only monthly performance entries are deleted.
+    Locked FYs cannot be modified. Always export a backup before deleting.</p>
+  </div>
+
+  <div class="grid-2" style="gap:16px;align-items:start">
+    <div class="card">
+      <div class="card-head"><p>🗂 Quick Wipe — Entire Fiscal Year</p></div>
+      <div class="card-body">
+        <p class="text-xs text-muted mb-16">Deletes ALL performance records for a selected FY in one click. MPs and CPs are untouched.</p>
+        <div class="tbl-wrap mb-16"><table>
+          <thead><tr><th>Fiscal Year</th><th>Records</th><th>Status</th><th>Actions</th></tr></thead>
+          <tbody>`
+
+  fys.forEach(fy => {
+    const cache = cacheMap[fy]
+    const locked = cache && cache.locked
+    const cnt = fyStats[fy] || 0
+    const col = locked ? '#b45309' : cnt > 0 ? '#dc2626' : '#16a34a'
+    html += `<tr>
+      <td class="font-bold">${fy}</td>
+      <td><span class="font-black" style="color:${col}">${cnt}</span> records</td>
+      <td>${locked
+        ? '<span class="badge" style="background:#fef3c7;color:#92400e">🔒 Locked</span>'
+        : '<span class="badge badge-c">Unlocked</span>'}</td>
+      <td><div style="display:flex;gap:6px">
+        <a href="/api/perf/export?fy=${encodeURIComponent(fy)}" class="btn btn-ghost btn-sm" style="font-size:10px">⬇ Export</a>
+        ${locked ? '' : `<button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c;font-size:10px"
+          onclick="wipeEntireFY('${fy}',${cnt})">🗑 Wipe FY</button>`}
+      </div></td>
+    </tr>`
+  })
+
+  html += `</tbody></table></div></div></div>
+
+    <div class="card">
+      <div class="card-head"><p>🎯 Selective Delete — Filter & Delete</p></div>
+      <div class="card-body">
+        <p class="text-xs text-muted mb-12">Set filters, preview matching records, then delete.</p>
+        <div class="form-group">
+          <label class="form-label">Fiscal Year <span style="color:var(--red)">*</span></label>
+          <select class="form-select" id="bd-fy" onchange="bdPreview()">
+            <option value="">— Select FY —</option>${fyOpts}
+          </select>
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group"><label class="form-label">Month (optional)</label>
+            <select class="form-select" id="bd-month" onchange="bdPreview()">
+              <option value="">All Months</option>${moOpts}
+            </select></div>
+          <div class="form-group"><label class="form-label">Employee (optional)</label>
+            <select class="form-select" id="bd-emp" onchange="bdPreview()">
+              <option value="">All Employees</option>${empOpts}
+            </select></div>
+        </div>
+        <div class="form-grid-2">
+          <div class="form-group"><label class="form-label">Managing Point (optional)</label>
+            <select class="form-select" id="bd-mp" onchange="bdPreview()">
+              <option value="">All MPs</option>${mpOpts}
+            </select></div>
+          <div class="form-group"><label class="form-label">Checking Point (optional)</label>
+            <select class="form-select" id="bd-cp" onchange="bdPreview()">
+              <option value="">All CPs</option>${cpOpts}
+            </select></div>
+        </div>
+        <div id="bd-preview-box" style="border:1.5px solid var(--border);border-radius:10px;padding:14px;background:#f8fafc;margin-bottom:14px;min-height:60px">
+          <p class="text-sm text-muted italic">Select a Fiscal Year to preview records.</p>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm flex-1" onclick="bdReset()">↺ Reset</button>
+          <button class="btn btn-sm flex-1" id="bd-delete-btn"
+            style="background:#fee2e2;color:#b91c1c;font-weight:700;opacity:0.4;pointer-events:none"
+            onclick="bdConfirmDelete()">🗑 Delete Matching</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="bd-table-wrap" class="card mt-16" style="display:none">
+    <div class="card-head" style="display:flex;justify-content:space-between">
+      <p id="bd-table-title">Matching Records</p>
+      <button class="btn btn-ghost btn-sm" onclick="q('#bd-table-wrap').style.display='none'">Hide</button>
+    </div>
+    <div class="card-body" style="overflow-x:auto">
+      <table><thead><tr>
+        <th>FY</th><th>Month</th><th>Emp Code</th><th>MP</th><th>CP</th><th>Metric</th>
+        <th style="text-align:right">Total</th><th>Status</th>
+      </tr></thead>
+      <tbody id="bd-table-body"></tbody></table>
+    </div>
+  </div>`
+
+  q('#data-content').innerHTML = html
+}
+
+async function bdPreview() {
+  const fy=q('#bd-fy')?.value||'', month=q('#bd-month')?.value||''
+  const emp=q('#bd-emp')?.value||'', mp=q('#bd-mp')?.value||'', cp=q('#bd-cp')?.value||''
+  const box=q('#bd-preview-box'), btn=q('#bd-delete-btn')
+  if(!fy){
+    box.innerHTML='<p class="text-sm text-muted italic">Select a Fiscal Year to preview.</p>'
+    btn.style.opacity='0.4';btn.style.pointerEvents='none';return
+  }
+  box.innerHTML='<div class="spinner" style="margin:10px auto"></div>'
+  try{
+    const res=await api.post('/api/perf/bulk_delete',{fy,month,emp_code:emp,mp_ref:mp,cp_ref:cp,preview:true})
+    const cnt=res.count||0
+    const matched=S.perf.filter(p=>(!fy||p.fy===fy)&&(!month||p.bs_month===month)&&(!emp||p.emp_code===emp)&&(!mp||p.mp_ref===mp)&&(!cp||p.cp_ref===cp))
+    const col=cnt===0?'#16a34a':'#dc2626'
+    box.innerHTML=`<div style="display:flex;align-items:center;gap:12px">
+      <span style="font-size:32px;font-weight:900;font-family:'Syne',sans-serif;color:${col}">${cnt}</span>
+      <div><p class="font-bold">${cnt===0?'No records match these filters':'records will be permanently deleted'}</p>
+      <p class="text-xs text-muted">FY:${fy}${month?' · '+month:''}${emp?' · '+emp:''}${mp?' · '+mp:''}${cp?' · '+cp:''}</p></div>
+      ${cnt>0?`<button class="btn btn-ghost btn-sm" style="margin-left:auto" onclick="bdShowTable()">View ↓</button>`:''}
+    </div>`
+    const tbody=q('#bd-table-body')
+    if(tbody) tbody.innerHTML=matched.slice(0,100).map(p=>`<tr>
+      <td class="font-bold">${p.fy}</td><td>${esc(p.bs_month)}</td>
+      <td><span class="emp-code">${esc(p.emp_code||'—')}</span></td>
+      <td><span class="ref-badge">${esc(p.mp_ref)}</span></td>
+      <td><span class="ref-badge ref-badge-blue">${esc(p.cp_ref)}</span></td>
+      <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.metric)}</td>
+      <td style="text-align:right;font-weight:700">${(p.total||0).toLocaleString()}</td>
+      <td>${statusBadge(p.status)}</td></tr>`).join('')
+    if(q('#bd-table-title'))q('#bd-table-title').textContent=`Matching Records — ${matched.length}${matched.length>100?' (showing 100)':''}`
+    btn.style.opacity=cnt>0?'1':'0.4';btn.style.pointerEvents=cnt>0?'auto':'none'
+  }catch(e){box.innerHTML=`<p style="color:var(--red)">Error:${e.message}</p>`}
+}
+
+function bdShowTable(){const w=q('#bd-table-wrap');if(w){w.style.display='';w.scrollIntoView({behavior:'smooth'})}}
+function bdReset(){
+  ['bd-fy','bd-month','bd-emp','bd-mp','bd-cp'].forEach(id=>{const el=q('#'+id);if(el)el.value=''})
+  const box=q('#bd-preview-box');if(box)box.innerHTML='<p class="text-sm text-muted italic">Select a Fiscal Year to preview.</p>'
+  const btn=q('#bd-delete-btn');if(btn){btn.style.opacity='0.4';btn.style.pointerEvents='none'}
+  const w=q('#bd-table-wrap');if(w)w.style.display='none'
+}
+
+async function bdConfirmDelete(){
+  const fy=q('#bd-fy')?.value||'',month=q('#bd-month')?.value||''
+  const emp=q('#bd-emp')?.value||'',mp=q('#bd-mp')?.value||'',cp=q('#bd-cp')?.value||''
+  if(!fy){toast('Select a FY first','error');return}
+  let msg=`Delete performance records for FY ${fy}`
+  if(month)msg+=`, Month:${month}`;if(emp)msg+=`, Emp:${emp}`
+  if(mp)msg+=`, MP:${mp}`;if(cp)msg+=`, CP:${cp}`
+  if(!confirm(msg+'\n\nThis cannot be undone. Export first if needed.'))return
+  const btn=q('#bd-delete-btn');if(btn){btn.disabled=true;btn.textContent='Deleting...'}
+  try{
+    const res=await api.post('/api/perf/bulk_delete',{fy,month,emp_code:emp,mp_ref:mp,cp_ref:cp,preview:false})
+    if(res.deleted!==undefined){
+      toast(`Deleted ${res.deleted} records from FY ${fy} ✓`,'ok')
+      await loadAll();renderBulkDelete()
+    }else{
+      toast('Error:'+(res.error||'Unknown'),'error')
+      if(btn){btn.disabled=false;btn.textContent='🗑 Delete Matching'}
+    }
+  }catch(e){toast('Error:'+e.message,'error');if(btn){btn.disabled=false;btn.textContent='🗑 Delete Matching'}}
+}
+
+async function wipeEntireFY(fy,cnt){
+  if(!confirm(`Wipe ALL ${cnt} performance records for FY ${fy}?\n\nMPs and CPs will be kept. This cannot be undone.`))return
+  const res=await api.post('/api/perf/bulk_delete_fy',{fy})
+  if(res.deleted!==undefined){toast(`Wiped ${res.deleted} records from FY ${fy} ✓`,'ok');await loadAll();renderBulkDelete()}
+  else toast('Error:'+(res.error||'Unknown'),'error')
+}
+// ── END BULK DELETE ────────────────────────────────────────────────────────────
+
 
 function renderPerfData() {
   const fyPerf=perfByFY(S.currentFY)

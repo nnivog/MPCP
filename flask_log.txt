@@ -1,0 +1,36 @@
+
+=======================================================
+  Sipradi SC-MPCP System v2.0
+  http://localhost:5050
+=======================================================
+
+ * Serving Flask app 'app'
+ * Debug mode: on
+WARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5050
+ * Running on http://10.61.192.240:5050
+Press CTRL+C to quit
+ * Restarting with stat
+ * Debugger is active!
+ * Debugger PIN: 122-200-886
+127.0.0.1 - - [09/Apr/2026 22:45:01] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:02] "GET /api/employees HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:02] "GET /api/cache HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:02] "GET /api/perf HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:02] "GET /api/mps HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:02] "GET /api/cps HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:02] "GET /api/roles HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:02] "GET /api/bs_today HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:02] "GET /api/locations HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:02] "GET /api/cascade HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:08] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:09] "GET /api/mps HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:09] "GET /api/roles HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:09] "GET /api/cache HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:09] "GET /api/perf HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:09] "GET /api/cps HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:09] "GET /api/employees HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:09] "GET /api/bs_today HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:09] "GET /api/locations HTTP/1.1" 200 -
+127.0.0.1 - - [09/Apr/2026 22:45:09] "GET /api/cascade HTTP/1.1" 200 -

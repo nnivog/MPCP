@@ -871,14 +871,18 @@ def cascade_api():
         return jsonify([dict(r) for r in rows])
     d = request.json
     lid = d.get('id') or uid()
-    db.execute("INSERT OR REPLACE INTO cascade_links VALUES(?,?,?,?,?)",
-               (lid, d['parent_emp_id'], d['parent_cp_id'],
-                d['child_emp_id'],  d['child_mp_id']))
-    # Also update the child MP's parent_cp_id field
-    db.execute("UPDATE mps SET parent_cp_id=? WHERE id=?",
-               (d['parent_cp_id'], d['child_mp_id']))
-    db.commit()
-    return jsonify({'id': lid})
+    try:
+        db.execute("INSERT OR REPLACE INTO cascade_links VALUES(?,?,?,?,?)",
+                   (lid, d.get('parent_emp_id',''), d.get('parent_cp_id',''),
+                    d.get('child_emp_id',''),  d.get('child_mp_id','')))
+        if d.get('child_mp_id'):
+            db.execute("UPDATE mps SET parent_cp_id=? WHERE id=?",
+                       (d.get('parent_cp_id',''), d['child_mp_id']))
+        db.commit()
+        return jsonify({'ok':True,'id': lid})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'ok':False,'error':str(e)}),500
 
 @app.route('/api/cascade/<lid>', methods=['DELETE'])
 def cascade_delete(lid):
@@ -1054,24 +1058,38 @@ def org_assign_cp():
 
 @app.route('/api/org/cascade_assign',methods=['POST'])
 def org_cascade_assign():
-    db=get_db(); d=request.json
-    parent_cp_id=d.get('parent_cp_id'); child_emp_id=d.get('child_emp_id')
-    child_mp_id=d.get('child_mp_id')
-    if not parent_cp_id or not child_emp_id: return jsonify({'error':'parent_cp_id and child_emp_id required'}),400
-    cp=db.execute("SELECT * FROM cps WHERE id=?",(parent_cp_id,)).fetchone()
-    if not cp: return jsonify({'error':'CP not found'}),404
-    if not child_mp_id:
-        mid=uid()
-        db.execute("INSERT OR IGNORE INTO mps VALUES(?,?,?,?,?,?,?,?,?,?)",
-                   (mid,cp['ref'],cp['title'],cp['target'],'Monthly',0,0,0,parent_cp_id,2))
-        child_mp_id=mid
-    else:
-        db.execute("UPDATE mps SET parent_cp_id=? WHERE id=?",(parent_cp_id,child_mp_id))
-    link_id=uid()
-    db.execute("INSERT OR REPLACE INTO cascade_links VALUES(?,?,?,?,?)",
-               (link_id,d.get('parent_emp_id',''),parent_cp_id,child_emp_id,child_mp_id))
-    db.execute("INSERT OR IGNORE INTO mp_owners VALUES(?,?)",(child_mp_id,child_emp_id))
-    db.commit(); return jsonify({'ok':True,'mp_id':child_mp_id,'link_id':link_id})
+    try:
+        db=get_db(); d=request.json
+        parent_cp_id=d.get('parent_cp_id'); child_emp_id=d.get('child_emp_id')
+        child_mp_id=d.get('child_mp_id') or None
+        if not parent_cp_id or not child_emp_id:
+            return jsonify({'ok':False,'error':'parent_cp_id and child_emp_id required'}),400
+        cp=db.execute("SELECT * FROM cps WHERE id=?",(parent_cp_id,)).fetchone()
+        if not cp: return jsonify({'ok':False,'error':'CP not found'}),404
+        if not child_mp_id:
+            mid=uid()
+            # Check how many cols mps table has and insert accordingly
+            cols=db.execute("PRAGMA table_info(mps)").fetchall()
+            ncols=len(cols)
+            if ncols>=10:
+                db.execute("INSERT OR IGNORE INTO mps VALUES(?,?,?,?,?,?,?,?,?,?)",
+                           (mid,cp['ref'],cp['title'],cp['target'],'Monthly',0,0,0,parent_cp_id,2))
+            else:
+                db.execute("INSERT OR IGNORE INTO mps VALUES(?,?,?,?,?,?,?,?)",
+                           (mid,cp['ref'],cp['title'],cp['target'],'Monthly',0,0,0))
+            child_mp_id=mid
+        else:
+            db.execute("UPDATE mps SET parent_cp_id=? WHERE id=?",(parent_cp_id,child_mp_id))
+        link_id=uid()
+        # Check cascade_links cols
+        db.execute("INSERT OR REPLACE INTO cascade_links VALUES(?,?,?,?,?)",
+                   (link_id,d.get('parent_emp_id',''),parent_cp_id,child_emp_id,child_mp_id))
+        db.execute("INSERT OR IGNORE INTO mp_owners VALUES(?,?)",(child_mp_id,child_emp_id))
+        db.commit()
+        return jsonify({'ok':True,'mp_id':child_mp_id,'link_id':link_id})
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'ok':False,'error':str(e)}),500
 
 
 # ── DASHBOARD LAYOUTS ──────────────────────────────────────────────────────────
@@ -1211,6 +1229,21 @@ def analytics_widget():
             if not loc_rows: continue
             a = agg(loc_rows)
             result['labels'].append(loc_row['name']); result['values'].append(a['pct'])
+            result['compliant'].append(a['comp']); result['nc'].append(a['nc']); result['total'].append(a['tot'])
+        return jsonify(result)
+
+    elif metric == 'by_emp_detail':
+        # Single employee detail — return their monthly breakdown
+        buckets = {}
+        for r in rows:
+            m = r['bs_month'] or 'Unknown'
+            buckets.setdefault(m,[]).append(r)
+        BS_ORDER = ['Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra','Baisakh','Jestha','Ashadh']
+        keys = sorted(buckets.keys(), key=lambda x: BS_ORDER.index(x) if x in BS_ORDER else 99)
+        result = {'labels':[],'values':[],'compliant':[],'nc':[],'total':[]}
+        for k in keys:
+            a = agg(buckets[k])
+            result['labels'].append(k); result['values'].append(a['pct'])
             result['compliant'].append(a['comp']); result['nc'].append(a['nc']); result['total'].append(a['tot'])
         return jsonify(result)
 

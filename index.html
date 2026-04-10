@@ -2648,10 +2648,27 @@ function openCascadeForm(){
     +'<div id="cl-prev" style="display:none" class="mt-12"></div>',
   [{label:'Create Link',cls:'btn-primary',fn:async function(){
     const pid=q('#cl-parent').value,cid=q('#cl-cp').value,eid=q('#cl-child').value,mid=q('#cl-mp').value
-    if(!pid||!cid||!eid){toast('Superior, CP and subordinate required','error');return}
-    const res=await api.post('/api/org/cascade_assign',{parent_emp_id:pid,parent_cp_id:cid,child_emp_id:eid,child_mp_id:mid||undefined})
-    if(res.ok){toast('Cascade link created','ok');closeModal();await loadAll();if(orgSub==='builder')renderCascadeBuilder()}
-    else toast(res.error||'Error','error')
+    if(!pid){toast('Select a superior employee','error');return}
+    if(!cid){toast('Select the CP to cascade down','error');return}
+    if(!eid){toast('Select the subordinate employee','error');return}
+    const btn=q('#modal-foot .btn-primary')
+    if(btn){btn.disabled=true;btn.textContent='Saving...'}
+    try{
+      const payload={parent_emp_id:pid,parent_cp_id:cid,child_emp_id:eid}
+      if(mid)payload.child_mp_id=mid
+      const res=await api.post('/api/org/cascade_assign',payload)
+      if(res&&res.ok){
+        toast('Cascade link created ✓','ok');closeModal()
+        await loadAll()
+        if(orgSub==='builder')renderCascadeBuilder()
+      } else {
+        toast('Error: '+(res&&res.error?res.error:'Unknown error — check Flask terminal'),'error')
+        if(btn){btn.disabled=false;btn.textContent='Create Link'}
+      }
+    }catch(err){
+      toast('Network error: '+err.message,'error')
+      if(btn){btn.disabled=false;btn.textContent='Create Link'}
+    }
   }}],true)
 }
 
@@ -2969,6 +2986,17 @@ async function loadWidget(idx, cfg) {
   if (cfg.emp_id) params.set('emp_id', cfg.emp_id)
   if (cfg.sector) params.set('sector', cfg.sector)
   if (cfg.mp_ref) params.set('mp_ref', cfg.mp_ref)
+  // Show employee context in widget header if filtered
+  if (cfg.emp_id) {
+    const emp = getEmp(cfg.emp_id)
+    if (emp) {
+      const head = el.closest('.card')?.querySelector('.card-head p')
+      if (head && !head.dataset.empSet) {
+        head.dataset.empSet = '1'
+        head.innerHTML += ` <span class="badge badge-blue" style="margin-left:6px">${esc(emp.name)}</span>`
+      }
+    }
+  }
 
   let data
   try { data = await api.get('/api/analytics/widget?'+params.toString()) }
@@ -3153,6 +3181,7 @@ function renderDashboardBuilder() {
                 <option value="by_emp" ${w.metric==='by_emp'?'selected':''}>By Employee</option>
                 <option value="by_location" ${w.metric==='by_location'?'selected':''}>By Location</option>
                 <option value="by_sector" ${w.metric==='by_sector'?'selected':''}>By Sector</option>
+                <option value="by_emp_detail" ${w.metric==='by_emp_detail'?'selected':''}>Employee Monthly (single emp)</option>
               </select>
             </div>
             <div>
@@ -3165,6 +3194,12 @@ function renderDashboardBuilder() {
               <label class="form-label" style="margin-bottom:2px">Filter Sector</label>
               <select class="form-select" style="font-size:11px;padding:4px 8px" onchange="builderWidgets[${i}].sector=this.value">
                 <option value="">All</option>${sectorOpts}
+              </select>
+            </div>
+            <div>
+              <label class="form-label" style="margin-bottom:2px">Filter Employee</label>
+              <select class="form-select" style="font-size:11px;padding:4px 8px" onchange="builderWidgets[${i}].emp_id=this.value">
+                <option value="">All Employees</option>${empOpts}
               </select>
             </div>
             <div>

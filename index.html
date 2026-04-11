@@ -412,6 +412,8 @@ tbody tr:hover .row-actions{opacity:1}
       <div class="flex gap-8">
         <button class="btn btn-ghost btn-sm" onclick="setTeamView('cards')">⊞ Cards</button>
         <button class="btn btn-ghost btn-sm" onclick="setTeamView('org')">⑂ Org Chart</button>
+        <button class="btn btn-ghost btn-sm" id="emp-bulk-toggle" onclick="toggleEmpBulk()" style="display:none">☑ Select</button>
+        <button class="btn btn-sm" id="emp-bulk-delete-btn" onclick="bulkDeleteEmps()" style="display:none;background:#fee2e2;color:#b91c1c">🗑 Delete Selected (<span id="emp-bulk-count">0</span>)</button>
         <button class="btn btn-primary btn-sm" onclick="openEmpForm()">+ Add Member</button>
       </div>
     </div>
@@ -488,21 +490,26 @@ const api = {
   del: url => fetch(url,{method:'DELETE'}).then(r=>r.json()),
 }
 
+async function safeGet(url, fallback=[]) {
+  try { const r = await fetch(url); if (!r.ok) return fallback; return await r.json() }
+  catch(e) { return fallback }
+}
+
 async function loadAll() {
   const [e,m,c,r,p,ca,locs,casc,bst,layouts,sects] = await Promise.all([
-    api.get('/api/employees'), api.get('/api/mps'), api.get('/api/cps'),
-    api.get('/api/roles'), api.get('/api/perf'), api.get('/api/cache'),
-    api.get('/api/locations'),
-    api.get('/api/cascade'),
-    api.get('/api/bs_today'),
-    api.get('/api/dashboard_layouts?user=default'),
-    api.get('/api/sectors')
+    safeGet('/api/employees',[]), safeGet('/api/mps',[]), safeGet('/api/cps',[]),
+    safeGet('/api/roles',[]), safeGet('/api/perf',[]), safeGet('/api/cache',[]),
+    safeGet('/api/locations',[]),
+    safeGet('/api/cascade',[]),
+    safeGet('/api/bs_today',{}),
+    safeGet('/api/dashboard_layouts?user=default',[]),
+    safeGet('/api/sectors',[])
   ])
-  S.employees=e; S.mps=m; S.cps=c; S.roles=r; S.perf=p; S.cache=ca;
-  S.locations=locs; S.cascade=casc; S.bsToday=bst; S.dashLayouts=layouts||[]; S.sectors=sects||[]
+  S.employees=e||[]; S.mps=m||[]; S.cps=c||[]; S.roles=r||[]; S.perf=p||[]; S.cache=ca||[];
+  S.locations=locs||[]; S.cascade=casc||[]; S.bsToday=bst||{}; S.dashLayouts=layouts||[]; S.sectors=sects||[]
   // Set currentFY from most recent active cache
-  const latest = ca.sort((a,b)=>b.fy.localeCompare(a.fy))[0]
-  if (latest && !S.cache.find(x=>x.fy===S.currentFY)) S.currentFY = latest.fy
+  const latest = (ca||[]).sort((a,b)=>b.fy.localeCompare(a.fy))[0]
+  if (latest && !(S.cache||[]).find(x=>x.fy===S.currentFY)) S.currentFY = latest.fy
   updateHeader(); renderCurrent()
 }
 
@@ -661,6 +668,9 @@ function toggleMP(id) {
 // ── TEAM ─────────────────────────────────────────────────────────────────────
 function renderTeam() {
   q('#team-sub').textContent = `${S.employees.length} members · ${[...new Set(S.employees.map(e=>e.dept))].length} departments`
+  // show/reset bulk toggle button
+  const et = q('#emp-bulk-toggle'); if (et) et.style.display = 'inline-flex'
+  const eb = q('#emp-bulk-delete-btn'); if (eb) eb.style.display = 'none'
   if (S.teamView==='org') { renderOrgChart(); return }
 
   let html = ''
@@ -692,9 +702,10 @@ function renderTeam() {
           </div>
         </div>
         <div class="flex gap-6 mt-12" style="border-top:1px solid var(--border);padding-top:10px">
+          <input type="checkbox" class="emp-bulk-cb" value="${emp.id}" onchange="updateEmpBulkCount()" style="display:none;width:16px;height:16px;margin-right:4px;cursor:pointer">
           <button class="btn btn-ghost btn-sm flex-1" onclick="openEmpForm('${emp.id}')">Edit</button>
           <button class="btn btn-ghost btn-sm flex-1" onclick="openProfile('${emp.id}')">Profile</button>
-          <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="delEmp('${emp.id}')">Del</button>
+          <button class="btn btn-sm emp-single-del" style="background:#fee2e2;color:#b91c1c" onclick="delEmp('${emp.id}')">Del</button>
         </div>
       </div>`
     })
@@ -859,11 +870,19 @@ function renderMPs() {
     <div><h2>Managing Points</h2><p>${S.mps.length} HOD-level strategic objectives</p></div>
     <div class="flex gap-8">
       <label class="upload-zone">⬆ Upload Excel<input type="file" accept=".xlsx,.xls" onchange="uploadMPExcel(this)"></label>
+      <button class="btn btn-ghost btn-sm" onclick="toggleMPBulk(true)">☑ Bulk Delete</button>
       <button class="btn btn-primary btn-sm" onclick="openMPForm()">+ New MP</button>
     </div>
   </div>
   <div class="mb-16"><div class="search-wrap"><span class="search-icon">🔍</span>
     <input class="form-input" id="mp-search" placeholder="Search MPs…" oninput="filterMPs()"></div></div>
+  <div id="mp-bulk-bar" style="display:none;align-items:center;gap:10px;margin-bottom:12px;background:#fff3cd;border:1.5px solid #fcd34d;border-radius:10px;padding:10px 14px">
+    <input type="checkbox" id="mp-select-all" onchange="toggleAllMPs(this.checked)" style="width:16px;height:16px;cursor:pointer">
+    <span style="font-size:12px;font-weight:700">Select All</span>
+    <span id="mp-bulk-count-label" style="font-size:12px;color:#92400e;font-weight:700;margin-left:8px"></span>
+    <button class="btn btn-sm" onclick="bulkDeleteMPs()" style="margin-left:auto;background:#fee2e2;color:#b91c1c">🗑 Delete Selected</button>
+    <button class="btn btn-ghost btn-sm" onclick="toggleMPBulk(false)">Cancel</button>
+  </div>
   <div id="mp-list">`
   S.mps.forEach(mp=>{
     const owners=(mp.owner_ids||[]).map(getEmp).filter(Boolean)
@@ -886,9 +905,10 @@ function renderMPs() {
           <div class="mp-owners mt-8">${owners.map(o=>`<span class="owner-chip" style="background:${dc(o.dept)}">${o.name.split(' ')[0]}<span style="font-size:9px;opacity:.7;margin-left:3px">(${o.emp_code||''})</span></span>`).join('')}
           ${owners.length===0?'<span class="text-xs text-muted italic">No owners assigned</span>':''}</div>
         </div>
-        <div class="flex gap-6">
+        <div class="flex gap-6" style="align-items:center">
+          <input type="checkbox" class="mp-bulk-cb" value="${mp.id}" onchange="updateMPBulkCount()" style="display:none;width:16px;height:16px;cursor:pointer">
           <button class="btn btn-ghost btn-sm" onclick="openMPForm('${mp.id}')">Edit</button>
-          <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="delMP('${mp.id}')">Del</button>
+          <button class="btn btn-sm mp-single-del" style="background:#fee2e2;color:#b91c1c" onclick="delMP('${mp.id}')">Del</button>
         </div>
       </div>
     </div>`
@@ -949,6 +969,7 @@ function renderCPs() {
     <div><h2>Checking Points</h2><p>${S.cps.length} operational checkpoints</p></div>
     <div class="flex gap-8">
       <label class="upload-zone">⬆ Upload Excel<input type="file" accept=".xlsx,.xls" onchange="uploadCPExcel(this)"></label>
+      <button class="btn btn-ghost btn-sm" onclick="toggleCPBulk(true)">☑ Bulk Delete</button>
       <button class="btn btn-primary btn-sm" onclick="openCPForm()">+ New CP</button>
     </div>
   </div>
@@ -959,13 +980,21 @@ function renderCPs() {
       <option value="">All MPs</option>${S.mps.map(m=>`<option value="${m.id}">${esc(m.ref)}</option>`).join('')}
     </select>
   </div>
+  <div id="cp-bulk-bar" style="display:none;align-items:center;gap:10px;margin-bottom:12px;background:#fff3cd;border:1.5px solid #fcd34d;border-radius:10px;padding:10px 14px">
+    <input type="checkbox" id="cp-select-all" onchange="toggleAllCPs(this.checked)" style="width:16px;height:16px;cursor:pointer">
+    <span style="font-size:12px;font-weight:700">Select All Visible</span>
+    <span id="cp-bulk-count-label" style="font-size:12px;color:#92400e;font-weight:700;margin-left:8px"></span>
+    <button class="btn btn-sm" onclick="bulkDeleteCPs()" style="margin-left:auto;background:#fee2e2;color:#b91c1c">🗑 Delete Selected</button>
+    <button class="btn btn-ghost btn-sm" onclick="toggleCPBulk(false)">Cancel</button>
+  </div>
   <div class="tbl-wrap"><table>
-    <thead><tr><th>CP Ref</th><th>Checking Point</th><th>Linked MP</th><th>Target</th><th>Freq</th><th>Source</th><th>Owners</th><th></th></tr></thead>
+    <thead><tr><th id="cp-cb-header"></th><th>CP Ref</th><th>Checking Point</th><th>Linked MP</th><th>Target</th><th>Freq</th><th>Source</th><th>Owners</th><th></th></tr></thead>
     <tbody id="cp-tbody">`
   S.cps.forEach(cp=>{
     const mp=S.mps.find(m=>m.id===cp.mp_id)
     const owners=(cp.owner_ids||[]).map(getEmp).filter(Boolean)
     html+=`<tr data-cs="${esc(cp.ref)} ${esc(cp.title)}" data-cm="${cp.mp_id}">
+      <td><input type="checkbox" class="cp-bulk-cb" value="${cp.id}" onchange="updateCPBulkCount()" style="display:none;width:16px;height:16px;cursor:pointer"></td>
       <td><span class="ref-badge ref-badge-blue">${esc(cp.ref)}</span></td>
       <td style="max-width:240px"><p class="font-bold text-sm" style="line-height:1.4">${esc(cp.title)}</p></td>
       <td>${mp?`<span class="ref-badge">${esc(mp.ref)}</span>`:'<span style="color:var(--red);font-size:10px">Unlinked</span>'}</td>
@@ -1355,6 +1384,105 @@ async function wipeEntireFY(fy,cnt){
   else toast('Error:'+(res.error||'Unknown'),'error')
 }
 // ── END BULK DELETE ────────────────────────────────────────────────────────────
+
+// ── EMPLOYEE BULK DELETE ──────────────────────────────────────────────────
+function toggleEmpBulk() {
+  const on = q('#emp-bulk-toggle')?.dataset.active !== '1'
+  const toggle = q('#emp-bulk-toggle')
+  const bar = q('#emp-bulk-delete-btn')
+  if (toggle) { toggle.dataset.active = on ? '1' : '0'; toggle.textContent = on ? '✕ Cancel' : '☑ Select' }
+  if (bar) bar.style.display = on ? 'inline-flex' : 'none'
+  qq('.emp-bulk-cb').forEach(cb => { cb.style.display = on ? 'inline-block' : 'none'; if (!on) cb.checked = false })
+  qq('.emp-single-del').forEach(b => b.style.display = on ? 'none' : '')
+  updateEmpBulkCount()
+}
+function updateEmpBulkCount() {
+  const n = qq('.emp-bulk-cb:checked').length
+  const el = q('#emp-bulk-count')
+  if (el) el.textContent = n
+}
+async function bulkDeleteEmps() {
+  const ids = [...qq('.emp-bulk-cb:checked')].map(cb => cb.value)
+  if (!ids.length) { toast('No employees selected','error'); return }
+  if (!confirm(`Permanently delete ${ids.length} employee(s)? They will be unlinked from all MPs and CPs.`)) return
+  const res = await api.post('/api/employees/bulk_delete', { ids })
+  if (res.deleted !== undefined) {
+    toast(`Deleted ${res.deleted} employee(s) ✓`, 'ok')
+    await loadAll()
+  } else {
+    toast('Error: ' + (res.error || 'Unknown'), 'error')
+  }
+}
+
+// ── MP BULK DELETE ────────────────────────────────────────────────────────
+function toggleMPBulk(on) {
+  const bar = q('#mp-bulk-bar')
+  if (bar) bar.style.display = on ? 'flex' : 'none'
+  qq('.mp-bulk-cb').forEach(cb => { cb.style.display = on ? 'inline-block' : 'none'; if (!on) cb.checked = false })
+  qq('.mp-single-del').forEach(b => b.style.display = on ? 'none' : '')
+  const sAll = q('#mp-select-all')
+  if (sAll && !on) sAll.checked = false
+  updateMPBulkCount()
+}
+function toggleAllMPs(checked) {
+  qq('.mp-bulk-cb').forEach(cb => { if (cb.closest('[style*="display: none"]') === null) cb.checked = checked })
+  updateMPBulkCount()
+}
+function updateMPBulkCount() {
+  const n = qq('.mp-bulk-cb:checked').length
+  const el = q('#mp-bulk-count-label')
+  if (el) el.textContent = n ? `${n} selected` : ''
+}
+async function bulkDeleteMPs() {
+  const ids = [...qq('.mp-bulk-cb:checked')].map(cb => cb.value)
+  if (!ids.length) { toast('No MPs selected','error'); return }
+  if (!confirm(`Delete ${ids.length} Managing Point(s)? Linked CPs will become unlinked.`)) return
+  const res = await api.post('/api/mps/bulk_delete', { ids })
+  if (res.deleted !== undefined) {
+    toast(`Deleted ${res.deleted} MP(s) ✓`, 'ok')
+    await loadAll()
+  } else {
+    toast('Error: ' + (res.error || 'Unknown'), 'error')
+  }
+}
+
+// ── CP BULK DELETE ────────────────────────────────────────────────────────
+function toggleCPBulk(on) {
+  const bar = q('#cp-bulk-bar')
+  if (bar) bar.style.display = on ? 'flex' : 'none'
+  qq('.cp-bulk-cb').forEach(cb => { cb.style.display = on ? 'inline-block' : 'none'; if (!on) cb.checked = false })
+  const hdr = q('#cp-cb-header')
+  if (hdr) hdr.style.display = on ? '' : 'none'
+  const sAll = q('#cp-select-all')
+  if (sAll && !on) sAll.checked = false
+  updateCPBulkCount()
+}
+function toggleAllCPs(checked) {
+  qq('.cp-bulk-cb').forEach(cb => {
+    const row = cb.closest('tr')
+    if (row && row.style.display !== 'none') cb.checked = checked
+  })
+  updateCPBulkCount()
+}
+function updateCPBulkCount() {
+  const n = qq('.cp-bulk-cb:checked').length
+  const el = q('#cp-bulk-count-label')
+  if (el) el.textContent = n ? `${n} selected` : ''
+}
+async function bulkDeleteCPs() {
+  const ids = [...qq('.cp-bulk-cb:checked')].map(cb => cb.value)
+  if (!ids.length) { toast('No CPs selected','error'); return }
+  if (!confirm(`Delete ${ids.length} Checking Point(s)?`)) return
+  const res = await api.post('/api/cps/bulk_delete', { ids })
+  if (res.deleted !== undefined) {
+    toast(`Deleted ${res.deleted} CP(s) ✓`, 'ok')
+    await loadAll()
+  } else {
+    toast('Error: ' + (res.error || 'Unknown'), 'error')
+  }
+}
+// ── END ENTITY BULK DELETE ────────────────────────────────────────────────
+
 
 
 function renderPerfData() {
@@ -2027,9 +2155,9 @@ function openSectorForm(id) {
   openModal(sec?`Edit Sector: ${sec.name}`:'New Sector / Department',
     `<div class="form-grid-2">
       <div class="form-group"><label class="form-label">Sector Name *</label>
-        <input class="form-input" id="sf-name" value="${sec?esc(sec.name):''}" placeholder="e.g. Vehicle, Finance"></div>
-      <div class="form-group"><label class="form-label">Sort Order</label>
-        <input class="form-input" type="number" id="sf-order" value="${sec?sec.sort_order:0}" min="0"></div>
+        <input class="form-input" id="sf-name" value="${sec?esc(sec.name):''}" placeholder="e.g. Vehicle, Finance" oninput="if(!q('#sf-code').dataset.edited)q('#sf-code').value=this.value.split(' ').map(w=>w[0]||'').join('').toUpperCase().slice(0,8)"></div>
+      <div class="form-group"><label class="form-label">Sector Code</label>
+        <input class="form-input" id="sf-code" value="${sec?esc(sec.code||''):''}" placeholder="e.g. VEH" oninput="this.dataset.edited='1'"></div>
     </div>
     <div class="form-group"><label class="form-label">Description</label>
       <input class="form-input" id="sf-desc" value="${sec?esc(sec.description||''):''}" placeholder="Brief description"></div>
@@ -2047,7 +2175,8 @@ function openSectorForm(id) {
   [{label:sec?'Save Changes':'Create Sector',cls:'btn-primary',fn:async function(){
     const name=q('#sf-name').value.trim()
     if(!name){toast('Name required','error');return}
-    const payload={name,color:q('#sf-color').value.trim()||'#475569',description:q('#sf-desc').value.trim(),sort_order:parseInt(q('#sf-order').value)||0}
+    const code=q('#sf-code').value.trim()||name.split(' ').map(w=>w[0]||'').join('').toUpperCase().slice(0,8)
+    const payload={name,code,color:q('#sf-color').value.trim()||'#475569',description:q('#sf-desc').value.trim()}
     if(sec){payload.id=sec.id;await api.put('/api/sectors/'+sec.id,payload);toast('Sector updated','ok')}
     else{await api.post('/api/sectors',payload);toast('Sector created','ok')}
     closeModal();await loadAll();renderSectors()
@@ -2686,6 +2815,7 @@ function renderTreeNodes(nodes, depth) {
                 </div>
             </div>
             ${mpHtml ? `<div class="cascade-node">${mpHtml}</div>` : ''}
+            ${emp.children && emp.children.length ? '<div style="margin-left:32px;border-left:2px solid var(--border);padding-left:16px;margin-top:8px">'+renderTreeNodes(emp.children, depth+1)+'</div>' : ''}
         </div>`
     }).join('')
 }

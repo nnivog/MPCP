@@ -150,6 +150,19 @@ CREATE TABLE IF NOT EXISTS locations(
 def init_db():
     con = sqlite3.connect(DB_PATH)
     con.executescript(SCHEMA)
+    # ── schema migrations: add columns that may be missing from old DBs ──
+    migrations = [
+        "ALTER TABLE sectors ADD COLUMN code TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE sectors ADD COLUMN description TEXT DEFAULT ''",
+        "ALTER TABLE locations ADD COLUMN sector_id TEXT DEFAULT ''",
+        "ALTER TABLE locations ADD COLUMN active INTEGER DEFAULT 1",
+        "ALTER TABLE locations ADD COLUMN code TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE employees ADD COLUMN email TEXT DEFAULT ''",
+    ]
+    for sql in migrations:
+        try: con.execute(sql)
+        except Exception: pass  # column already exists — ignore
+    con.commit()
     if not con.execute("SELECT 1 FROM employees LIMIT 1").fetchone():
         _seed(con)
     con.close()
@@ -991,8 +1004,12 @@ def sectors_api():
     if request.method == 'GET':
         return jsonify(R(db.execute("SELECT * FROM sectors ORDER BY name").fetchall()))
     d = request.json; sid = d.get('id') or uid()
-    db.execute("INSERT OR REPLACE INTO sectors VALUES(?,?,?,?,?)",
-               (sid, d['code'], d['name'], d.get('color','#475569'), d.get('description','')))
+    # Auto-derive code from name if not supplied (fixes KeyError → 500)
+    code = (d.get('code') or '').strip()
+    if not code:
+        code = ''.join(w[0].upper() for w in d.get('name','').split() if w)[:8] or uid()[:6].upper()
+    db.execute("INSERT OR REPLACE INTO sectors(id,code,name,color,description) VALUES(?,?,?,?,?)",
+               (sid, code, d['name'], d.get('color','#475569'), d.get('description','')))
     db.commit()
     return jsonify({'id': sid})
 
@@ -1023,10 +1040,10 @@ def locations_api():
                 ORDER BY l.name
             """).fetchall()
         except Exception:
-            rows = db.execute('SELECT * FROM locations ORDER BY name').fetchall()
+            rows = db.execute("SELECT * FROM locations ORDER BY name").fetchall()
         return jsonify(R(rows))
     d = request.json; lid = d.get('id') or uid()
-    db.execute("INSERT OR REPLACE INTO locations VALUES(?,?,?,?,?,?)",
+    db.execute("INSERT OR REPLACE INTO locations(id,code,name,address,sector_id,active) VALUES(?,?,?,?,?,?)",
                (lid, d['code'], d['name'], d.get('address',''),
                 d.get('sector_id',''), 1 if d.get('active', True) else 0))
     db.commit()
@@ -1198,9 +1215,9 @@ if __name__ == '__main__':
     print("="*55 + "\n")
     app.run(debug=DEBUG, port=PORT, host='0.0.0.0', use_reloader=False)
 
-# ── MISSING STUBS (fix loadAll crash + perf bulk delete) ──────────────────
+# ── MISSING STUBS: fix loadAll crash + perf/emp bulk delete ───────────────
 
-@app.route('/api/cascade', methods=['GET','POST','DELETE'])
+@app.route('/api/cascade', methods=['GET','POST'])
 def cascade_api():
     db = get_db()
     if request.method == 'GET':
@@ -1208,16 +1225,75 @@ def cascade_api():
             rows = db.execute("SELECT * FROM cascade_links ORDER BY id").fetchall()
             return jsonify(R(rows))
         except: return jsonify([])
-    if request.method == 'POST':
-        d = request.json or {}
-        cid = uid()
-        try:
-            db.execute("CREATE TABLE IF NOT EXISTS cascade_links(id TEXT PRIMARY KEY, emp_id TEXT, mp_id TEXT, cp_id TEXT, loc_id TEXT, note TEXT)")
-            db.execute("INSERT INTO cascade_links VALUES(?,?,?,?,?,?)",(cid, d.get('emp_id',''), d.get('mp_id',''), d.get('cp_id',''), d.get('loc_id',''), d.get('note','')))
-            db.commit()
-        except: pass
-        return jsonify({'id': cid})
-    return jsonify({'ok': True})
+    d = request.json or {}
+    cid = uid()
+    try:
+        db.execute("CREATE TABLE IF NOT EXISTS cascade_links(id TEXT PRIMARY KEY, emp_id TEXT, mp_id TEXT, cp_id TEXT, loc_id TEXT, note TEXT)")
+        db.execute("INSERT INTO cascade_links VALUES(?,?,?,?,?,?)",(cid,d.get('emp_id',''),d.get('mp_id',''),d.get('cp_id',''),d.get('loc_id',''),d.get('note','')))
+        db.commit()
+    except: pass
+    return jsonify({'id': cid})
+
+@app.route('/api/cascade/tree')
+def cascade_tree():
+    """Return org tree with nested roles, MPs and CPs for each employee."""
+    db = get_db()
+    emp_id_filter = request.args.get('emp_id')
+
+    all_roles = {r['id']: dict(r) for r in db.execute("SELECT * FROM roles")}
+    all_mps   = {m['id']: dict(m) for m in db.execute("SELECT * FROM mps")}
+    all_cps   = {c['id']: dict(c) for c in db.execute("SELECT * FROM cps")}
+
+    def build_node(emp):
+        e = dict(emp)
+        eid = e['id']
+        role_ids = [r['role_id'] for r in db.execute("SELECT role_id FROM emp_roles WHERE emp_id=?", (eid,))]
+        e['roles'] = [all_roles[rid] for rid in role_ids if rid in all_roles]
+        mp_ids_a = [r['mp_id'] for r in db.execute("SELECT mp_id FROM mp_owners WHERE emp_id=?", (eid,))]
+        mp_ids_b = [r['mp_id'] for r in db.execute("SELECT mp_id FROM emp_mps WHERE emp_id=?", (eid,))]
+        mp_ids = list(dict.fromkeys(mp_ids_a + mp_ids_b))
+        mp_nodes = []
+        for mid in mp_ids:
+            if mid not in all_mps:
+                continue
+            mp = dict(all_mps[mid])
+            cp_ids_a = [r['cp_id'] for r in db.execute("SELECT cp_id FROM cp_owners WHERE emp_id=?", (eid,))]
+            cp_ids_b = [r['cp_id'] for r in db.execute("SELECT cp_id FROM emp_cps WHERE emp_id=?", (eid,))]
+            cp_ids_all = list(dict.fromkeys(cp_ids_a + cp_ids_b))
+            cp_nodes = []
+            for cid in cp_ids_all:
+                if cid not in all_cps:
+                    continue
+                cp = dict(all_cps[cid])
+                if cp.get('mp_id') != mid:
+                    continue
+                cp['cascade_children'] = []
+                cp_nodes.append(cp)
+            mp['cps'] = cp_nodes
+            mp_nodes.append(mp)
+        e['mps'] = mp_nodes
+        return e
+
+    if emp_id_filter:
+        row = db.execute("SELECT * FROM employees WHERE id=?", (emp_id_filter,)).fetchone()
+        if not row:
+            return jsonify([])
+        return jsonify([build_node(row)])
+
+    all_emps = {r['id']: dict(r) for r in db.execute("SELECT * FROM employees ORDER BY level, name")}
+    children_map = {}
+    for e in all_emps.values():
+        mid = e.get('manager_id')
+        if mid:
+            children_map.setdefault(mid, []).append(e['id'])
+
+    def build_tree(eid):
+        node = build_node(all_emps[eid])
+        node['children'] = [build_tree(c) for c in children_map.get(eid, [])]
+        return node
+
+    roots = [e['id'] for e in all_emps.values() if not e.get('manager_id')]
+    return jsonify([build_tree(r) for r in roots])
 
 @app.route('/api/cascade/<cid>', methods=['DELETE'])
 def cascade_delete(cid):
@@ -1229,8 +1305,7 @@ def cascade_delete(cid):
 @app.route('/api/bs_today')
 def bs_today():
     now = datetime.datetime.now()
-    m3 = now.strftime('%b')
-    bs_month = AD_TO_BS.get(m3, 'Shrawan')
+    bs_month = AD_TO_BS.get(now.strftime('%b'), 'Shrawan')
     return jsonify({'bs_month': bs_month, 'quarter': bs_q(bs_month), 'ad_date': now.strftime('%Y-%m-%d')})
 
 @app.route('/api/dashboard_layouts', methods=['GET','POST'])
@@ -1265,13 +1340,13 @@ def perf_bulk_delete():
     d = request.json or {}
     fy = d.get('fy','').strip()
     preview = d.get('preview', False)
-    q = "SELECT * FROM perf WHERE 1=1"; args = []
-    if fy: q += " AND fy=?"; args.append(fy)
-    if d.get('month'): q += " AND bs_month=?"; args.append(d['month'])
-    if d.get('emp_code'): q += " AND emp_code=?"; args.append(d['emp_code'])
-    if d.get('mp_ref'): q += " AND mp_ref=?"; args.append(d['mp_ref'])
-    if d.get('cp_ref'): q += " AND cp_ref=?"; args.append(d['cp_ref'])
-    rows = db.execute(q, args).fetchall()
+    q_str = "SELECT * FROM perf WHERE 1=1"; args = []
+    if fy: q_str += " AND fy=?"; args.append(fy)
+    if d.get('month'): q_str += " AND bs_month=?"; args.append(d['month'])
+    if d.get('emp_code'): q_str += " AND emp_code=?"; args.append(d['emp_code'])
+    if d.get('mp_ref'): q_str += " AND mp_ref=?"; args.append(d['mp_ref'])
+    if d.get('cp_ref'): q_str += " AND cp_ref=?"; args.append(d['cp_ref'])
+    rows = db.execute(q_str, args).fetchall()
     if preview: return jsonify({'count': len(rows), 'rows': R(rows)[:20]})
     ids = [r['id'] for r in rows]
     if ids:

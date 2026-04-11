@@ -158,6 +158,8 @@ def init_db():
         "ALTER TABLE locations ADD COLUMN active INTEGER DEFAULT 1",
         "ALTER TABLE locations ADD COLUMN code TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE employees ADD COLUMN email TEXT DEFAULT ''",
+        "ALTER TABLE perf ADD COLUMN location_code TEXT DEFAULT ''",
+        "ALTER TABLE perf ADD COLUMN sector_code TEXT DEFAULT ''",
     ]
     for sql in migrations:
         try: con.execute(sql)
@@ -886,11 +888,23 @@ def import_perf():
             unit = str(row.get('Unit','%') or '%')
             st   = str(row.get('Status','') or calc_status(act, tgt, unit))
             if st not in ('C','NC'): st = calc_status(act, tgt, unit)
-            db.execute("INSERT OR IGNORE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            loc_code = str(row.get('Location_Code','') or row.get('location_code','') or '').strip()
+            sec_code = str(row.get('Sector_Code','')   or row.get('sector_code','')   or '').strip()
+            # Auto-derive sector from employee dept if not supplied
+            if not sec_code and eid:
+                emp_row = db.execute("SELECT dept FROM employees WHERE id=?", (eid,)).fetchone()
+                if emp_row: sec_code = emp_row['dept'] or ''
+            db.execute("""INSERT OR IGNORE INTO perf
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                        (uid(), fy, bsm, bs_q(bsm), eid, ec,
                         str(row.get('MP_Ref','') or ''), str(row.get('CP_Ref','') or ''),
                         str(row.get('Metric','') or ''), tot, comp, nc, pct_c, pct_nc,
                         tgt, act, unit, st, str(row.get('Notes','') or '')))
+            # Update location/sector on the just-inserted row (columns may not be in VALUES if schema is old)
+            try:
+                db.execute("UPDATE perf SET location_code=?,sector_code=? WHERE id=(SELECT id FROM perf ORDER BY rowid DESC LIMIT 1)",
+                           (loc_code, sec_code))
+            except Exception: pass
             count += 1
         except Exception as e: errs.append(f"Row {i}: {e}")
     for fy in fys_seen: _upd_cache(db, fy)
@@ -1141,30 +1155,41 @@ def _gen_sample_cps():
     return _xlsx_out(wb, 'Sample_CheckingPoints.xlsx')
 
 def _gen_sample_perf():
-    """CSV template based on actual MPs/CPs/Employees in DB."""
+    """CSV template based on actual MPs/CPs/Employees/Locations/Sectors in DB."""
     db = get_db()
-    emps = db.execute("SELECT emp_code FROM employees ORDER BY level,name LIMIT 5").fetchall()
+    emps = db.execute("""
+        SELECT e.emp_code, e.dept,
+               s.code as sector_code,
+               l.code as loc_code
+        FROM employees e
+        LEFT JOIN sectors s ON e.dept = s.code
+        LEFT JOIN locations l ON l.sector_id = s.id
+        ORDER BY e.level, e.name LIMIT 5""").fetchall()
     mps  = db.execute("SELECT ref FROM mps ORDER BY ref LIMIT 4").fetchall()
     cp_map = {}
     for m in mps:
         cps = db.execute("SELECT ref FROM cps WHERE mp_id=(SELECT id FROM mps WHERE ref=?) ORDER BY ref LIMIT 3",(m['ref'],)).fetchall()
         cp_map[m['ref']] = [c['ref'] for c in cps]
 
-    rows = [["FY","BS_Month","Emp_Code","MP_Ref","CP_Ref","Metric",
+    rows = [["FY","BS_Month","Emp_Code","Sector_Code","Location_Code",
+             "MP_Ref","CP_Ref","Metric",
              "Total","Compliant","Non_Compliant","Pct_Compliant","Pct_NC",
              "Target_Val","Actual_Val","Unit","Status","Notes"]]
     months = ["Shrawan","Bhadra","Ashwin","Kartik"]
-    ec_list = [e['emp_code'] for e in emps]
-    for i,m in enumerate(mps):
+    for i, m in enumerate(mps):
         mref = m['ref']
-        cps_for_m = cp_map.get(mref,[mref+'-CP'])
-        ec = ec_list[i % len(ec_list)]
+        cps_for_m = cp_map.get(mref, [mref+'-CP'])
+        emp = emps[i % len(emps)]
+        ec  = emp['emp_code']
+        sec = emp['sector_code'] or emp['dept'] or ''
+        loc = emp['loc_code'] or ''
         for mo in months[:2]:
             for cp in cps_for_m[:2]:
                 tot=200; comp=190
-                rows.append(["2081-82",mo,ec,mref,cp,"Compliance Check",
-                             tot,comp,tot-comp,round(comp/tot*100,2),round((tot-comp)/tot*100,2),
-                             100,round(comp/tot*100,2),"%","C","Sample record"])
+                rows.append(["2081-82", mo, ec, sec, loc, mref, cp, "Compliance Check",
+                             tot, comp, tot-comp,
+                             round(comp/tot*100, 2), round((tot-comp)/tot*100, 2),
+                             100, round(comp/tot*100, 2), "%", "C", "Sample record"])
     out = io.StringIO(); w = csv.writer(out)
     for r in rows: w.writerow(r)
     out.seek(0)
@@ -1220,19 +1245,59 @@ if __name__ == '__main__':
 @app.route('/api/cascade', methods=['GET','POST'])
 def cascade_api():
     db = get_db()
+    # Ensure table exists with correct columns (idempotent)
+    db.execute("""CREATE TABLE IF NOT EXISTS cascade_links(
+        id TEXT PRIMARY KEY,
+        parent_emp_id TEXT DEFAULT '',
+        parent_cp_id  TEXT DEFAULT '',
+        child_emp_id  TEXT DEFAULT '',
+        child_mp_id   TEXT DEFAULT '',
+        note TEXT DEFAULT '')""")
+    db.commit()
+
     if request.method == 'GET':
-        try:
-            rows = db.execute("SELECT * FROM cascade_links ORDER BY id").fetchall()
-            return jsonify(R(rows))
-        except: return jsonify([])
+        rows = db.execute("SELECT * FROM cascade_links ORDER BY rowid").fetchall()
+        result = []
+        for row in rows:
+            link = dict(row)
+            pe = db.execute("SELECT * FROM employees WHERE id=?", (link.get('parent_emp_id',''),)).fetchone()
+            ce = db.execute("SELECT * FROM employees WHERE id=?", (link.get('child_emp_id',''),)).fetchone()
+            cp = db.execute("SELECT * FROM cps WHERE id=?", (link.get('parent_cp_id',''),)).fetchone()
+            mp = db.execute("SELECT * FROM mps WHERE id=?", (link.get('child_mp_id',''),)).fetchone()
+            link['parent_emp'] = dict(pe) if pe else {}
+            link['child_emp']  = dict(ce) if ce else {}
+            link['parent_cp']  = dict(cp) if cp else {}
+            link['child_mp']   = dict(mp) if mp else {}
+            result.append(link)
+        return jsonify(result)
+
     d = request.json or {}
     cid = uid()
-    try:
-        db.execute("CREATE TABLE IF NOT EXISTS cascade_links(id TEXT PRIMARY KEY, emp_id TEXT, mp_id TEXT, cp_id TEXT, loc_id TEXT, note TEXT)")
-        db.execute("INSERT INTO cascade_links VALUES(?,?,?,?,?,?)",(cid,d.get('emp_id',''),d.get('mp_id',''),d.get('cp_id',''),d.get('loc_id',''),d.get('note','')))
-        db.commit()
-    except: pass
-    return jsonify({'id': cid})
+    parent_emp_id = d.get('parent_emp_id', d.get('emp_id', ''))
+    parent_cp_id  = d.get('parent_cp_id',  d.get('cp_id',  ''))
+    child_emp_id  = d.get('child_emp_id',  '')
+    child_mp_id   = d.get('child_mp_id',   d.get('mp_id',  ''))
+
+    if not parent_emp_id or not parent_cp_id or not child_emp_id:
+        return jsonify({'error': 'parent_emp_id, parent_cp_id and child_emp_id are required'}), 400
+
+    # Auto-create child MP from the CP if none supplied
+    if not child_mp_id:
+        cp_row = db.execute("SELECT * FROM cps WHERE id=?", (parent_cp_id,)).fetchone()
+        if cp_row:
+            child_mp_id = uid()
+            new_ref   = cp_row['ref'] + '-MP'
+            new_title = cp_row['title']
+            db.execute("INSERT OR IGNORE INTO mps VALUES(?,?,?,?,?,?,?,?)",
+                       (child_mp_id, new_ref, new_title,
+                        cp_row['target'], cp_row['freq'], 0, 0, 0))
+            db.execute("INSERT OR IGNORE INTO mp_owners VALUES(?,?)", (child_mp_id, child_emp_id))
+            db.execute("INSERT OR IGNORE INTO emp_mps VALUES(?,?)", (child_emp_id, child_mp_id))
+
+    db.execute("INSERT OR REPLACE INTO cascade_links VALUES(?,?,?,?,?,?)",
+               (cid, parent_emp_id, parent_cp_id, child_emp_id, child_mp_id, d.get('note','')))
+    db.commit()
+    return jsonify({'id': cid, 'ok': True})
 
 @app.route('/api/cascade/tree')
 def cascade_tree():

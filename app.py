@@ -1016,11 +1016,14 @@ def sector_api(sid):
 def locations_api():
     db = get_db()
     if request.method == 'GET':
-        rows = db.execute("""
-            SELECT l.*, s.name as sector_name, s.color as sector_color
-            FROM locations l LEFT JOIN sectors s ON l.sector_id=s.id
-            ORDER BY l.name
-        """).fetchall()
+        try:
+            rows = db.execute("""
+                SELECT l.*, s.name as sector_name, s.color as sector_color
+                FROM locations l LEFT JOIN sectors s ON l.sector_id=s.id
+                ORDER BY l.name
+            """).fetchall()
+        except Exception:
+            rows = db.execute('SELECT * FROM locations ORDER BY name').fetchall()
         return jsonify(R(rows))
     d = request.json; lid = d.get('id') or uid()
     db.execute("INSERT OR REPLACE INTO locations VALUES(?,?,?,?,?,?)",

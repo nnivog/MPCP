@@ -1194,3 +1194,110 @@ if __name__ == '__main__':
     print(f"  http://localhost:{PORT}")
     print("="*55 + "\n")
     app.run(debug=DEBUG, port=PORT, host='0.0.0.0', use_reloader=False)
+
+# ── MISSING STUBS (fix loadAll crash + perf bulk delete) ──────────────────
+
+@app.route('/api/cascade', methods=['GET','POST','DELETE'])
+def cascade_api():
+    db = get_db()
+    if request.method == 'GET':
+        try:
+            rows = db.execute("SELECT * FROM cascade_links ORDER BY id").fetchall()
+            return jsonify(R(rows))
+        except: return jsonify([])
+    if request.method == 'POST':
+        d = request.json or {}
+        cid = uid()
+        try:
+            db.execute("CREATE TABLE IF NOT EXISTS cascade_links(id TEXT PRIMARY KEY, emp_id TEXT, mp_id TEXT, cp_id TEXT, loc_id TEXT, note TEXT)")
+            db.execute("INSERT INTO cascade_links VALUES(?,?,?,?,?,?)",(cid, d.get('emp_id',''), d.get('mp_id',''), d.get('cp_id',''), d.get('loc_id',''), d.get('note','')))
+            db.commit()
+        except: pass
+        return jsonify({'id': cid})
+    return jsonify({'ok': True})
+
+@app.route('/api/cascade/<cid>', methods=['DELETE'])
+def cascade_delete(cid):
+    db = get_db()
+    try: db.execute("DELETE FROM cascade_links WHERE id=?", (cid,)); db.commit()
+    except: pass
+    return jsonify({'ok': True})
+
+@app.route('/api/bs_today')
+def bs_today():
+    now = datetime.datetime.now()
+    m3 = now.strftime('%b')
+    bs_month = AD_TO_BS.get(m3, 'Shrawan')
+    return jsonify({'bs_month': bs_month, 'quarter': bs_q(bs_month), 'ad_date': now.strftime('%Y-%m-%d')})
+
+@app.route('/api/dashboard_layouts', methods=['GET','POST'])
+def dashboard_layouts():
+    if request.method == 'GET': return jsonify([])
+    return jsonify({'ok': True})
+
+@app.route('/api/org/move', methods=['POST'])
+def org_move():
+    d = request.json or {}
+    db = get_db()
+    db.execute("UPDATE employees SET manager_id=? WHERE id=?", (d.get('new_manager_id'), d.get('emp_id')))
+    db.commit(); return jsonify({'ok': True})
+
+@app.route('/api/org/assign_mp', methods=['POST'])
+def org_assign_mp():
+    d = request.json or {}
+    db = get_db()
+    if d.get('emp_id') and d.get('mp_id'):
+        db.execute("INSERT OR IGNORE INTO emp_mps VALUES(?,?)", (d['emp_id'], d['mp_id']))
+        db.execute("INSERT OR IGNORE INTO mp_owners VALUES(?,?)", (d['mp_id'], d['emp_id']))
+        db.commit()
+    return jsonify({'ok': True})
+
+@app.route('/api/org/cascade_assign', methods=['POST'])
+def org_cascade_assign():
+    return jsonify({'ok': True, 'assigned': 0})
+
+@app.route('/api/perf/bulk_delete', methods=['POST'])
+def perf_bulk_delete():
+    db = get_db()
+    d = request.json or {}
+    fy = d.get('fy','').strip()
+    preview = d.get('preview', False)
+    q = "SELECT * FROM perf WHERE 1=1"; args = []
+    if fy: q += " AND fy=?"; args.append(fy)
+    if d.get('month'): q += " AND bs_month=?"; args.append(d['month'])
+    if d.get('emp_code'): q += " AND emp_code=?"; args.append(d['emp_code'])
+    if d.get('mp_ref'): q += " AND mp_ref=?"; args.append(d['mp_ref'])
+    if d.get('cp_ref'): q += " AND cp_ref=?"; args.append(d['cp_ref'])
+    rows = db.execute(q, args).fetchall()
+    if preview: return jsonify({'count': len(rows), 'rows': R(rows)[:20]})
+    ids = [r['id'] for r in rows]
+    if ids:
+        db.execute(f"DELETE FROM perf WHERE id IN ({','.join('?'*len(ids))})", ids)
+        fys = set(r['fy'] for r in rows)
+        for f in fys: _upd_cache(db, f)
+        db.commit()
+    return jsonify({'deleted': len(ids)})
+
+@app.route('/api/perf/bulk_delete_fy', methods=['POST'])
+def perf_bulk_delete_fy():
+    db = get_db()
+    fy = (request.json or {}).get('fy','').strip()
+    if not fy: return jsonify({'error': 'FY required'}), 400
+    row = db.execute("SELECT locked FROM perf_cache WHERE fy=?", (fy,)).fetchone()
+    if row and row['locked']: return jsonify({'error': 'FY is locked'}), 400
+    cnt = db.execute("SELECT COUNT(*) FROM perf WHERE fy=?", (fy,)).fetchone()[0]
+    db.execute("DELETE FROM perf WHERE fy=?", (fy,))
+    _upd_cache(db, fy); db.commit()
+    return jsonify({'deleted': cnt, 'fy': fy})
+
+@app.route('/api/employees/bulk_delete', methods=['POST'])
+def employees_bulk_delete():
+    db = get_db()
+    ids = (request.json or {}).get('ids', [])
+    if not ids: return jsonify({'error': 'No ids'}), 400
+    for eid in ids:
+        for t,c in [('employees','id'),('mp_owners','emp_id'),('cp_owners','emp_id'),
+                    ('emp_roles','emp_id'),('emp_mps','emp_id'),('emp_cps','emp_id')]:
+            db.execute(f"DELETE FROM {t} WHERE {c}=?", (eid,))
+    db.commit()
+    return jsonify({'deleted': len(ids)})

@@ -4,121 +4,7 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Sipradi SC-MPCP System</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
-// ── LOCATIONS ─────────────────────────────────────────────────────────────────
-const LOC_COLORS = {Office:'#1d4ed8',Border:'#b45309',Warehouse:'#047857',Depot:'#6d28d9',Branch:'#0891b2'}
-
-function renderLocations() {
-    let html = '<div class="section-head"><div><h2>Workstation Locations</h2><p>'+S.locations.length+' locations &middot; staff can belong to multiple workstations</p></div>'
-    html += '<button class="btn btn-primary btn-sm" onclick="openLocForm()">+ New Location</button></div><div class="grid-3">'
-    S.locations.forEach(loc => {
-        const emps = (loc.emp_ids||[]).map(getEmp).filter(Boolean)
-        const color = LOC_COLORS[loc.type]||'#475569'
-        html += '<div class="card" style="border-top:3px solid '+color+';padding:16px">'
-        html += '<div class="flex justify-between items-start mb-8">'
-        html += '<span class="ref-badge" style="font-size:12px;font-weight:900">'+esc(loc.code)+'</span>'
-        html += '<span class="badge" style="background:'+color+'20;color:'+color+';font-weight:700">'+esc(loc.type)+'</span></div>'
-        html += '<p class="font-black" style="font-size:14px">'+esc(loc.name)+'</p>'
-        if(loc.address) html += '<p class="text-xs text-muted mt-4">&#128205; '+esc(loc.address)+'</p>'
-        html += '<div class="mt-12 flex gap-4" style="flex-wrap:wrap">'
-        if(emps.length) emps.forEach(e=>{ html += '<span class="owner-chip" style="background:'+dc(e.dept)+'" onclick="openProfile(''+e.id+'',event)">'+e.name.split(' ')[0]+'</span>' })
-        else html += '<span class="text-xs text-muted italic">No staff assigned</span>'
-        html += '</div><p class="text-xxs text-muted mt-8">'+emps.length+' staff assigned</p>'
-        html += '<div class="flex gap-6 mt-12" style="border-top:1px solid var(--border);padding-top:10px">'
-        html += '<button class="btn btn-ghost btn-sm flex-1" onclick="openLocForm(''+loc.id+'')">Edit</button>'
-        html += '<button class="btn btn-sm flex-1" style="background:#fee2e2;color:#b91c1c" onclick="delLoc(''+loc.id+'')">Delete</button>'
-        html += '</div></div>'
-    })
-    html += '</div>'
-    q('#master-content').innerHTML = html
-}
-
-function openLocForm(id) {
-    const loc = id ? S.locations.find(function(l){return l.id===id}) : null
-    const TYPES = ['Office','Border','Warehouse','Depot','Branch']
-    const typeOpts = TYPES.map(function(t){return '<option'+(loc&&loc.type===t?' selected':'')+'>'+t+'</option>'}).join('')
-    const body = '<div class="form-grid-2">'
-        + '<div class="form-group"><label class="form-label">Location Code</label>'
-        + '<input class="form-input" id="lf-code" value="'+(loc?esc(loc.code):'')+'" placeholder="e.g. BORDER, WH-KTM"></div>'
-        + '<div class="form-group"><label class="form-label">Type</label>'
-        + '<select class="form-select" id="lf-type">'+typeOpts+'</select></div></div>'
-        + '<div class="form-group"><label class="form-label">Location Name</label>'
-        + '<input class="form-input" id="lf-name" value="'+(loc?esc(loc.name):'')+'"></div>'
-        + '<div class="form-group"><label class="form-label">Address / Description</label>'
-        + '<input class="form-input" id="lf-addr" value="'+(loc?esc(loc.address||''):'')+'"></div>'
-        + '<div class="form-group"><label class="form-label">Staff at this Location</label>'
-        + buildOwnerPicker('lf-emps', loc?loc.emp_ids||[]:[])+' </div>'
-    openModal(loc?'Edit Location':'Add Workstation Location', body,
-    [{label: loc?'Save Changes':'Create Location', cls:'btn-primary', fn: async function(){
-        const d = {code:q('#lf-code').value.trim(), name:q('#lf-name').value.trim(),
-                   type:q('#lf-type').value, address:q('#lf-addr').value.trim(),
-                   emp_ids: getOwnerPicked('lf-emps')}
-        if(!d.code||!d.name){toast('Code and name required','error');return}
-        if(loc){d.id=loc.id; await api.put('/api/locations/'+loc.id,d)}
-        else await api.post('/api/locations',d)
-        toast(loc?'Location updated':'Location created','ok'); closeModal(); await loadAll()
-    }}], true)
-}
-
-async function delLoc(id){
-    if(!confirm('Delete this location? Staff assignments will be removed.'))return
-    await api.del('/api/locations/'+id); toast('Deleted','ok'); await loadAll()
-}
-
-async function renderLocationReport() {
-    setSpinner('report-content')
-    const data = await api.get('/api/analytics/by_location?fy='+encodeURIComponent(S.currentFY))
-    const entries = Object.entries(data)
-    let html = '<div class="section-head mb-20"><div>'
-    html += '<h2>Performance by Location &mdash; FY '+esc(S.currentFY)+'</h2>'
-    html += '<p>Compliance rates aggregated by workstation. Staff may appear in multiple locations.</p>'
-    html += '</div></div>'
-    html += '<div class="grid-3 mb-20">'
-    entries.forEach(function(kv){
-        const loc = kv[1]
-        html += compCard({ref:kv[0], title:loc.name+' · '+loc.type,
-            tot:loc.total, comp:loc.compliant, nc:loc.nc,
-            pct_c:loc.pct_c, pct_nc:loc.pct_nc,
-            color: LOC_COLORS[loc.type]||'#475569'})
-    })
-    html += '</div>'
-    html += '<div class="card mb-20"><div class="card-head"><p>Staff Assignments by Location</p></div><div class="card-body">'
-    html += '<div class="tbl-wrap"><table><thead><tr>'
-    html += '<th>Location</th><th>Type</th><th>Address</th><th>Staff</th><th>Compliance</th>'
-    html += '</tr></thead><tbody>'
-    entries.forEach(function(kv){
-        const code=kv[0]; const loc=kv[1]
-        const color = LOC_COLORS[loc.type]||'#475569'
-        const emps = (loc.emp_ids||[]).map(getEmp).filter(Boolean)
-        html += '<tr>'
-        html += '<td><span class="ref-badge" style="font-weight:900">'+esc(code)+'</span> <span class="font-bold">'+esc(loc.name)+'</span></td>'
-        html += '<td><span class="badge" style="background:'+color+'20;color:'+color+'">'+esc(loc.type)+'</span></td>'
-        html += '<td class="text-muted text-xs">'+esc(loc.address||'&mdash;')+'</td>'
-        html += '<td>'+emps.map(function(e){return '<span class="owner-chip" style="background:'+dc(e.dept)+'" onclick="openProfile(''+e.id+'',event)">'+e.name.split(' ')[0]+'</span>'}).join('')+'</td>'
-        if(loc.total>0){
-            const col = loc.pct_c>=95?'var(--green)':loc.pct_c>=80?'var(--amber)':'var(--red)'
-            html += '<td><span class="font-black" style="color:'+col+'">'+loc.pct_c+'%</span> <span class="text-xs text-muted">('+loc.compliant+'/'+loc.total+')</span></td>'
-        } else { html += '<td><span class="text-muted text-xs">No data</span></td>' }
-        html += '</tr>'
-    })
-    html += '</tbody></table></div></div></div>'
-    html += '<div class="card"><div class="card-head"><p>Location Compliance Chart</p></div>'
-    html += '<div class="card-body"><canvas id="loc-chart" height="80"></canvas></div></div>'
-    q('#report-content').innerHTML = html
-    destroyChart('loc-chart')
-    const labels = entries.map(function(kv){return kv[1].name})
-    const pcts   = entries.map(function(kv){return kv[1].pct_c})
-    const bgs    = entries.map(function(kv){return LOC_COLORS[kv[1].type]||'#475569'})
-    charts['loc-chart'] = new Chart(q('#loc-chart'), {
-        type:'bar',
-        data:{labels:labels, datasets:[{label:'Compliance %', data:pcts, backgroundColor:bgs, borderRadius:8}]},
-        options:{responsive:true, plugins:{legend:{display:false}},
-            scales:{y:{min:0,max:100,ticks:{callback:function(v){return v+'%'}},grid:{color:'#f1f5f9'}},
-                    x:{grid:{display:false}}}}
-    })
-}
-
-</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 :root{
   --bg:#f0f2f7;--surface:#fff;--border:#e2e6ef;--text:#0f1a2e;--muted:#6b7a99;
@@ -639,7 +525,16 @@ function openModal(title, body, actions=[], wide=false) {
   q('#modal-body').innerHTML = body
   q('#modal-box').className = 'modal'+(wide?' wide':'')
   const ft = q('#modal-foot'); ft.innerHTML = '<button class="btn btn-ghost" onclick="closeModal()">Cancel</button>'
-  actions.forEach(a=>{const b=document.createElement('button');b.className='btn '+(a.cls||'btn-primary');b.textContent=a.label;b.onclick=a.fn;ft.appendChild(b)})
+  actions.forEach(a=>{
+    const b=document.createElement('button')
+    b.className='btn '+(a.cls||'btn-primary')
+    b.textContent=a.label
+    b.onclick=async function(){
+      try { await a.fn() }
+      catch(err) { toast('Error: '+err.message,'error'); console.error(err) }
+    }
+    ft.appendChild(b)
+  })
   q('#modal-overlay').classList.remove('hidden')
 }
 function closeModal(e){if(e&&e.target!==e.currentTarget)return;q('#modal-overlay').classList.add('hidden')}
@@ -2194,8 +2089,18 @@ function renderSectors() {
   const sectors = S.sectors || []
   const empsBySector = {}
   S.employees.forEach(e => {
-    empsBySector[e.dept] = empsBySector[e.dept] || []
-    empsBySector[e.dept].push(e)
+    // Match by dept code (primary sector code) OR by any assigned sector
+    const deptKey = e.dept || ''
+    empsBySector[deptKey] = empsBySector[deptKey] || []
+    empsBySector[deptKey].push(e)
+    // Also index by sector_ids for multi-sector employees
+    ;(e.sector_ids||[]).forEach(sid => {
+      const sec = (S.sectors||[]).find(s=>s.id===sid)
+      if (sec && sec.code !== deptKey) {
+        empsBySector[sec.code] = empsBySector[sec.code] || []
+        if (!empsBySector[sec.code].includes(e)) empsBySector[sec.code].push(e)
+      }
+    })
   })
   let html = `<div class="section-head">
     <div><h2>Sectors / Departments</h2>
@@ -2207,7 +2112,7 @@ function renderSectors() {
   } else {
     html += '<div class="grid-3">'
     sectors.forEach(s => {
-      const emps = empsBySector[s.name] || []
+      const emps = empsBySector[s.code] || []
       const fyPerf = S.perf.filter(p => p.fy===S.currentFY && emps.some(e=>e.emp_code===p.emp_code))
       const tot  = fyPerf.reduce((a,r)=>a+(r.total||1),0)
       const comp = fyPerf.reduce((a,r)=>a+(r.compliant||(r.status==='C'?1:0)),0)
@@ -2315,31 +2220,36 @@ async function delSector(id,name){
 function renderLocations() {
     const TYPES = ['Office','Border','Warehouse','Depot','Branch']
 
-    // Group employees by dept = sector
-    const sectors = {}
-    S.employees.forEach(e => {
-        if (!sectors[e.dept]) sectors[e.dept] = []
-        sectors[e.dept].push(e)
-    })
+    // Build sector → employees map using junction table (sector_ids) with dept fallback
+    function empsInSector(sec) {
+        return S.employees.filter(e =>
+            (e.sector_ids && e.sector_ids.includes(sec.id)) ||
+            (!e.sector_ids || !e.sector_ids.length) && e.dept === sec.code
+        )
+    }
+
+    const totalSectorStaff = new Set(S.employees.map(e=>e.id)).size
 
     let html = `
     <div class="section-head">
         <div><h2>Workstations &amp; Sectors</h2>
-        <p>${S.locations.length} locations &middot; ${Object.keys(sectors).length} sectors &middot; ${S.employees.length} staff</p></div>
+        <p>${S.locations.length} locations &middot; ${(S.sectors||[]).length} sectors &middot; ${S.employees.length} staff</p></div>
         <div style="display:flex;gap:8px">
           <button class="btn btn-ghost btn-sm" onclick="switchMaster('sectors')">⚙ Manage Sectors</button>
           <button class="btn btn-primary btn-sm" onclick="openLocForm()">+ New Location</button>
         </div>
     </div>`
 
-    // ── SECTOR OVERVIEW ──
+    // ── SECTOR OVERVIEW (from S.sectors — the real list, editable in Manage Sectors) ──
     html += `<div class="card mb-20">
-        <div class="card-head"><p>Sectors / Departments</p></div>
-        <div class="card-body">
-        <div class="grid-4">`
-    Object.entries(sectors).forEach(function(kv) {
-        const sect = kv[0]; const emps = kv[1]
-        const col = SECTOR_COLORS[sect] || '#475569'
+        <div class="card-head">
+          <p>Sectors / Departments</p>
+          <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="switchMaster('sectors')">Edit sectors →</button>
+        </div>
+        <div class="card-body"><div class="grid-4">`
+    ;(S.sectors||[]).forEach(function(sec) {
+        const emps = empsInSector(sec)
+        const col  = sec.color || '#475569'
         const myMPs = S.mps.filter(m => emps.some(e => (m.owner_ids||[]).includes(e.id))).length
         const myCPs = S.cps.filter(c => emps.some(e => (c.owner_ids||[]).includes(e.id))).length
         const fyPerf = S.perf.filter(p => p.fy === S.currentFY && emps.some(e => e.emp_code === p.emp_code))
@@ -2347,23 +2257,29 @@ function renderLocations() {
         const comp = fyPerf.reduce((s,r) => s + (r.compliant||(r.status==='C'?1:0)), 0)
         const pct  = tot ? (comp/tot*100).toFixed(1) : null
         html += `<div class="stat-box" style="border-left:4px solid ${col};text-align:left;padding:14px 16px">
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
-                <span class="dept-badge" style="background:${col}">${sect}</span>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+                <span class="dept-badge" style="background:${col}">${esc(sec.name)}</span>
+                <span class="text-xxs text-muted" style="background:#f1f5f9;padding:2px 6px;border-radius:4px">${esc(sec.code)}</span>
             </div>
             <div style="display:flex;gap:12px;flex-wrap:wrap">
-                <span class="text-xs text-muted"><strong>${emps.length}</strong> staff</span>
+                <span class="text-xs text-muted"><strong style="color:var(--blue)">${emps.length}</strong> staff</span>
                 <span class="text-xs text-muted"><strong>${myMPs}</strong> MPs</span>
                 <span class="text-xs text-muted"><strong>${myCPs}</strong> CPs</span>
             </div>
             ${pct !== null
-                ? `<div style="margin-top:8px;font-size:18px;font-weight:900;font-family:'Syne',sans-serif;color:${pct>=95?'var(--green)':pct>=80?'var(--amber)':'var(--red)'}">${pct}%</div>
+                ? `<div style="margin-top:8px;font-size:18px;font-weight:900;font-family:'Syne',sans-serif;color:${+pct>=95?'var(--green)':+pct>=80?'var(--amber)':'var(--red)'}">${pct}%</div>
                    <div class="text-xxs text-muted">FY ${S.currentFY} compliance</div>`
                 : '<div class="text-xs text-muted italic mt-8">No performance data</div>'}
             <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:4px">
-                ${emps.map(e => `<span class="owner-chip" style="background:${col}" onclick="openProfile('${e.id}',event)">${e.name.split(' ')[0]}</span>`).join('')}
+                ${emps.map(e => `<span class="owner-chip" style="background:${col}" onclick="openProfile('${e.id}',event)" title="${esc(e.role)}">${e.name.split(' ')[0]}</span>`).join('')}
+                ${emps.length===0?'<span class="text-xs text-muted italic">No staff — assign via employee form</span>':''}
             </div>
+            ${sec.description?`<p class="text-xxs text-muted mt-8" style="border-top:1px solid var(--border);padding-top:6px">${esc(sec.description)}</p>`:''}
         </div>`
     })
+    if (!(S.sectors||[]).length) {
+        html += `<div class="info-box"><p>No sectors yet. <button class="btn btn-ghost btn-sm" onclick="switchMaster('sectors')">+ Add Sectors</button></p></div>`
+    }
     html += '</div></div></div>'
 
     // ── LOCATION CARDS ──

@@ -179,7 +179,8 @@ def init_db():
             PRIMARY KEY(emp_id, loc_id));
     """)
     # Back-fill emp_sectors from existing employees.dept (one-time migration)
-    con.row_factory = __import__("sqlite3").Row
+    # Must set row_factory on con so column names work (init_db uses plain sqlite3.connect)
+    con.row_factory = sqlite3.Row
     rows = con.execute("SELECT id, dept FROM employees WHERE dept != ''").fetchall()
     for r in rows:
         sec = con.execute("SELECT id FROM sectors WHERE code=?", (r['dept'],)).fetchone()
@@ -1188,9 +1189,21 @@ def sector_api(sid):
         db.execute("UPDATE locations SET sector_id='' WHERE sector_id=?", (sid,))
         db.execute("DELETE FROM sectors WHERE id=?", (sid,))
         db.commit(); return jsonify({'ok': True})
-    d = request.json
+    d = request.json or {}
+    new_code  = d.get('code','').strip()
+    new_name  = d.get('name','').strip()
+    if not new_name:
+        return jsonify({'error': 'name required'}), 400
+    if not new_code:
+        new_code = ''.join(w[0].upper() for w in new_name.split() if w)[:8]
+    # Get old code so we can update employees.dept references
+    old = db.execute("SELECT code FROM sectors WHERE id=?", (sid,)).fetchone()
+    old_code = old['code'] if old else None
     db.execute("UPDATE sectors SET code=?,name=?,color=?,description=? WHERE id=?",
-               (d['code'], d['name'], d.get('color','#475569'), d.get('description',''), sid))
+               (new_code, new_name, d.get('color','#475569'), d.get('description',''), sid))
+    # Keep employees.dept in sync when the sector code changes
+    if old_code and old_code != new_code:
+        db.execute("UPDATE employees SET dept=? WHERE dept=?", (new_code, old_code))
     db.commit(); return jsonify({'ok': True})
 
 # ── LOCATIONS ────────────────────────────────────────────────────────────────

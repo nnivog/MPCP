@@ -658,6 +658,52 @@ function buildOwnerPicker(pid, sel) {
   </div>`).join('')}</div>`
 }
 function getOwnerPicked(pid) { return [...document.querySelectorAll(`#${pid} input:checked`)].map(i=>i.value) }
+
+// Multi-select picker for Sectors
+function buildSectorPicker(pid, selIds) {
+  const items = S.sectors||[]
+  if (!items.length) return '<p class="text-xs text-muted italic">No sectors defined yet — add them in Master Setup → Sectors first.</p>'
+  return `<div class="owner-list" id="${pid}">${items.map((s,i)=>`
+  <div class="owner-item">
+    <input type="checkbox" value="${s.id}" id="sp-${pid}-${s.id}" ${selIds.includes(s.id)?'checked':''}
+      onchange="markPrimary('${pid}')">
+    <div class="avatar avatar-sm" style="background:${s.color||'#475569'}">${(s.code||s.name||'?')[0].toUpperCase()}</div>
+    <div class="flex-1">
+      <p class="text-sm font-bold">${esc(s.name)}</p>
+      <p class="text-xxs text-muted">${esc(s.code)}</p>
+    </div>
+    ${selIds[0]===s.id?'<span class="badge badge-c text-xxs">Primary</span>':''}
+  </div>`).join('')}</div>`
+}
+function getSectorPicked(pid) { return [...document.querySelectorAll(`#${pid} input:checked`)].map(i=>i.value) }
+
+// Multi-select picker for Locations
+function buildLocationPicker(pid, selIds) {
+  const items = S.locations||[]
+  if (!items.length) return '<p class="text-xs text-muted italic">No locations defined yet.</p>'
+  return `<div class="owner-list" id="${pid}">${items.map(l=>`
+  <div class="owner-item">
+    <input type="checkbox" value="${l.id}" id="lp-${pid}-${l.id}" ${selIds.includes(l.id)?'checked':''}>
+    <div class="avatar avatar-sm" style="background:#0891b2">&#128205;</div>
+    <div class="flex-1">
+      <p class="text-sm font-bold">${esc(l.name)}</p>
+      <p class="text-xxs text-muted">${esc(l.code)}${l.sector_name?' · '+esc(l.sector_name):''}</p>
+    </div>
+  </div>`).join('')}</div>`
+}
+function getLocationPicked(pid) { return [...document.querySelectorAll(`#${pid} input:checked`)].map(i=>i.value) }
+
+// Re-label the first checked item as "Primary" when selections change
+function markPrimary(pid) {
+  const checked = document.querySelectorAll(`#${pid} input:checked`)
+  document.querySelectorAll(`#${pid} .badge-c`).forEach(b=>b.remove())
+  if (checked.length) {
+    const label = document.createElement('span')
+    label.className = 'badge badge-c text-xxs'
+    label.textContent = 'Primary'
+    checked[0].closest('.owner-item').appendChild(label)
+  }
+}
 function buildItemPicker(pid, items, sel, lf) {
   return `<div class="item-list" id="${pid}">${items.map(i=>`
   <div class="item-row">
@@ -695,7 +741,10 @@ function renderTeam() {
       const myMPs=S.mps.filter(m=>(m.owner_ids||[]).includes(emp.id)).length
       const myCPs=S.cps.filter(c=>(c.owner_ids||[]).includes(emp.id)).length
       const eroles=(emp.role_ids||[]).map(getRole).filter(Boolean)
-      html += `<div class="card" style="padding:14px;border-left:3px solid ${dc(emp.dept)}">
+      const empCardColor = emp.sector_ids&&emp.sector_ids.length
+        ? (S.sectors.find(s=>s.id===emp.sector_ids[0])?.color||dc(emp.dept))
+        : dc(emp.dept)
+      html += `<div class="card" style="padding:14px;border-left:3px solid ${empCardColor}">
         <div class="flex gap-12">
           <div class="avatar avatar-md" style="background:${dc(emp.dept)}">${av(emp.name)}</div>
           <div class="flex-1" style="min-width:0">
@@ -753,39 +802,71 @@ function renderOrgChart() {
 }
 
 function openEmpForm(id) {
-  const emp = id?getEmp(id):null
-  const DEPTS = S.sectors&&S.sectors.length ? S.sectors.map(s=>s.name) : ['HOD','Vehicle','Registration','Warehouse','Stock','Ops','Finance','HR']
-  openModal(emp?'Edit Team Member':'Add Team Member', `
-    <div class="form-group"><label class="form-label">Employee Code</label>
-      <input class="form-input" id="ef-code" value="${esc(emp?.emp_code||'')}" placeholder="Auto-generated e.g. EMP-001">
-      <p class="text-xs text-muted mt-8">Used in CSV/Excel uploads as the employee identifier.</p>
-    </div>
-    <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="ef-name" value="${esc(emp?.name||'')}"></div>
-    <div class="form-group"><label class="form-label">Role / Designation</label><input class="form-input" id="ef-role" value="${esc(emp?.role||'')}"></div>
-    <div class="form-group"><label class="form-label">Email</label><input class="form-input" type="email" id="ef-email" value="${esc(emp?.email||'')}"></div>
+  const emp = id ? getEmp(id) : null
+  const selSectors   = emp?.sector_ids  || (emp?.dept ? (S.sectors.filter(s=>s.code===emp.dept).map(s=>s.id)) : [])
+  const selLocations = emp?.loc_ids     || []
+  openModal(emp ? 'Edit Team Member' : 'Add Team Member', `
     <div class="form-grid-2">
-      <div class="form-group"><label class="form-label">Department</label>
-        <select class="form-select" id="ef-dept">${DEPTS.map(d=>`<option ${emp?.dept===d?'selected':''}>${d}</option>`).join('')}</select></div>
+      <div class="form-group"><label class="form-label">Employee Code</label>
+        <input class="form-input" id="ef-code" value="${esc(emp?.emp_code||'')}" placeholder="Auto-generated">
+      </div>
       <div class="form-group"><label class="form-label">Level</label>
         <select class="form-select" id="ef-level">
           <option value="1" ${emp?.level===1?'selected':''}>1 — Head of Department</option>
           <option value="2" ${emp?.level===2?'selected':''}>2 — Team Lead</option>
           <option value="3" ${!emp||emp.level===3?'selected':''}>3 — Operations</option>
-        </select></div>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Full Name *</label>
+      <input class="form-input" id="ef-name" value="${esc(emp?.name||'')}">
+    </div>
+    <div class="form-group"><label class="form-label">Role / Designation</label>
+      <input class="form-input" id="ef-role" value="${esc(emp?.role||'')}">
+    </div>
+    <div class="form-group"><label class="form-label">Email</label>
+      <input class="form-input" type="email" id="ef-email" value="${esc(emp?.email||'')}">
     </div>
     <div class="form-group"><label class="form-label">Reports To (Manager)</label>
       <select class="form-select" id="ef-mgr">
         <option value="">— None / Top Level —</option>
         ${S.employees.filter(e=>e.id!==id).map(e=>`<option value="${e.id}" ${emp?.manager_id===e.id?'selected':''}>${esc(e.name)} (${esc(e.emp_code||'')})</option>`).join('')}
-      </select></div>`,
-    [{label:emp?'Save Changes':'Add Member',cls:'btn-primary',fn:async()=>{
-      const d={name:q('#ef-name').value,role:q('#ef-role').value,email:q('#ef-email').value,
-        emp_code:q('#ef-code').value.trim(),dept:q('#ef-dept').value,
-        level:+q('#ef-level').value,manager_id:q('#ef-mgr').value||null}
-      if(!d.name){toast('Name required','error');return}
-      if(emp){d.id=emp.id;await api.put(`/api/employees/${emp.id}`,d)}
-      else await api.post('/api/employees',d)
-      toast(emp?'Member updated':'Member added','ok');closeModal();await loadAll()
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Sectors / Departments
+        <span class="text-xxs text-muted font-normal">&nbsp;— select all that apply, first = primary</span>
+      </label>
+      ${buildSectorPicker('ef-sectors', selSectors)}
+    </div>
+    <div class="form-group">
+      <label class="form-label">Work Locations
+        <span class="text-xxs text-muted font-normal">&nbsp;— branches / offices this employee works at</span>
+      </label>
+      ${buildLocationPicker('ef-locations', selLocations)}
+    </div>`,
+    [{label: emp ? 'Save Changes' : 'Add Member', cls: 'btn-primary', fn: async () => {
+      const sector_ids   = getSectorPicked('ef-sectors')
+      const loc_ids      = getLocationPicked('ef-locations')
+      const d = {
+        name:       q('#ef-name').value.trim(),
+        role:       q('#ef-role').value,
+        email:      q('#ef-email').value,
+        emp_code:   q('#ef-code').value.trim(),
+        level:      +q('#ef-level').value,
+        manager_id: q('#ef-mgr').value || null,
+        sector_ids,
+        loc_ids,
+        // keep dept in sync with primary sector for backward compat
+        dept: sector_ids.length
+          ? (S.sectors.find(s=>s.id===sector_ids[0])?.code || 'Ops')
+          : 'Ops'
+      }
+      if (!d.name) { toast('Name required', 'error'); return }
+      if (emp) { d.id = emp.id; await api.put(`/api/employees/${emp.id}`, d) }
+      else await api.post('/api/employees', d)
+      toast(emp ? 'Member updated' : 'Member added', 'ok')
+      closeModal(); await loadAll()
     }}]
   )
 }
@@ -832,9 +913,14 @@ function openProfile(id, e) {
         <p class="text-sm text-muted">${esc(emp.role)}</p>
         <div class="flex gap-8 mt-8" style="flex-wrap:wrap">
           <span class="emp-code">${esc(emp.emp_code||'—')}</span>
-          ${deptBadge(emp.dept)}
+          ${(emp.sector_ids&&emp.sector_ids.length
+            ? emp.sector_ids.map(sid=>{const s=S.sectors.find(x=>x.id===sid);return s?`<span class="dept-badge" style="background:${s.color||'#475569'}">${s.name}</span>`:''}).join('')
+            : deptBadge(emp.dept))}
           <span class="badge badge-gray">Level ${emp.level}</span>
           ${mgr?`<span class="badge badge-gray">→ ${esc(mgr.name.split(' ')[0])}</span>`:''}
+          ${(emp.loc_ids&&emp.loc_ids.length
+            ? emp.loc_ids.map(lid=>{const l=(S.locations||[]).find(x=>x.id===lid);return l?`<span class="badge badge-gray">&#128205; ${esc(l.name)}</span>`:''}).join('')
+            : '')}
         </div>
         ${eroles.length?`<div class="flex gap-4 mt-8">${eroles.map(r=>`<span class="badge" style="background:${r.color};color:#fff">${esc(r.name)}</span>`).join('')}</div>`:''}
       </div>
@@ -1650,15 +1736,38 @@ function openPerfForm(id){
       <div class="form-group"><label class="form-label">Unit</label>
         <select class="form-select" id="pf-unit-in">${UNITS.map(u=>`<option ${rec?.unit===u?'selected':''}>${u}</option>`).join('')}</select></div>
     </div>
+    <div class="form-grid-2">
+      <div class="form-group"><label class="form-label">Sector</label>
+        <select class="form-select" id="pf-sec-in">
+          <option value="">— Auto from employee —</option>
+          ${S.sectors.map(s=>`<option value="${s.code}" ${rec?.sector_code===s.code?'selected':''}>${esc(s.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Location</label>
+        <select class="form-select" id="pf-loc-in">
+          <option value="">— Auto from employee —</option>
+          ${(S.locations||[]).map(l=>`<option value="${l.code}" ${rec?.location_code===l.code?'selected':''}>${esc(l.name)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
     <div class="form-group"><label class="form-label">Notes</label><input class="form-input" id="pf-notes-in" value="${esc(rec?.notes||'')}"></div>`,
     [{label:rec?'Save Changes':'Add Record',cls:'btn-primary',fn:async()=>{
       const ec=q('#pf-emp-in').value
       const tot=+q('#pf-tot-in').value, comp=+q('#pf-c-in').value, nc=+q('#pf-nc-in').value
+      const selEmp2 = S.employees.find(e=>e.emp_code===ec||e.id===ec)
+      const autoSec2 = selEmp2 && selEmp2.sector_ids && selEmp2.sector_ids.length
+        ? (S.sectors.find(s=>s.id===selEmp2.sector_ids[0])?.code||selEmp2.dept||'')
+        : (selEmp2?.dept||'')
+      const autoLoc2 = selEmp2 && selEmp2.loc_ids && selEmp2.loc_ids.length
+        ? ((S.locations||[]).find(l=>l.id===selEmp2.loc_ids[0])?.code||'')
+        : ''
       const d={fy:q('#pf-fy-in').value, bs_month:q('#pf-mo-in').value,
         emp_code:ec, mp_ref:q('#pf-mp-in').value, cp_ref:q('#pf-cp-in').value,
         metric:q('#pf-metric-in').value, total:tot, compliant:comp, non_compliant:nc,
         target_val:+q('#pf-tgt-in').value, actual_val:+q('#pf-act-in').value,
-        unit:q('#pf-unit-in').value, notes:q('#pf-notes-in').value}
+        unit:q('#pf-unit-in').value, notes:q('#pf-notes-in').value,
+        sector_code:  q('#pf-sec-in')?.value  || autoSec2,
+        location_code:q('#pf-loc-in')?.value  || autoLoc2}
       if(!d.emp_code){toast('Select employee','error');return}
       if(rec){d.id=rec.id;await api.put(`/api/perf/${rec.id}`,d)}
       else await api.post('/api/perf',d)
@@ -2370,49 +2479,38 @@ async function delLoc(id) {
 // ── LOCATION REPORT ───────────────────────────────────────────────────────────
 async function renderLocationReport() {
     setSpinner('report-content')
-    const data = await api.get('/api/analytics/by_location?fy='+encodeURIComponent(S.currentFY))
-    const entries = Object.entries(data)
-
-    // Also build sector summary from live S.perf
-    const fyPerf = perfByFY(S.currentFY)
-    const sectors = {}
-    S.employees.forEach(function(e) {
-        if (!sectors[e.dept]) sectors[e.dept] = { emps:[], tot:0, comp:0, nc:0 }
-        sectors[e.dept].emps.push(e)
-    })
-    fyPerf.forEach(function(r) {
-        const emp = getEmpByCode(r.emp_code)
-        if (!emp) return
-        const s = sectors[emp.dept]
-        if (!s) return
-        s.tot  += (r.total||1)
-        s.comp += (r.compliant||(r.status==='C'?1:0))
-        s.nc   += (r.non_compliant||(r.status==='NC'?1:0))
-    })
+    const [locData, secData] = await Promise.all([
+        api.get('/api/analytics/by_location?fy='+encodeURIComponent(S.currentFY)),
+        api.get('/api/analytics/by_sector?fy='+encodeURIComponent(S.currentFY))
+    ])
+    const locEntries = Object.entries(locData)
+    const secEntries = Object.entries(secData)
 
     let html = `<div class="section-head mb-16"><div>
         <h2>Performance by Location &amp; Sector &mdash; FY ${esc(S.currentFY)}</h2>
-        <p>Compliance rates broken down by workstation and by department/sector.</p>
+        <p>Employees can belong to multiple sectors and locations. Each bucket counts all assigned staff.</p>
     </div></div>`
 
-    // ── SECTOR COMPLIANCE ──
+    // ── SECTOR COMPLIANCE (from real API, junction-table based) ──
     html += `<div class="card mb-20">
-        <div class="card-head"><p>By Sector / Department</p></div>
+        <div class="card-head"><p>By Sector / Department</p>
+          <span class="text-xs text-muted">${secEntries.length} sectors</span>
+        </div>
         <div class="card-body"><div class="grid-4">`
-    Object.entries(sectors).forEach(function(kv) {
-        const sect=kv[0]; const s=kv[1]
-        const col = SECTOR_COLORS[sect]||'#475569'
-        const pct = s.tot ? (s.comp/s.tot*100).toFixed(1) : null
+    secEntries.forEach(function(kv) {
+        const code=kv[0]; const s=kv[1]
+        const col = s.color || SECTOR_COLORS[code] || '#475569'
+        const pct = s.total ? (s.compliant/s.total*100).toFixed(1) : null
         html += `<div class="compliance-card" style="border-left:4px solid ${col}">
             <div class="cc-title">
-                <span class="dept-badge" style="background:${col}">${sect}</span>
-                <span class="flex-1 text-xs text-muted">${s.emps.length} staff</span>
-                <span class="cc-pct" style="color:${pct?( pct>=95?'var(--green)':pct>=80?'var(--amber)':'var(--red)'):'#94a3b8'}">${pct!==null?pct+'%':'—'}</span>
+                <span class="dept-badge" style="background:${col}">${esc(s.name||code)}</span>
+                <span class="flex-1 text-xs text-muted">${s.emp_count} staff</span>
+                <span class="cc-pct" style="color:${pct?(+pct>=95?'var(--green)':+pct>=80?'var(--amber)':'var(--red)'):'#94a3b8'}">${pct!==null?pct+'%':'—'}</span>
             </div>
-            ${pct!==null?`<div class="cc-bar"><span class="cc-bar-c" style="width:${Math.min(pct,100)}%;background:${pct>=95?'var(--green)':pct>=80?'var(--amber)':'var(--red)'}"></span></div>
+            ${pct!==null?`<div class="cc-bar"><span class="cc-bar-c" style="width:${Math.min(+pct,100)}%;background:${+pct>=95?'var(--green)':+pct>=80?'var(--amber)':'var(--red)'}"></span></div>
             <div class="cc-nums">
-                <span class="cc-total">Total: <strong>${s.tot}</strong></span>
-                <span class="cc-c">&#10003; ${s.comp}</span>
+                <span class="cc-total">Total: <strong>${s.total}</strong></span>
+                <span class="cc-c">&#10003; ${s.compliant}</span>
                 <span class="cc-nc">&#10007; ${s.nc}</span>
             </div>`:'<p class="text-xs text-muted italic">No data this FY</p>'}
         </div>`

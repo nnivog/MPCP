@@ -145,6 +145,14 @@ CREATE TABLE IF NOT EXISTS locations(
   id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL, address TEXT DEFAULT '',
   sector_id TEXT DEFAULT '', active INTEGER DEFAULT 1);
+
+CREATE TABLE IF NOT EXISTS emp_sectors(
+  emp_id TEXT, sector_id TEXT, is_primary INTEGER DEFAULT 0,
+  PRIMARY KEY(emp_id, sector_id));
+
+CREATE TABLE IF NOT EXISTS emp_locations(
+  emp_id TEXT, loc_id TEXT, is_primary INTEGER DEFAULT 0,
+  PRIMARY KEY(emp_id, loc_id));
 """
 
 def init_db():
@@ -161,6 +169,25 @@ def init_db():
         "ALTER TABLE perf ADD COLUMN location_code TEXT DEFAULT ''",
         "ALTER TABLE perf ADD COLUMN sector_code TEXT DEFAULT ''",
     ]
+    # Ensure new junction tables exist (safe for existing DBs)
+    con.executescript("""
+        CREATE TABLE IF NOT EXISTS emp_sectors(
+            emp_id TEXT, sector_id TEXT, is_primary INTEGER DEFAULT 0,
+            PRIMARY KEY(emp_id, sector_id));
+        CREATE TABLE IF NOT EXISTS emp_locations(
+            emp_id TEXT, loc_id TEXT, is_primary INTEGER DEFAULT 0,
+            PRIMARY KEY(emp_id, loc_id));
+    """)
+    # Back-fill emp_sectors from existing employees.dept (one-time migration)
+    rows = con.execute("SELECT id, dept FROM employees WHERE dept != ''").fetchall()
+    for r in rows:
+        sec = con.execute("SELECT id FROM sectors WHERE code=?", (r['dept'],)).fetchone()
+        if sec:
+            try:
+                con.execute("INSERT OR IGNORE INTO emp_sectors VALUES(?,?,1)", (r['id'], sec['id']))
+            except Exception:
+                pass
+    con.commit()
     for sql in migrations:
         try: con.execute(sql)
         except Exception: pass  # column already exists — ignore
@@ -368,9 +395,18 @@ def health():
 
 def enrich_emp(e, db):
     r = dict(e)
-    r['role_ids'] = [x['role_id'] for x in db.execute("SELECT role_id FROM emp_roles WHERE emp_id=?", (r['id'],))]
-    r['mp_ids']   = [x['mp_id']   for x in db.execute("SELECT mp_id   FROM emp_mps   WHERE emp_id=?", (r['id'],))]
-    r['cp_ids']   = [x['cp_id']   for x in db.execute("SELECT cp_id   FROM emp_cps   WHERE emp_id=?", (r['id'],))]
+    r['role_ids']    = [x['role_id']  for x in db.execute("SELECT role_id  FROM emp_roles     WHERE emp_id=?", (r['id'],))]
+    r['mp_ids']      = [x['mp_id']    for x in db.execute("SELECT mp_id    FROM emp_mps       WHERE emp_id=?", (r['id'],))]
+    r['cp_ids']      = [x['cp_id']    for x in db.execute("SELECT cp_id    FROM emp_cps       WHERE emp_id=?", (r['id'],))]
+    r['sector_ids']  = [x['sector_id'] for x in db.execute("SELECT sector_id FROM emp_sectors WHERE emp_id=?", (r['id'],))]
+    r['loc_ids']     = [x['loc_id']   for x in db.execute("SELECT loc_id   FROM emp_locations WHERE emp_id=?", (r['id'],))]
+    # primary sector code for backward compat (dc() / deptBadge still read emp.dept)
+    if r['sector_ids']:
+        pri = db.execute("SELECT s.code FROM emp_sectors es JOIN sectors s ON es.sector_id=s.id WHERE es.emp_id=? AND es.is_primary=1 LIMIT 1", (r['id'],)).fetchone()
+        if not pri:
+            pri = db.execute("SELECT s.code FROM emp_sectors es JOIN sectors s ON es.sector_id=s.id WHERE es.emp_id=? LIMIT 1", (r['id'],)).fetchone()
+        if pri:
+            r['dept'] = pri['code']
     return r
 
 @app.route('/api/employees', methods=['GET','POST'])
@@ -386,9 +422,24 @@ def employees_api():
         try: num = int(last['emp_code'].split('-')[1]) + 1 if last else 1
         except: num = 1
         code = f"EMP-{num:03d}"
+    # Derive dept from primary sector_id if provided
+    dept = d.get('dept', 'Ops')
+    sec_ids = d.get('sector_ids', [])
+    if sec_ids:
+        pri_sec = db.execute("SELECT code FROM sectors WHERE id=?", (sec_ids[0],)).fetchone()
+        if pri_sec:
+            dept = pri_sec['code']
     db.execute("INSERT OR REPLACE INTO employees VALUES(?,?,?,?,?,?,?,?)",
                (eid, code, d['name'], d.get('role',''), d.get('level',3),
-                d.get('dept','Ops'), d.get('manager_id') or None, d.get('email','')))
+                dept, d.get('manager_id') or None, d.get('email','')))
+    # Save sector assignments
+    db.execute("DELETE FROM emp_sectors WHERE emp_id=?", (eid,))
+    for i, sid in enumerate(sec_ids):
+        db.execute("INSERT OR IGNORE INTO emp_sectors VALUES(?,?,?)", (eid, sid, 1 if i==0 else 0))
+    # Save location assignments
+    db.execute("DELETE FROM emp_locations WHERE emp_id=?", (eid,))
+    for i, lid in enumerate(d.get('loc_ids', [])):
+        db.execute("INSERT OR IGNORE INTO emp_locations VALUES(?,?,?)", (eid, lid, 1 if i==0 else 0))
     db.commit()
     return jsonify({'id': eid, 'emp_code': code})
 
@@ -397,14 +448,27 @@ def employee_api(eid):
     db = get_db()
     if request.method == 'DELETE':
         for t, c in [('employees','id'),('mp_owners','emp_id'),('cp_owners','emp_id'),
-                     ('emp_roles','emp_id'),('emp_mps','emp_id'),('emp_cps','emp_id')]:
+                     ('emp_roles','emp_id'),('emp_mps','emp_id'),('emp_cps','emp_id'),
+                     ('emp_sectors','emp_id'),('emp_locations','emp_id')]:
             db.execute(f"DELETE FROM {t} WHERE {c}=?", (eid,))
         db.commit()
         return jsonify({'ok': True})
     d = request.json
+    dept = d.get('dept', 'Ops')
+    sec_ids = d.get('sector_ids', [])
+    if sec_ids:
+        pri_sec = db.execute("SELECT code FROM sectors WHERE id=?", (sec_ids[0],)).fetchone()
+        if pri_sec:
+            dept = pri_sec['code']
     db.execute("UPDATE employees SET emp_code=?,name=?,role=?,level=?,dept=?,manager_id=?,email=? WHERE id=?",
                (d.get('emp_code'), d['name'], d.get('role',''), d.get('level',3),
-                d.get('dept','Ops'), d.get('manager_id') or None, d.get('email',''), eid))
+                dept, d.get('manager_id') or None, d.get('email',''), eid))
+    db.execute("DELETE FROM emp_sectors WHERE emp_id=?", (eid,))
+    for i, sid in enumerate(sec_ids):
+        db.execute("INSERT OR IGNORE INTO emp_sectors VALUES(?,?,?)", (eid, sid, 1 if i==0 else 0))
+    db.execute("DELETE FROM emp_locations WHERE emp_id=?", (eid,))
+    for i, lid in enumerate(d.get('loc_ids', [])):
+        db.execute("INSERT OR IGNORE INTO emp_locations VALUES(?,?,?)", (eid, lid, 1 if i==0 else 0))
     db.commit()
     return jsonify({'ok': True})
 
@@ -968,6 +1032,93 @@ def analytics_summary():
         for emp_d in rv['by_emp'].values():
             pct(emp_d)
             for mp2 in emp_d.get('by_mp',{}).values(): pct(mp2)
+    return jsonify(result)
+
+@app.route('/api/analytics/by_location')
+def analytics_by_location():
+    db  = get_db()
+    fy  = request.args.get('fy', '')
+    locs = db.execute("SELECT * FROM locations ORDER BY name").fetchall()
+    result = {}
+    for loc in locs:
+        # All employees assigned to this location
+        emp_ids = [r['emp_id'] for r in db.execute(
+            "SELECT emp_id FROM emp_locations WHERE loc_id=?", (loc['id'],))]
+        if not emp_ids:
+            # fallback: employees whose primary sector matches location's sector
+            if loc['sector_id']:
+                emp_ids = [r['id'] for r in db.execute(
+                    "SELECT id FROM employees WHERE id IN (SELECT emp_id FROM emp_sectors WHERE sector_id=?)",
+                    (loc['sector_id'],))]
+        emp_codes = []
+        if emp_ids:
+            ph = ','.join('?'*len(emp_ids))
+            emp_codes = [r['emp_code'] for r in db.execute(
+                f"SELECT emp_code FROM employees WHERE id IN ({ph})", emp_ids)]
+        q2 = "SELECT * FROM perf WHERE 1=1"; args = []
+        if fy:
+            q2 += " AND fy=?"; args.append(fy)
+        if emp_codes:
+            ph = ','.join('?'*len(emp_codes))
+            q2 += f" AND emp_code IN ({ph})"; args += emp_codes
+        rows = db.execute(q2, args).fetchall()
+        tot  = sum(r['total'] or 1 for r in rows)
+        comp = sum(r['compliant'] or (1 if r['status']=='C' else 0) for r in rows)
+        nc   = tot - comp
+        # Sector breakdown for this location
+        sector_info = {}
+        if loc['sector_id']:
+            sec = db.execute("SELECT * FROM sectors WHERE id=?", (loc['sector_id'],)).fetchone()
+            if sec:
+                sector_info = {'id': sec['id'], 'code': sec['code'],
+                               'name': sec['name'], 'color': sec['color']}
+        result[loc['code']] = {
+            'id': loc['id'], 'name': loc['name'], 'address': loc['address'],
+            'active': loc['active'], 'sector': sector_info,
+            'emp_ids': emp_ids, 'emp_count': len(emp_ids),
+            'total': tot, 'compliant': comp, 'nc': nc,
+            'pct_c':  round(comp/tot*100, 2) if tot else 0,
+            'pct_nc': round(nc/tot*100,   2) if tot else 0,
+        }
+    return jsonify(result)
+
+@app.route('/api/analytics/by_sector')
+def analytics_by_sector():
+    db  = get_db()
+    fy  = request.args.get('fy', '')
+    secs = db.execute("SELECT * FROM sectors ORDER BY name").fetchall()
+    result = {}
+    for sec in secs:
+        # All employees in this sector (via junction table)
+        emp_ids = [r['emp_id'] for r in db.execute(
+            "SELECT emp_id FROM emp_sectors WHERE sector_id=?", (sec['id'],))]
+        # Also pick up employees whose dept still matches the code (legacy)
+        legacy = [r['id'] for r in db.execute(
+            "SELECT id FROM employees WHERE dept=? AND id NOT IN (SELECT emp_id FROM emp_sectors WHERE sector_id=?)",
+            (sec['code'], sec['id']))]
+        emp_ids = list(dict.fromkeys(emp_ids + legacy))
+        emp_codes = []
+        if emp_ids:
+            ph = ','.join('?'*len(emp_ids))
+            emp_codes = [r['emp_code'] for r in db.execute(
+                f"SELECT emp_code FROM employees WHERE id IN ({ph})", emp_ids)]
+        q2 = "SELECT * FROM perf WHERE 1=1"; args = []
+        if fy:
+            q2 += " AND fy=?"; args.append(fy)
+        if emp_codes:
+            ph = ','.join('?'*len(emp_codes))
+            q2 += f" AND emp_code IN ({ph})"; args += emp_codes
+        rows = db.execute(q2, args).fetchall()
+        tot  = sum(r['total'] or 1 for r in rows)
+        comp = sum(r['compliant'] or (1 if r['status']=='C' else 0) for r in rows)
+        nc   = tot - comp
+        result[sec['code']] = {
+            'id': sec['id'], 'code': sec['code'], 'name': sec['name'],
+            'color': sec['color'], 'emp_ids': emp_ids, 'emp_count': len(emp_ids),
+            'total': tot, 'compliant': comp, 'nc': nc,
+            'pct_c':  round(comp/tot*100, 2) if tot else 0,
+            'pct_nc': round(nc/tot*100,   2) if tot else 0,
+        }
     return jsonify(result)
 
 @app.route('/api/calendar')

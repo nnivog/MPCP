@@ -179,6 +179,7 @@ def init_db():
             PRIMARY KEY(emp_id, loc_id));
     """)
     # Back-fill emp_sectors from existing employees.dept (one-time migration)
+    con.row_factory = __import__("sqlite3").Row
     rows = con.execute("SELECT id, dept FROM employees WHERE dept != ''").fetchall()
     for r in rows:
         sec = con.execute("SELECT id FROM sectors WHERE code=?", (r['dept'],)).fetchone()

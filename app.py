@@ -168,6 +168,8 @@ def init_db():
         "ALTER TABLE employees ADD COLUMN email TEXT DEFAULT ''",
         "ALTER TABLE perf ADD COLUMN location_code TEXT DEFAULT ''",
         "ALTER TABLE perf ADD COLUMN sector_code TEXT DEFAULT ''",
+        "ALTER TABLE emp_sectors  ADD COLUMN is_primary INTEGER DEFAULT 0",
+        "ALTER TABLE emp_locations ADD COLUMN is_primary INTEGER DEFAULT 0",
     ]
     # Ensure new junction tables exist (safe for existing DBs)
     con.executescript("""
@@ -437,11 +439,13 @@ def employees_api():
     # Save sector assignments
     db.execute("DELETE FROM emp_sectors WHERE emp_id=?", (eid,))
     for i, sid in enumerate(sec_ids):
-        db.execute("INSERT OR IGNORE INTO emp_sectors VALUES(?,?,?)", (eid, sid, 1 if i==0 else 0))
+        db.execute("INSERT OR IGNORE INTO emp_sectors(emp_id,sector_id,is_primary) VALUES(?,?,?)",
+                   (eid, sid, 1 if i==0 else 0))
     # Save location assignments
     db.execute("DELETE FROM emp_locations WHERE emp_id=?", (eid,))
     for i, lid in enumerate(d.get('loc_ids', [])):
-        db.execute("INSERT OR IGNORE INTO emp_locations VALUES(?,?,?)", (eid, lid, 1 if i==0 else 0))
+        db.execute("INSERT OR IGNORE INTO emp_locations(emp_id,loc_id,is_primary) VALUES(?,?,?)",
+                   (eid, lid, 1 if i==0 else 0))
     db.commit()
     return jsonify({'id': eid, 'emp_code': code})
 
@@ -467,10 +471,12 @@ def employee_api(eid):
                 dept, d.get('manager_id') or None, d.get('email',''), eid))
     db.execute("DELETE FROM emp_sectors WHERE emp_id=?", (eid,))
     for i, sid in enumerate(sec_ids):
-        db.execute("INSERT OR IGNORE INTO emp_sectors VALUES(?,?,?)", (eid, sid, 1 if i==0 else 0))
+        db.execute("INSERT OR IGNORE INTO emp_sectors(emp_id,sector_id,is_primary) VALUES(?,?,?)",
+                   (eid, sid, 1 if i==0 else 0))
     db.execute("DELETE FROM emp_locations WHERE emp_id=?", (eid,))
     for i, lid in enumerate(d.get('loc_ids', [])):
-        db.execute("INSERT OR IGNORE INTO emp_locations VALUES(?,?,?)", (eid, lid, 1 if i==0 else 0))
+        db.execute("INSERT OR IGNORE INTO emp_locations(emp_id,loc_id,is_primary) VALUES(?,?,?)",
+                   (eid, lid, 1 if i==0 else 0))
     db.commit()
     return jsonify({'ok': True})
 

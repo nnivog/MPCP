@@ -136,6 +136,25 @@ CREATE TABLE IF NOT EXISTS perf_cache(
   fy TEXT PRIMARY KEY, label TEXT NOT NULL,
   record_count INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT, locked INTEGER DEFAULT 0);
 
+CREATE TABLE IF NOT EXISTS perf_raw(
+  id TEXT PRIMARY KEY,
+  recorded_date TEXT NOT NULL,
+  bs_month TEXT NOT NULL,
+  fy TEXT NOT NULL,
+  quarter TEXT DEFAULT 'Q1',
+  emp_id TEXT DEFAULT '',
+  emp_code TEXT NOT NULL,
+  cp_ref TEXT NOT NULL,
+  mp_ref TEXT DEFAULT '',
+  actual_val REAL DEFAULT 0,
+  target_val REAL DEFAULT 0,
+  unit TEXT DEFAULT '%',
+  status TEXT DEFAULT 'C',
+  remarks TEXT DEFAULT '',
+  imported_at TEXT DEFAULT '',
+  sector_code TEXT DEFAULT '',
+  location_code TEXT DEFAULT '');
+
 CREATE TABLE IF NOT EXISTS sectors(
   id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE,
   name TEXT NOT NULL, color TEXT DEFAULT '#475569',
@@ -171,6 +190,16 @@ def init_db():
         "ALTER TABLE emp_sectors  ADD COLUMN is_primary INTEGER DEFAULT 0",
         "ALTER TABLE emp_locations ADD COLUMN is_primary INTEGER DEFAULT 0",
     ]
+    # Ensure perf_raw table exists
+    con.execute("""CREATE TABLE IF NOT EXISTS perf_raw(
+        id TEXT PRIMARY KEY, recorded_date TEXT NOT NULL,
+        bs_month TEXT NOT NULL, fy TEXT NOT NULL, quarter TEXT DEFAULT 'Q1',
+        emp_id TEXT DEFAULT '', emp_code TEXT NOT NULL,
+        cp_ref TEXT NOT NULL, mp_ref TEXT DEFAULT '',
+        actual_val REAL DEFAULT 0, target_val REAL DEFAULT 0,
+        unit TEXT DEFAULT '%', status TEXT DEFAULT 'C',
+        remarks TEXT DEFAULT '', imported_at TEXT DEFAULT '',
+        sector_code TEXT DEFAULT '', location_code TEXT DEFAULT '')""")
     # Ensure new junction tables exist (safe for existing DBs)
     con.executescript("""
         CREATE TABLE IF NOT EXISTS emp_sectors(
@@ -900,6 +929,209 @@ def perf_record(pid):
 PHDR = ['FY','BS_Month','Emp_Code','MP_Ref','CP_Ref','Metric',
         'Total','Compliant','Non_Compliant','Pct_Compliant','Pct_NC',
         'Target_Val','Actual_Val','Unit','Status','Notes']
+
+
+@app.route('/api/perf/simple_template')
+def perf_simple_template():
+    """Minimal 5-column template - the only thing users need to fill."""
+    import datetime
+    if HAS_OPENPYXL:
+        from openpyxl.styles import Font, PatternFill, Alignment
+        wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Performance"
+        headers = ["Date (YYYY-MM-DD)", "Emp_Code", "CP_Ref", "Actual_Value", "Remarks"]
+        for col, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="1E3A5F")
+            cell.alignment = Alignment(horizontal="center")
+        hints = ["e.g. 2082-01-15", "EMP-002", "LM-VEH-2-B", "2.8", "On time"]
+        for col, h in enumerate(hints, 1):
+            cell = ws.cell(row=2, column=col, value=h)
+            cell.font = Font(italic=True, color="94A3B8")
+        db = get_db()
+        emps = db.execute("SELECT emp_code FROM employees ORDER BY level,name LIMIT 3").fetchall()
+        cps  = db.execute("SELECT ref, target FROM cps ORDER BY ref LIMIT 6").fetchall()
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        row = 3
+        for i, cp in enumerate(cps):
+            ec = emps[i % len(emps)]["emp_code"] if emps else "EMP-001"
+            ws.cell(row=row, column=1, value=today)
+            ws.cell(row=row, column=2, value=ec)
+            ws.cell(row=row, column=3, value=cp["ref"])
+            tgt = cp["target"] or "95"
+            try: ws.cell(row=row, column=4, value=float("".join(c for c in tgt.split()[0] if c.isdigit() or c == ".")))
+            except: ws.cell(row=row, column=4, value=95)
+            ws.cell(row=row, column=5, value="Sample record")
+            row += 1
+        for col, w in enumerate([20, 12, 18, 14, 30], 1):
+            ws.column_dimensions[chr(64+col)].width = w
+        out = io.BytesIO(); wb.save(out); out.seek(0)
+        return send_file(out,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            as_attachment=True, download_name="MPCP_Simple_Template.xlsx")
+    out = io.StringIO(); w = csv.writer(out)
+    w.writerow(["Date (YYYY-MM-DD)", "Emp_Code", "CP_Ref", "Actual_Value", "Remarks"])
+    w.writerow(["2082-01-15", "EMP-002", "LM-VEH-2-B", "2.8", "On time"])
+    out.seek(0)
+    return send_file(io.BytesIO(out.getvalue().encode("utf-8-sig")),
+                     mimetype="text/csv", as_attachment=True,
+                     download_name="MPCP_Simple_Template.csv")
+
+@app.route("/api/perf/import_simple", methods=["POST"])
+def import_perf_simple():
+    """Simplified import: Date + Emp_Code + CP_Ref + Actual + Remarks.
+    Auto-derives FY, BS_Month, Quarter, Target, Unit, Status from masters."""
+    import datetime, calendar as cal_mod
+    f = request.files.get("file")
+    if not f: return jsonify({"error": "No file"}), 400
+    db = get_db()
+    emp_map = {r["emp_code"]: dict(r) for r in db.execute("SELECT * FROM employees WHERE emp_code IS NOT NULL")}
+    cp_map  = {r["ref"]: dict(r) for r in db.execute("SELECT c.*, m.ref as mp_ref_val FROM cps c LEFT JOIN mps m ON c.mp_id=m.id")}
+    ext = f.filename.lower().split(".")[-1]
+    rows_raw = []
+    if ext in ("xlsx", "xls"):
+        if not HAS_OPENPYXL: return jsonify({"error": "pip install openpyxl"}), 400
+        wb = openpyxl.load_workbook(f, data_only=True); ws = wb.active
+        hdrs = [str(c.value or "").strip().lower() for c in next(ws.iter_rows(min_row=1, max_row=1))]
+        def ci(names):
+            for n in names:
+                if n in hdrs: return hdrs.index(n)
+            return None
+        d_=ci(["date (yyyy-mm-dd)","date","recorded_date"]); e_=ci(["emp_code","emp code","employee code"])
+        c_=ci(["cp_ref","cp ref","cp"]); a_=ci(["actual_value","actual value","actual","actual_val"]); r_=ci(["remarks","notes"])
+        for row in ws.iter_rows(min_row=3, values_only=True):
+            if not row or not any(row): continue
+            rows_raw.append({"date": str(row[d_] or "").strip() if d_ is not None else "",
+                             "emp":  str(row[e_] or "").strip() if e_ is not None else "",
+                             "cp":   str(row[c_] or "").strip() if c_ is not None else "",
+                             "actual": str(row[a_] or "").strip() if a_ is not None else "",
+                             "rem":  str(row[r_] or "").strip() if r_ is not None else ""})
+    else:
+        text = f.read().decode("utf-8-sig")
+        for row in csv.DictReader(io.StringIO(text)):
+            rows_raw.append({
+                "date":   (row.get("Date (YYYY-MM-DD)") or row.get("Date") or "").strip(),
+                "emp":    (row.get("Emp_Code") or row.get("emp_code") or "").strip(),
+                "cp":     (row.get("CP_Ref")   or row.get("cp_ref")   or "").strip(),
+                "actual": (row.get("Actual_Value") or row.get("Actual") or "").strip(),
+                "rem":    (row.get("Remarks") or row.get("Notes") or "").strip()})
+    now_str = datetime.datetime.now().isoformat()
+    count = 0; errors = []
+    for i, row in enumerate(rows_raw, 1):
+        if not row["emp"] and not row["cp"]: continue
+        if row["emp"].lower().startswith("e.g"): continue
+        row_errs = []
+        # Date → BS month + FY
+        date_str = row["date"] or datetime.date.today().strftime("%Y-%m-%d")
+        try:
+            parts = date_str.replace("/", "-").split("-")
+            yr, mo = int(parts[0]), int(parts[1])
+            ad_month = cal_mod.month_abbr[mo]
+            bs_month = AD_TO_BS.get(ad_month, "Shrawan")
+            bs_yr = yr + 56 if bs_month in ["Shrawan","Bhadra","Ashwin","Kartik","Mangsir","Poush"] else yr + 57
+            fy = f"{bs_yr}-{str(bs_yr+1)[-2:]}"
+        except Exception:
+            bs_month = "Shrawan"; fy = "2081-82"
+        # Employee
+        ec = row["emp"]; emp = emp_map.get(ec)
+        if not emp:
+            candidates = [k for k in emp_map if k.lower().replace("-","").startswith(ec.lower().replace("-","")[:4])]
+            sug = f" Suggestion: {candidates[0]}" if candidates else ""
+            row_errs.append(f"Row {i}: Employee code '{ec}' not found.{sug}")
+        # CP
+        cp_ref = row["cp"]; cp = cp_map.get(cp_ref)
+        if not cp:
+            candidates = [k for k in cp_map if k.lower().startswith(cp_ref.lower()[:4])]
+            sug = f" Suggestion: {candidates[0]}" if candidates else ""
+            row_errs.append(f"Row {i}: CP ref '{cp_ref}' not found.{sug}")
+        if row_errs: errors.extend(row_errs); continue
+        try: actual = float(row["actual"]) if row["actual"] else 0.0
+        except: actual = 0.0
+        tgt_str = cp.get("target", "") or ""
+        try: target = float("".join(c for c in tgt_str.split()[0] if c.isdigit() or c == "."))
+        except: target = 0.0
+        unit = ("Days" if "day" in tgt_str.lower() else "Hours" if "hour" in tgt_str.lower() else "%")
+        mp_ref = cp.get("mp_ref_val", "") or ""
+        status = calc_status(actual, target, unit)
+        sec_code = emp.get("dept", "") if emp else ""
+        loc_code = ""
+        if emp:
+            pri_sec = db.execute("SELECT s.code FROM emp_sectors es JOIN sectors s ON es.sector_id=s.id WHERE es.emp_id=? AND es.is_primary=1 LIMIT 1", (emp["id"],)).fetchone()
+            if pri_sec: sec_code = pri_sec["code"]
+            pri_loc = db.execute("SELECT l.code FROM emp_locations el JOIN locations l ON el.loc_id=l.id WHERE el.emp_id=? AND el.is_primary=1 LIMIT 1", (emp["id"],)).fetchone()
+            if pri_loc: loc_code = pri_loc["code"]
+        db.execute("""INSERT INTO perf_raw
+            (id,recorded_date,bs_month,fy,quarter,emp_id,emp_code,cp_ref,mp_ref,
+             actual_val,target_val,unit,status,remarks,imported_at,sector_code,location_code)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (uid(), date_str, bs_month, fy, bs_q(bs_month),
+             emp["id"] if emp else "", ec, cp_ref, mp_ref,
+             actual, target, unit, status, row["rem"], now_str, sec_code, loc_code))
+        count += 1
+    db.commit()
+    _rebuild_perf_from_raw(db)
+    return jsonify({"imported": count, "errors": errors[:20], "total_rows": len(rows_raw)})
+
+def _rebuild_perf_from_raw(db):
+    """Aggregate perf_raw into perf table grouped by (fy, bs_month, emp_code, cp_ref)."""
+    fys = [r["fy"] for r in db.execute("SELECT DISTINCT fy FROM perf_raw")]
+    for fy in fys:
+        raw = db.execute("SELECT * FROM perf_raw WHERE fy=?", (fy,)).fetchall()
+        groups = {}
+        for r in raw:
+            key = (r["bs_month"], r["emp_code"], r["cp_ref"])
+            groups.setdefault(key, []).append(dict(r))
+        for (bsm, ec, cp_ref), rows in groups.items():
+            total = len(rows); compliant = sum(1 for r in rows if r["status"] == "C")
+            nc = total - compliant
+            pct_c = round(compliant/total*100, 2) if total else 0
+            pct_nc = round(nc/total*100, 2) if total else 0
+            last = rows[-1]
+            existing = db.execute("SELECT id FROM perf WHERE fy=? AND bs_month=? AND emp_code=? AND cp_ref=?",
+                                  (fy, bsm, ec, cp_ref)).fetchone()
+            if existing:
+                db.execute("""UPDATE perf SET total=?,compliant=?,non_compliant=?,pct_compliant=?,pct_nc=?,
+                    target_val=?,actual_val=?,unit=?,status=?,mp_ref=?,emp_id=?,sector_code=?,location_code=?
+                    WHERE id=?""",
+                    (total, compliant, nc, pct_c, pct_nc,
+                     last["target_val"], last["actual_val"], last["unit"],
+                     "C" if pct_c >= 95 else "NC", last["mp_ref"], last["emp_id"],
+                     last["sector_code"], last["location_code"], existing["id"]))
+            else:
+                db.execute("""INSERT OR IGNORE INTO perf
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (uid(), fy, bsm, bs_q(bsm), last["emp_id"], ec,
+                     last["mp_ref"], cp_ref, last.get("metric",""),
+                     total, compliant, nc, pct_c, pct_nc,
+                     last["target_val"], last["actual_val"], last["unit"],
+                     "C" if pct_c >= 95 else "NC", ""))
+        _upd_cache(db, fy)
+    db.commit()
+
+@app.route("/api/perf/raw", methods=["GET"])
+def perf_raw_api():
+    db = get_db()
+    q2 = "SELECT r.*, e.name as emp_name FROM perf_raw r LEFT JOIN employees e ON r.emp_id=e.id WHERE 1=1"
+    args = []
+    for param, col in [("fy","r.fy"),("cp_ref","r.cp_ref"),("emp_code","r.emp_code"),("status","r.status")]:
+        if request.args.get(param): q2 += f" AND {col}=?"; args.append(request.args[param])
+    q2 += " ORDER BY r.recorded_date DESC LIMIT 500"
+    return jsonify(R(db.execute(q2, args).fetchall()))
+
+@app.route("/api/perf/exceptions")
+def perf_exceptions():
+    """Return NC records for the exception dashboard."""
+    from collections import Counter
+    db = get_db(); fy = request.args.get("fy","")
+    q2 = "SELECT r.*, e.name as emp_name FROM perf_raw r LEFT JOIN employees e ON r.emp_id=e.id WHERE r.status='NC'"
+    args = []
+    if fy: q2 += " AND r.fy=?"; args.append(fy)
+    q2 += " ORDER BY r.recorded_date DESC LIMIT 200"
+    rows = R(db.execute(q2, args).fetchall())
+    nc_cps = Counter(r["cp_ref"] for r in rows)
+    repeat = {k:v for k,v in nc_cps.items() if v > 1}
+    return jsonify({"exceptions": rows, "repeat_failures": repeat,
+                    "total_nc": len(rows), "unique_cps": len(nc_cps)})
 
 @app.route('/api/perf/template')
 def perf_template():

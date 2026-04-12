@@ -1,0 +1,33 @@
+--- index.html.bak	2026-04-11 11:18:18.220206023 +0000
++++ index.html	2026-04-11 11:19:30.549206528 +0000
+@@ -2155,9 +2155,9 @@
+   openModal(sec?`Edit Sector: ${sec.name}`:'New Sector / Department',
+     `<div class="form-grid-2">
+       <div class="form-group"><label class="form-label">Sector Name *</label>
+-        <input class="form-input" id="sf-name" value="${sec?esc(sec.name):''}" placeholder="e.g. Vehicle, Finance"></div>
+-      <div class="form-group"><label class="form-label">Sort Order</label>
+-        <input class="form-input" type="number" id="sf-order" value="${sec?sec.sort_order:0}" min="0"></div>
++        <input class="form-input" id="sf-name" value="${sec?esc(sec.name):''}" placeholder="e.g. Vehicle, Finance" oninput="if(!q('#sf-code').dataset.edited)q('#sf-code').value=this.value.split(' ').map(w=>w[0]||'').join('').toUpperCase().slice(0,8)"></div>
++      <div class="form-group"><label class="form-label">Sector Code</label>
++        <input class="form-input" id="sf-code" value="${sec?esc(sec.code||''):''}" placeholder="e.g. VEH" oninput="this.dataset.edited='1'"></div>
+     </div>
+     <div class="form-group"><label class="form-label">Description</label>
+       <input class="form-input" id="sf-desc" value="${sec?esc(sec.description||''):''}" placeholder="Brief description"></div>
+@@ -2175,7 +2175,8 @@
+   [{label:sec?'Save Changes':'Create Sector',cls:'btn-primary',fn:async function(){
+     const name=q('#sf-name').value.trim()
+     if(!name){toast('Name required','error');return}
+-    const payload={name,color:q('#sf-color').value.trim()||'#475569',description:q('#sf-desc').value.trim(),sort_order:parseInt(q('#sf-order').value)||0}
++    const code=q('#sf-code').value.trim()||name.split(' ').map(w=>w[0]||'').join('').toUpperCase().slice(0,8)
++    const payload={name,code,color:q('#sf-color').value.trim()||'#475569',description:q('#sf-desc').value.trim()}
+     if(sec){payload.id=sec.id;await api.put('/api/sectors/'+sec.id,payload);toast('Sector updated','ok')}
+     else{await api.post('/api/sectors',payload);toast('Sector created','ok')}
+     closeModal();await loadAll();renderSectors()
+@@ -2814,6 +2815,7 @@
+                 </div>
+             </div>
+             ${mpHtml ? `<div class="cascade-node">${mpHtml}</div>` : ''}
++            ${emp.children && emp.children.length ? '<div style="margin-left:32px;border-left:2px solid var(--border);padding-left:16px;margin-top:8px">'+renderTreeNodes(emp.children, depth+1)+'</div>' : ''}
+         </div>`
+     }).join('')
+ }

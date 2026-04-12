@@ -1,0 +1,84 @@
+--- app.py.bak	2026-04-11 11:18:18.214206023 +0000
++++ app.py	2026-04-11 11:18:55.442206285 +0000
+@@ -1004,8 +1004,12 @@
+     if request.method == 'GET':
+         return jsonify(R(db.execute("SELECT * FROM sectors ORDER BY name").fetchall()))
+     d = request.json; sid = d.get('id') or uid()
++    # Auto-derive code from name if not supplied (fixes KeyError → 500)
++    code = (d.get('code') or '').strip()
++    if not code:
++        code = ''.join(w[0].upper() for w in d.get('name','').split() if w)[:8] or uid()[:6].upper()
+     db.execute("INSERT OR REPLACE INTO sectors(id,code,name,color,description) VALUES(?,?,?,?,?)",
+-               (sid, d['code'], d['name'], d.get('color','#475569'), d.get('description','')))
++               (sid, code, d['name'], d.get('color','#475569'), d.get('description','')))
+     db.commit()
+     return jsonify({'id': sid})
+ 
+@@ -1230,6 +1234,67 @@
+     except: pass
+     return jsonify({'id': cid})
+ 
++@app.route('/api/cascade/tree')
++def cascade_tree():
++    """Return org tree with nested roles, MPs and CPs for each employee."""
++    db = get_db()
++    emp_id_filter = request.args.get('emp_id')
++
++    all_roles = {r['id']: dict(r) for r in db.execute("SELECT * FROM roles")}
++    all_mps   = {m['id']: dict(m) for m in db.execute("SELECT * FROM mps")}
++    all_cps   = {c['id']: dict(c) for c in db.execute("SELECT * FROM cps")}
++
++    def build_node(emp):
++        e = dict(emp)
++        eid = e['id']
++        role_ids = [r['role_id'] for r in db.execute("SELECT role_id FROM emp_roles WHERE emp_id=?", (eid,))]
++        e['roles'] = [all_roles[rid] for rid in role_ids if rid in all_roles]
++        mp_ids_a = [r['mp_id'] for r in db.execute("SELECT mp_id FROM mp_owners WHERE emp_id=?", (eid,))]
++        mp_ids_b = [r['mp_id'] for r in db.execute("SELECT mp_id FROM emp_mps WHERE emp_id=?", (eid,))]
++        mp_ids = list(dict.fromkeys(mp_ids_a + mp_ids_b))
++        mp_nodes = []
++        for mid in mp_ids:
++            if mid not in all_mps:
++                continue
++            mp = dict(all_mps[mid])
++            cp_ids_a = [r['cp_id'] for r in db.execute("SELECT cp_id FROM cp_owners WHERE emp_id=?", (eid,))]
++            cp_ids_b = [r['cp_id'] for r in db.execute("SELECT cp_id FROM emp_cps WHERE emp_id=?", (eid,))]
++            cp_ids_all = list(dict.fromkeys(cp_ids_a + cp_ids_b))
++            cp_nodes = []
++            for cid in cp_ids_all:
++                if cid not in all_cps:
++                    continue
++                cp = dict(all_cps[cid])
++                if cp.get('mp_id') != mid:
++                    continue
++                cp['cascade_children'] = []
++                cp_nodes.append(cp)
++            mp['cps'] = cp_nodes
++            mp_nodes.append(mp)
++        e['mps'] = mp_nodes
++        return e
++
++    if emp_id_filter:
++        row = db.execute("SELECT * FROM employees WHERE id=?", (emp_id_filter,)).fetchone()
++        if not row:
++            return jsonify([])
++        return jsonify([build_node(row)])
++
++    all_emps = {r['id']: dict(r) for r in db.execute("SELECT * FROM employees ORDER BY level, name")}
++    children_map = {}
++    for e in all_emps.values():
++        mid = e.get('manager_id')
++        if mid:
++            children_map.setdefault(mid, []).append(e['id'])
++
++    def build_tree(eid):
++        node = build_node(all_emps[eid])
++        node['children'] = [build_tree(c) for c in children_map.get(eid, [])]
++        return node
++
++    roots = [e['id'] for e in all_emps.values() if not e.get('manager_id')]
++    return jsonify([build_tree(r) for r in roots])
++
+ @app.route('/api/cascade/<cid>', methods=['DELETE'])
+ def cascade_delete(cid):
+     db = get_db()

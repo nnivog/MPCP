@@ -1482,15 +1482,40 @@ function renderPerfData() {
   const years=[...new Set(S.cache.map(c=>c.fy))].sort((a,b)=>b.localeCompare(a))
 
   q('#data-content').innerHTML = `
-  <div class="sample-banner">
-    <h4>📥 CSV Upload — Performance Data</h4>
-    <p>Upload monthly performance records using BS (Bikram Samwat) month names. Each row captures: FY, BS_Month, Emp_Code, MP_Ref, CP_Ref, Metric, <strong>Total / Compliant / Non_Compliant counts</strong> + percentages.<br>
-    The system auto-calculates Status. Both BS month names (Shrawan, Bhadra…) and AD month names (Jul, Aug…) are accepted.</p>
-    <div class="sample-files">
-      <a href="/api/samples/perf" class="sample-link">⬇ Sample_Performance.csv</a>
-      <a href="/api/perf/template" class="sample-link">⬇ Blank Template CSV</a>
-      <a href="/api/perf/export?fy=${encodeURIComponent(S.currentFY)}" class="sample-link">⬇ Export FY ${S.currentFY}</a>
-      <a href="/api/perf/export" class="sample-link">⬇ Export All FYs</a>
+  <!-- ── SIMPLIFIED UPLOAD BANNER ── -->
+  <div style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:1.5px solid #86efac;border-radius:14px;padding:18px 20px;margin-bottom:16px">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
+      <div style="flex:1;min-width:260px">
+        <h4 style="font-size:12px;font-weight:800;color:#15803d;font-family:'Syne',sans-serif;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">
+          ✅ Simplified Upload — Just 4 Columns
+        </h4>
+        <p style="font-size:12px;color:#166534;line-height:1.7;margin-bottom:10px">
+          Fill only: <strong>Date · Emp Code · CP Ref · Actual Value</strong><br>
+          Everything else (FY, Month, Target, Unit, Status, MP) is <strong>auto-calculated</strong> from your masters.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <a href="/api/perf/simple_template" class="sample-link" style="background:#15803d;color:#fff;border:none">⬇ Download Template</a>
+          <a href="/api/perf/export?fy=${encodeURIComponent(S.currentFY)}" class="sample-link">⬇ Export FY ${S.currentFY}</a>
+          <a href="/api/perf/export" class="sample-link">⬇ Export All</a>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end">
+        <label class="btn btn-primary btn-sm" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px">
+          ⬆ Upload File (xlsx / csv)
+          <input type="file" accept=".xlsx,.xls,.csv" style="display:none" onchange="uploadPerfSimple(this)">
+        </label>
+        <button class="btn btn-ghost btn-sm" onclick="openQuickEntry()">⚡ Quick Entry</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:10px;color:var(--muted)" onclick="q('#legacy-upload').classList.toggle('hidden')">Advanced / Legacy Upload ▾</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Legacy upload - hidden by default -->
+  <div id="legacy-upload" class="hidden" style="background:#fafafa;border:1px dashed var(--border);border-radius:10px;padding:14px;margin-bottom:14px">
+    <p style="font-size:11px;font-weight:700;color:var(--muted);margin-bottom:10px">LEGACY FORMAT — FY, Month, Emp, MP, CP, Counts, Percentages required</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <label class="upload-zone">⬆ Upload CSV<input type="file" accept=".csv" onchange="uploadPerf(this)"></label>
+      <a href="/api/perf/template" class="sample-link">⬇ Legacy Template</a>
     </div>
   </div>
 
@@ -1498,8 +1523,8 @@ function renderPerfData() {
     <div><h2>Performance Records</h2>
       <p>Working FY: <strong style="color:var(--blue)">FY ${S.currentFY}</strong> · ${fyPerf.length} records · ${S.perf.length} total across all FYs</p></div>
     <div class="flex gap-8">
-      <label class="upload-zone">⬆ Upload CSV<input type="file" accept=".csv" onchange="uploadPerf(this)"></label>
-      <button class="btn btn-primary btn-sm" onclick="openPerfForm()">+ Add Record</button>
+      <button class="btn btn-ghost btn-sm" onclick="switchData('raw')">📋 View Raw Entries</button>
+      <button class="btn btn-primary btn-sm" onclick="openQuickEntry()">⚡ Quick Entry</button>
     </div>
   </div>
   <div id="upload-msg" class="hidden mb-16" style="padding:12px 16px;border-radius:10px;font-size:12px;font-weight:600"></div>
@@ -1679,6 +1704,132 @@ function autoCalcPct(){
   if(cp)cp.textContent=pctC+'%'; if(cn)cn.textContent=pctNC+'%'
 }
 async function delPerf(id){if(!confirm('Delete this record?'))return;await api.del(`/api/perf/${id}`);toast('Deleted');await loadAll()}
+
+async function uploadPerfSimple(input) {
+  const fd = new FormData(); fd.append('file', input.files[0])
+  const msg = q('#upload-msg')
+  msg.style.cssText = 'padding:12px 16px;border-radius:10px;font-size:12px;font-weight:600;background:#dbeafe;color:#1e40af;margin-bottom:16px'
+  msg.className = 'mb-16'
+  msg.textContent = '⏳ Uploading and auto-calculating…'
+  try {
+    const r = await fetch('/api/perf/import_simple', {method:'POST', body:fd}).then(r => r.json())
+    if (r.imported != null) {
+      const errHtml = r.errors && r.errors.length
+        ? '<div style="margin-top:8px;font-size:11px"><strong>⚠ Issues (' + r.errors.length + '):</strong><ul style="margin:4px 0 0 16px">' + r.errors.map(e=>'<li>'+e+'</li>').join('') + '</ul></div>'
+        : ''
+      msg.style.background = r.errors && r.errors.length ? '#fefce8' : '#dcfce7'
+      msg.style.color      = r.errors && r.errors.length ? '#92400e' : '#15803d'
+      msg.innerHTML = `✅ Imported <strong>${r.imported}</strong> records from ${r.total_rows} rows.
+        FY / Month / Target / Status auto-calculated from masters.${errHtml}`
+    } else {
+      msg.style.background = '#fee2e2'; msg.style.color = '#b91c1c'
+      msg.textContent = '❌ Import failed: ' + (r.error || 'Unknown error')
+    }
+  } catch(err) {
+    msg.style.background = '#fee2e2'; msg.style.color = '#b91c1c'
+    msg.textContent = '❌ Error: ' + err.message
+  }
+  setTimeout(() => msg.className = 'mb-16 hidden', 12000)
+  await loadAll(); input.value = ''
+}
+
+function openQuickEntry() {
+  const empOpts = S.employees.map(e =>
+    `<option value="${e.emp_code||e.id}">${esc(e.name)} — ${esc(e.emp_code||'')}</option>`).join('')
+  const cpOpts = S.cps.map(c =>
+    `<option value="${c.ref}" data-target="${esc(c.target||'')}" data-mp="${esc(c.mp_id||'')}">[${esc(c.ref)}] ${esc(c.title.slice(0,55))}</option>`).join('')
+  openModal('⚡ Quick Performance Entry',
+    `<p class="text-xs text-muted mb-16">Fill just 4 fields. Everything else is auto-calculated from your CP masters.</p>
+    <div class="form-grid-2">
+      <div class="form-group"><label class="form-label">Date *</label>
+        <input class="form-input" type="date" id="qe-date" value="${new Date().toISOString().slice(0,10)}"></div>
+      <div class="form-group"><label class="form-label">Employee *</label>
+        <select class="form-select" id="qe-emp">
+          <option value="">— Select —</option>${empOpts}
+        </select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Checking Point (CP) *</label>
+      <select class="form-select" id="qe-cp" onchange="qeUpdateTarget()">
+        <option value="">— Select CP —</option>${cpOpts}
+      </select>
+    </div>
+    <div id="qe-target-hint" class="info-box" style="display:none;padding:8px 12px;margin-bottom:10px;font-size:12px"></div>
+    <div class="form-grid-2">
+      <div class="form-group"><label class="form-label">Actual Value *</label>
+        <input class="form-input" type="number" step="0.01" id="qe-actual" placeholder="e.g. 2.8" oninput="qeUpdateStatus()"></div>
+      <div class="form-group"><label class="form-label">Status (auto)</label>
+        <div id="qe-status-preview" style="padding:8px 12px;border-radius:8px;background:#f1f5f9;font-weight:700;font-size:13px;margin-top:2px">—</div>
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Remarks</label>
+      <input class="form-input" id="qe-remarks" placeholder="Optional notes"></div>`,
+    [{label:'Save Entry', cls:'btn-primary', fn: async function() {
+      const date = q('#qe-date').value
+      const emp  = q('#qe-emp').value
+      const cp   = q('#qe-cp').value
+      const actual = q('#qe-actual').value
+      if (!date||!emp||!cp||actual==='') { toast('Date, Employee, CP and Actual are required','error'); return }
+      const fd = new FormData()
+      const csv = 'Date (YYYY-MM-DD),Emp_Code,CP_Ref,Actual_Value,Remarks\n' +
+                  `${date},${emp},${cp},${actual},${q('#qe-remarks').value}`
+      fd.append('file', new Blob([csv], {type:'text/csv'}), 'quick_entry.csv')
+      const r = await fetch('/api/perf/import_simple', {method:'POST', body:fd}).then(r=>r.json())
+      if (r.imported > 0) {
+        toast(`✅ Entry saved — Status: ${q('#qe-status-preview').textContent}`, 'ok')
+        closeModal(); await loadAll()
+      } else {
+        toast('Error: ' + (r.errors&&r.errors[0] ? r.errors[0] : r.error||'Unknown'), 'error')
+      }
+    }}, {label:'Save & Add Another', cls:'btn-ghost', fn: async function() {
+      const date = q('#qe-date').value; const emp = q('#qe-emp').value
+      const cp = q('#qe-cp').value; const actual = q('#qe-actual').value
+      if (!date||!emp||!cp||actual==='') { toast('All fields required','error'); return }
+      const fd = new FormData()
+      const csv = 'Date (YYYY-MM-DD),Emp_Code,CP_Ref,Actual_Value,Remarks\n' +
+                  `${date},${emp},${cp},${actual},${q('#qe-remarks').value}`
+      fd.append('file', new Blob([csv], {type:'text/csv'}), 'quick_entry.csv')
+      const r = await fetch('/api/perf/import_simple', {method:'POST', body:fd}).then(r=>r.json())
+      if (r.imported > 0) {
+        toast('Saved! Add another.','ok')
+        q('#qe-actual').value = ''; q('#qe-remarks').value = ''
+        q('#qe-status-preview').textContent = '—'
+        q('#qe-status-preview').style.background = '#f1f5f9'
+        await loadAll()
+      } else {
+        toast('Error: ' + (r.errors&&r.errors[0] ? r.errors[0] : r.error||'Unknown'), 'error')
+      }
+    }}], true)
+}
+
+function qeUpdateTarget() {
+  const sel = q('#qe-cp'); if (!sel) return
+  const opt = sel.options[sel.selectedIndex]
+  const tgt = opt ? opt.dataset.target : ''
+  const hint = q('#qe-target-hint')
+  if (tgt) {
+    hint.style.display = ''
+    hint.innerHTML = `Target for this CP: <strong>${esc(tgt)}</strong> — enter the actual value achieved`
+  } else { hint.style.display = 'none' }
+  qeUpdateStatus()
+}
+
+function qeUpdateStatus() {
+  const cp_ref = q('#qe-cp')?.value
+  const actual = parseFloat(q('#qe-actual')?.value)
+  const cp = S.cps.find(c => c.ref === cp_ref)
+  const prev = q('#qe-status-preview'); if (!prev) return
+  if (!cp || isNaN(actual)) { prev.textContent = '—'; prev.style.background = '#f1f5f9'; return }
+  const tgt_str = cp.target || ''
+  const tgt = parseFloat(tgt_str)
+  const is_lower_better = /day|hour|hr/i.test(tgt_str)
+  let status = 'NC'
+  if (!isNaN(tgt)) {
+    status = (is_lower_better ? actual <= tgt * 1.05 : actual >= tgt * 0.95) ? 'C' : 'NC'
+  }
+  prev.textContent = status === 'C' ? '✓ Compliant' : '✗ Non-Compliant'
+  prev.style.background = status === 'C' ? '#dcfce7' : '#fee2e2'
+  prev.style.color = status === 'C' ? '#15803d' : '#b91c1c'
+}
 async function uploadPerf(input){
   const fd=new FormData();fd.append('file',input.files[0])
   const msg=q('#upload-msg');msg.className='mb-16';msg.style.cssText='padding:12px 16px;border-radius:10px;font-size:12px;font-weight:600;background:#dbeafe;color:#1e40af;margin-bottom:16px'
@@ -1787,90 +1938,201 @@ async function renderReport(){
 }
 
 function renderOverviewReport(){
-  const fyPerf=perfByFY(S.currentFY)
-  const years=[...new Set(S.cache.map(c=>c.fy))].sort((a,b)=>b.localeCompare(a))
+  const fyPerf = perfByFY(S.currentFY)
+  const years  = [...new Set(S.cache.map(c=>c.fy))].sort((a,b)=>b.localeCompare(a))
+  const {tot,comp,nc,pct_c,pct_nc} = complianceSummary(fyPerf)
 
-  // Per-MP compliance cards
-  const mpCards=S.mps.map(mp=>{
-    const rows=fyPerf.filter(p=>p.mp_ref===mp.ref)
-    const {tot,comp,nc,pct_c,pct_nc}=complianceSummary(rows)
-    if(!tot)return null
-    return {ref:mp.ref,title:mp.title,tot,comp,nc,pct_c,pct_nc}
+  // ── Risk MPs (lowest compliance) ──
+  const mpStats = S.mps.map(mp => {
+    const rows = fyPerf.filter(p=>p.mp_ref===mp.ref)
+    const s = complianceSummary(rows)
+    return {...s, ref:mp.ref, title:mp.title, freq:mp.freq}
+  }).filter(m=>m.tot>0).sort((a,b)=>a.pct_c-b.pct_c)
+  const riskMPs = mpStats.slice(0,3)
+
+  // ── Monthly trend ──
+  const monthData = BS_MONTHS.map(m=>{
+    const rows = fyPerf.filter(p=>p.bs_month===m)
+    if(!rows.length) return null
+    const s = complianceSummary(rows)
+    return {month:m.slice(0,3), tot:s.tot, comp:s.comp, nc:s.nc, pct:s.pct_c}
   }).filter(Boolean)
 
-  // Monthly breakdown
-  const monthData=BS_MONTHS.map(m=>{
-    const rows=fyPerf.filter(p=>p.bs_month===m)
-    if(!rows.length)return null
-    const {tot,comp,nc,pct_c}=complianceSummary(rows)
-    return {month:m,tot,comp,nc,pct:pct_c}
-  }).filter(Boolean)
-
-  let html=`
-  <div class="flex gap-8 items-center mb-20">
+  // ── FY selector ──
+  let html = `<div class="flex gap-8 items-center mb-20">
     <span class="font-bold text-sm">Fiscal Year:</span>
     <select class="form-select" id="rep-fy" style="width:130px" onchange="S.currentFY=this.value;updateHeader();renderReport()">
       ${years.map(y=>`<option ${y===S.currentFY?'selected':''}>${y}</option>`).join('')}
     </select>
+    <span class="text-xs text-muted">${fyPerf.length} records</span>
   </div>`
 
-  const {tot,comp,nc,pct_c,pct_nc}=complianceSummary(fyPerf)
-  html+=`<div class="mb-16">${compCard({title:'FY '+S.currentFY+' — Overall Performance',tot,comp,nc,pct_c,pct_nc})}</div>`
+  // ══ LEVEL 1 — Top KPIs ══
+  const overallColor = pct_c>=95?'var(--green)':pct_c>=80?'var(--amber)':'var(--red)'
+  html += `<div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+    <div class="card" style="border-left:4px solid ${overallColor};padding:20px">
+      <div class="text-xxs text-muted font-bold" style="text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">Overall Compliance — FY ${S.currentFY}</div>
+      <div style="font-size:42px;font-weight:900;font-family:'Syne',sans-serif;color:${overallColor};line-height:1">${tot?pct_c+'%':'—'}</div>
+      <div class="cc-bar mt-12"><span class="cc-bar-c" style="width:${Math.min(pct_c,100)}%;background:${overallColor}"></span></div>
+      <div class="text-xs text-muted mt-8">${comp.toLocaleString()} compliant of ${tot.toLocaleString()} total</div>
+    </div>
+    <div class="stat-box"><div class="val" style="color:var(--green)">${comp.toLocaleString()}</div><div class="lbl">✓ Compliant</div></div>
+    <div class="stat-box"><div class="val" style="color:var(--red)">${nc.toLocaleString()}</div><div class="lbl">✗ Non-Compliant</div></div>
+    <div class="stat-box"><div class="val" style="color:var(--blue)">${S.mps.length}</div><div class="lbl">Active MPs</div></div>
+  </div>`
 
-  if(monthData.length){
-    html+=`<div class="card mb-20">
-      <div class="card-head"><p>Monthly Compliance Trend — FY ${S.currentFY} (BS Calendar)</p></div>
-      <div class="card-body"><canvas id="rep-trend-chart" height="100"></canvas></div>
+  // ══ LEVEL 1 — Risk MPs ══
+  if(riskMPs.length) {
+    html += `<div class="card mb-20" style="border-left:4px solid var(--red)">
+      <div class="card-head"><p>🚨 Top Risk MPs — Lowest Compliance this FY</p></div>
+      <div class="card-body" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+        ${riskMPs.map(m=>`<div style="background:#fff5f5;border:1.5px solid #fecaca;border-radius:10px;padding:14px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+            <span class="ref-badge" style="background:#0f2540;color:#fff">${esc(m.ref)}</span>
+            <span style="font-size:22px;font-weight:900;font-family:'Syne',sans-serif;color:var(--red)">${m.pct_c}%</span>
+          </div>
+          <p class="text-xs font-bold" style="color:#7f1d1d;margin-bottom:4px">${esc(m.title.slice(0,50))}</p>
+          <div class="cc-bar"><span class="cc-bar-c" style="width:${Math.min(m.pct_c,100)}%;background:var(--red)"></span></div>
+          <p class="text-xxs text-muted mt-6">${m.nc} NC of ${m.tot} total</p>
+        </div>`).join('')}
+      </div>
     </div>`
   }
 
-  html+=`<div class="card mb-20">
-    <div class="card-head"><p>MP-wise Compliance Summary — FY ${S.currentFY}</p></div>
+  // ══ LEVEL 2 — Monthly Trend ══
+  if(monthData.length) {
+    html += `<div class="card mb-20">
+      <div class="card-head"><p>Monthly Compliance Trend — FY ${S.currentFY}</p></div>
+      <div class="card-body"><canvas id="rep-trend-chart" height="80"></canvas></div>
+    </div>`
+  }
+
+  // ══ LEVEL 2 — MP Cards ══
+  html += `<div class="card mb-20">
+    <div class="card-head">
+      <p>Managing Points — Compliance Summary</p>
+      <span class="text-xs text-muted">${mpStats.filter(m=>m.tot>0).length} MPs with data</span>
+    </div>
     <div class="card-body">
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px">
-        ${mpCards.map(m=>compCard(m)).join('')}
-        ${!mpCards.length?'<p class="text-sm text-muted italic">No performance data for this FY. Upload records in Data Manager.</p>':''}
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">
+        ${mpStats.map(m=>{
+          const col = m.pct_c>=95?'var(--green)':m.pct_c>=80?'var(--amber)':'var(--red)'
+          // Get CPs for this MP with data
+          const mpCPs = S.cps.filter(c=>c.mp_id===S.mps.find(mp=>mp.ref===m.ref)?.id)
+          const cpFails = mpCPs.filter(c=>{
+            const rows = fyPerf.filter(p=>p.cp_ref===c.ref)
+            const s = complianceSummary(rows)
+            return s.tot>0 && s.pct_c<95
+          }).length
+          return `<div class="card" style="border-top:3px solid ${col};padding:14px">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">
+              <span class="ref-badge">${esc(m.ref)}</span>
+              <span style="font-size:24px;font-weight:900;font-family:'Syne',sans-serif;color:${col}">${m.pct_c}%</span>
+            </div>
+            <p class="text-xs font-bold mb-8">${esc(m.title.slice(0,55))}</p>
+            <div class="cc-bar mb-8"><span class="cc-bar-c" style="width:${Math.min(m.pct_c,100)}%;background:${col}"></span></div>
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted)">
+              <span>✓ ${m.comp.toLocaleString()} / ${m.tot.toLocaleString()}</span>
+              ${cpFails>0?`<span style="color:var(--red);font-weight:700">${cpFails} CP${cpFails>1?'s':''} at risk</span>`:'<span style="color:var(--green)">All CPs on track</span>'}
+            </div>
+            <button class="btn btn-ghost btn-sm" style="width:100%;margin-top:10px;font-size:11px"
+              onclick="S.reportSub='mpcp';document.querySelectorAll('#tab-reports .sub-tab').forEach(t=>t.classList.remove('active'));renderReport()">
+              Drill into CPs →
+            </button>
+          </div>`
+        }).join('')}
+        ${!mpStats.length?'<p class="text-sm text-muted italic">No performance data for this FY. Use Quick Entry or Upload File above.</p>':''}
       </div>
     </div>
   </div>`
 
-  // Full table
-  html+=`<div class="card">
-    <div class="card-head"><p>MP Compliance Table</p></div>
-    <div class="card-body"><div class="tbl-wrap"><table>
-      <thead><tr><th>MP Ref</th><th>Managing Point</th><th>Total</th><th>✓ Compliant</th><th>% C</th><th>✗ NC</th><th>% NC</th><th>KPI Rate</th></tr></thead>
-      <tbody>${S.mps.map(mp=>{
-        const rows=fyPerf.filter(p=>p.mp_ref===mp.ref)
-        const {tot:mt,comp:mc,nc:mn,pct_c:mpc,pct_nc:mpnc}=complianceSummary(rows)
-        return `<tr>
-          <td><span class="ref-badge">${esc(mp.ref)}</span></td>
-          <td style="max-width:260px">${esc(mp.title.slice(0,60))}</td>
-          <td style="text-align:right;font-weight:700">${mt>0?mt.toLocaleString():'—'}</td>
-          <td style="text-align:right;color:var(--green);font-weight:700">${mc>0?mc.toLocaleString():'—'}</td>
-          <td style="text-align:right"><span style="font-weight:900;color:${pc(mpc)};font-family:'Syne',sans-serif">${mt>0?mpc+'%':'—'}</span></td>
-          <td style="text-align:right;color:var(--red)">${mn>0?mn.toLocaleString():'—'}</td>
-          <td style="text-align:right;color:var(--red)">${mn>0?mpnc+'%':'—'}</td>
-          <td>${mp.pct!=null?`<span class="badge ${mp.pct>=95?'badge-pct-green':mp.pct>=80?'badge-pct-amber':'badge-pct-red'}">${mp.pct}%</span>`:'—'}</td>
-        </tr>`}).join('')}
-      </tbody>
-    </table></div></div>
+  // ══ LEVEL 3 — Exception Dashboard ══
+  html += `<div class="card mb-20" id="exception-panel">
+    <div class="card-head">
+      <p>🚨 Exception Dashboard — Non-Compliant Records</p>
+      <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="loadExceptions()">Refresh</button>
+    </div>
+    <div class="card-body" id="exception-body">
+      <p class="text-xs text-muted italic">Click Refresh to load exceptions.</p>
+    </div>
   </div>`
 
-  q('#report-content').innerHTML=html
+  q('#report-content').innerHTML = html
+
+  // Trend chart
   destroyChart('rep-trend-chart')
-  if(monthData.length){
-    charts['rep-trend-chart']=new Chart(q('#rep-trend-chart'),{
-      type:'line',
-      data:{labels:monthData.map(d=>d.month),
+  if(monthData.length) {
+    charts['rep-trend-chart'] = new Chart(q('#rep-trend-chart'),{
+      type:'bar',
+      data:{
+        labels: monthData.map(d=>d.month),
         datasets:[
-          {label:'Total',data:monthData.map(d=>d.tot),borderColor:'#94a3b8',tension:.3,borderDash:[4,4]},
-          {label:'Compliant',data:monthData.map(d=>d.comp),borderColor:'#16a34a',backgroundColor:'#16a34a20',fill:true,tension:.3},
-          {label:'Non-Compliant',data:monthData.map(d=>d.nc),borderColor:'#dc2626',tension:.3}
-        ]},
-      options:{responsive:true,plugins:{legend:{position:'top'}}}
+          {label:'Compliant', data:monthData.map(d=>d.comp), backgroundColor:'#16a34a99', borderRadius:4},
+          {label:'Non-Compliant', data:monthData.map(d=>d.nc), backgroundColor:'#dc262699', borderRadius:4},
+          {label:'% Compliant', data:monthData.map(d=>d.pct), type:'line',
+           borderColor:'#1d4ed8', backgroundColor:'transparent',
+           tension:.3, yAxisID:'y2', pointRadius:4}
+        ]
+      },
+      options:{responsive:true, plugins:{legend:{position:'top'}},
+        scales:{
+          x:{stacked:true, grid:{display:false}},
+          y:{stacked:true, grid:{color:'#f1f5f9'}, title:{display:true,text:'Records'}},
+          y2:{position:'right', min:0, max:100, title:{display:true,text:'% Compliant'},
+              ticks:{callback:v=>v+'%'}, grid:{display:false}}
+        }}
     })
   }
+  loadExceptions()
 }
+
+async function loadExceptions() {
+  const body = q('#exception-body'); if(!body) return
+  body.innerHTML = '<p class="text-xs text-muted">Loading…</p>'
+  try {
+    const r = await api.get('/api/perf/exceptions?fy='+encodeURIComponent(S.currentFY))
+    if (!r.total_nc) { body.innerHTML = '<p class="text-xs text-muted italic" style="color:var(--green)">✅ No exceptions found for FY '+esc(S.currentFY)+'</p>'; return }
+    const repeats = Object.entries(r.repeat_failures||{}).sort((a,b)=>b[1]-a[1])
+    let html = `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      <div style="background:#fee2e2;border-radius:10px;padding:14px">
+        <div style="font-size:28px;font-weight:900;font-family:'Syne',sans-serif;color:var(--red)">${r.total_nc}</div>
+        <div class="text-xs text-muted">Non-compliant records this FY</div>
+      </div>
+      <div style="background:#fef3c7;border-radius:10px;padding:14px">
+        <div style="font-size:28px;font-weight:900;font-family:'Syne',sans-serif;color:var(--amber)">${repeats.length}</div>
+        <div class="text-xs text-muted">CPs with repeat failures</div>
+      </div>
+    </div>`
+    if(repeats.length) {
+      html += `<p class="text-xxs text-muted font-bold" style="text-transform:uppercase;margin-bottom:8px">🔁 Repeat Failures</p>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+        ${repeats.slice(0,8).map(([cp,cnt])=>`<span style="background:#fee2e2;color:#b91c1c;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:700">${esc(cp)} ×${cnt}</span>`).join('')}
+      </div>`
+    }
+    html += `<div class="tbl-wrap"><table>
+      <thead><tr><th>Date</th><th>Employee</th><th>CP Ref</th><th>Target</th><th>Actual</th><th>Gap</th><th>Remarks</th></tr></thead>
+      <tbody>${r.exceptions.slice(0,30).map(e=>{
+        const gap = e.target_val ? (e.actual_val - e.target_val).toFixed(2) : '—'
+        const is_lb = /day|hour/i.test(e.unit||'')
+        const gapColor = is_lb ? (parseFloat(gap)>0?'var(--red)':'var(--green)') : (parseFloat(gap)<0?'var(--red)':'var(--green)')
+        return `<tr>
+          <td class="text-xs text-muted">${esc(e.recorded_date||e.bs_month)}</td>
+          <td class="font-bold">${esc(e.emp_name||e.emp_code)}</td>
+          <td><span class="ref-badge ref-badge-blue">${esc(e.cp_ref)}</span></td>
+          <td class="text-xs">${e.target_val||'—'} ${esc(e.unit||'')}</td>
+          <td style="font-weight:700;color:var(--red)">${e.actual_val}</td>
+          <td style="color:${gapColor};font-weight:700">${gap}</td>
+          <td class="text-xs text-muted">${esc(e.remarks||'—')}</td>
+        </tr>`
+      }).join('')}
+      </tbody></table></div>
+    ${r.total_nc>30?`<p class="text-xs text-muted mt-8">Showing 30 of ${r.total_nc} exceptions.</p>`:''}`
+    body.innerHTML = html
+  } catch(err) {
+    body.innerHTML = '<p class="text-xs text-muted">Could not load exceptions: '+err.message+'</p>'
+  }
+}
+
 
 async function renderYoYReport(){
   const data=await api.get('/api/analytics/summary')

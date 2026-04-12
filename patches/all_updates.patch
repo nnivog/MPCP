@@ -1,0 +1,1181 @@
+From 79bbbdb366388dde14ae1ffc0b9351ceca44ba36 Mon Sep 17 00:00:00 2001
+From: Govinda Upadhyay <govinda.upadhyay@sipradi.com>
+Date: Sat, 11 Apr 2026 11:34:24 +0000
+Subject: [PATCH 1/5] fix: cascade link save, api error handling, perf sample
+ with location+sector
+
+- /api/cascade POST: replaced broken stub (wrong column names, silent
+  try/except) with full implementation. Table now uses correct columns:
+  parent_emp_id, parent_cp_id, child_emp_id, child_mp_id. Auto-creates
+  child MP from the parent CP when left blank. GET returns enriched
+  links with employee/CP/MP display names.
+
+- api helper (index.html): checks Content-Type before .json() so Flask
+  HTML error pages produce a readable toast (Server HTTP 500) instead
+  of the cryptic 'Unexpected token < <!doctype' crash.
+
+- Sample_Performance.csv now includes Sector_Code and Location_Code
+  columns pulled from live DB, so the download matches what import
+  actually expects.
+
+- perf table migration: adds location_code and sector_code columns to
+  existing DBs. Import route reads both columns from CSV and auto-
+  derives sector from employee dept when not supplied.
+---
+ app.py     | 107 ++++++++++++++++++++++++++++++++++++++++++-----------
+ index.html |  18 +++++++--
+ 2 files changed, 100 insertions(+), 25 deletions(-)
+
+diff --git a/app.py b/app.py
+index b65d0aa..33a23bf 100644
+--- a/app.py
++++ b/app.py
+@@ -158,6 +158,8 @@ def init_db():
+         "ALTER TABLE locations ADD COLUMN active INTEGER DEFAULT 1",
+         "ALTER TABLE locations ADD COLUMN code TEXT NOT NULL DEFAULT ''",
+         "ALTER TABLE employees ADD COLUMN email TEXT DEFAULT ''",
++        "ALTER TABLE perf ADD COLUMN location_code TEXT DEFAULT ''",
++        "ALTER TABLE perf ADD COLUMN sector_code TEXT DEFAULT ''",
+     ]
+     for sql in migrations:
+         try: con.execute(sql)
+@@ -886,11 +888,23 @@ def import_perf():
+             unit = str(row.get('Unit','%') or '%')
+             st   = str(row.get('Status','') or calc_status(act, tgt, unit))
+             if st not in ('C','NC'): st = calc_status(act, tgt, unit)
+-            db.execute("INSERT OR IGNORE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
++            loc_code = str(row.get('Location_Code','') or row.get('location_code','') or '').strip()
++            sec_code = str(row.get('Sector_Code','')   or row.get('sector_code','')   or '').strip()
++            # Auto-derive sector from employee dept if not supplied
++            if not sec_code and eid:
++                emp_row = db.execute("SELECT dept FROM employees WHERE id=?", (eid,)).fetchone()
++                if emp_row: sec_code = emp_row['dept'] or ''
++            db.execute("""INSERT OR IGNORE INTO perf
++                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (uid(), fy, bsm, bs_q(bsm), eid, ec,
+                         str(row.get('MP_Ref','') or ''), str(row.get('CP_Ref','') or ''),
+                         str(row.get('Metric','') or ''), tot, comp, nc, pct_c, pct_nc,
+                         tgt, act, unit, st, str(row.get('Notes','') or '')))
++            # Update location/sector on the just-inserted row (columns may not be in VALUES if schema is old)
++            try:
++                db.execute("UPDATE perf SET location_code=?,sector_code=? WHERE id=(SELECT id FROM perf ORDER BY rowid DESC LIMIT 1)",
++                           (loc_code, sec_code))
++            except Exception: pass
+             count += 1
+         except Exception as e: errs.append(f"Row {i}: {e}")
+     for fy in fys_seen: _upd_cache(db, fy)
+@@ -1141,30 +1155,41 @@ def _gen_sample_cps():
+     return _xlsx_out(wb, 'Sample_CheckingPoints.xlsx')
+ 
+ def _gen_sample_perf():
+-    """CSV template based on actual MPs/CPs/Employees in DB."""
++    """CSV template based on actual MPs/CPs/Employees/Locations/Sectors in DB."""
+     db = get_db()
+-    emps = db.execute("SELECT emp_code FROM employees ORDER BY level,name LIMIT 5").fetchall()
++    emps = db.execute("""
++        SELECT e.emp_code, e.dept,
++               s.code as sector_code,
++               l.code as loc_code
++        FROM employees e
++        LEFT JOIN sectors s ON e.dept = s.code
++        LEFT JOIN locations l ON l.sector_id = s.id
++        ORDER BY e.level, e.name LIMIT 5""").fetchall()
+     mps  = db.execute("SELECT ref FROM mps ORDER BY ref LIMIT 4").fetchall()
+     cp_map = {}
+     for m in mps:
+         cps = db.execute("SELECT ref FROM cps WHERE mp_id=(SELECT id FROM mps WHERE ref=?) ORDER BY ref LIMIT 3",(m['ref'],)).fetchall()
+         cp_map[m['ref']] = [c['ref'] for c in cps]
+ 
+-    rows = [["FY","BS_Month","Emp_Code","MP_Ref","CP_Ref","Metric",
++    rows = [["FY","BS_Month","Emp_Code","Sector_Code","Location_Code",
++             "MP_Ref","CP_Ref","Metric",
+              "Total","Compliant","Non_Compliant","Pct_Compliant","Pct_NC",
+              "Target_Val","Actual_Val","Unit","Status","Notes"]]
+     months = ["Shrawan","Bhadra","Ashwin","Kartik"]
+-    ec_list = [e['emp_code'] for e in emps]
+-    for i,m in enumerate(mps):
++    for i, m in enumerate(mps):
+         mref = m['ref']
+-        cps_for_m = cp_map.get(mref,[mref+'-CP'])
+-        ec = ec_list[i % len(ec_list)]
++        cps_for_m = cp_map.get(mref, [mref+'-CP'])
++        emp = emps[i % len(emps)]
++        ec  = emp['emp_code']
++        sec = emp['sector_code'] or emp['dept'] or ''
++        loc = emp['loc_code'] or ''
+         for mo in months[:2]:
+             for cp in cps_for_m[:2]:
+                 tot=200; comp=190
+-                rows.append(["2081-82",mo,ec,mref,cp,"Compliance Check",
+-                             tot,comp,tot-comp,round(comp/tot*100,2),round((tot-comp)/tot*100,2),
+-                             100,round(comp/tot*100,2),"%","C","Sample record"])
++                rows.append(["2081-82", mo, ec, sec, loc, mref, cp, "Compliance Check",
++                             tot, comp, tot-comp,
++                             round(comp/tot*100, 2), round((tot-comp)/tot*100, 2),
++                             100, round(comp/tot*100, 2), "%", "C", "Sample record"])
+     out = io.StringIO(); w = csv.writer(out)
+     for r in rows: w.writerow(r)
+     out.seek(0)
+@@ -1220,19 +1245,59 @@ if __name__ == '__main__':
+ @app.route('/api/cascade', methods=['GET','POST'])
+ def cascade_api():
+     db = get_db()
++    # Ensure table exists with correct columns (idempotent)
++    db.execute("""CREATE TABLE IF NOT EXISTS cascade_links(
++        id TEXT PRIMARY KEY,
++        parent_emp_id TEXT DEFAULT '',
++        parent_cp_id  TEXT DEFAULT '',
++        child_emp_id  TEXT DEFAULT '',
++        child_mp_id   TEXT DEFAULT '',
++        note TEXT DEFAULT '')""")
++    db.commit()
++
+     if request.method == 'GET':
+-        try:
+-            rows = db.execute("SELECT * FROM cascade_links ORDER BY id").fetchall()
+-            return jsonify(R(rows))
+-        except: return jsonify([])
++        rows = db.execute("SELECT * FROM cascade_links ORDER BY rowid").fetchall()
++        result = []
++        for row in rows:
++            link = dict(row)
++            pe = db.execute("SELECT * FROM employees WHERE id=?", (link.get('parent_emp_id',''),)).fetchone()
++            ce = db.execute("SELECT * FROM employees WHERE id=?", (link.get('child_emp_id',''),)).fetchone()
++            cp = db.execute("SELECT * FROM cps WHERE id=?", (link.get('parent_cp_id',''),)).fetchone()
++            mp = db.execute("SELECT * FROM mps WHERE id=?", (link.get('child_mp_id',''),)).fetchone()
++            link['parent_emp'] = dict(pe) if pe else {}
++            link['child_emp']  = dict(ce) if ce else {}
++            link['parent_cp']  = dict(cp) if cp else {}
++            link['child_mp']   = dict(mp) if mp else {}
++            result.append(link)
++        return jsonify(result)
++
+     d = request.json or {}
+     cid = uid()
+-    try:
+-        db.execute("CREATE TABLE IF NOT EXISTS cascade_links(id TEXT PRIMARY KEY, emp_id TEXT, mp_id TEXT, cp_id TEXT, loc_id TEXT, note TEXT)")
+-        db.execute("INSERT INTO cascade_links VALUES(?,?,?,?,?,?)",(cid,d.get('emp_id',''),d.get('mp_id',''),d.get('cp_id',''),d.get('loc_id',''),d.get('note','')))
+-        db.commit()
+-    except: pass
+-    return jsonify({'id': cid})
++    parent_emp_id = d.get('parent_emp_id', d.get('emp_id', ''))
++    parent_cp_id  = d.get('parent_cp_id',  d.get('cp_id',  ''))
++    child_emp_id  = d.get('child_emp_id',  '')
++    child_mp_id   = d.get('child_mp_id',   d.get('mp_id',  ''))
++
++    if not parent_emp_id or not parent_cp_id or not child_emp_id:
++        return jsonify({'error': 'parent_emp_id, parent_cp_id and child_emp_id are required'}), 400
++
++    # Auto-create child MP from the CP if none supplied
++    if not child_mp_id:
++        cp_row = db.execute("SELECT * FROM cps WHERE id=?", (parent_cp_id,)).fetchone()
++        if cp_row:
++            child_mp_id = uid()
++            new_ref   = cp_row['ref'] + '-MP'
++            new_title = cp_row['title']
++            db.execute("INSERT OR IGNORE INTO mps VALUES(?,?,?,?,?,?,?,?)",
++                       (child_mp_id, new_ref, new_title,
++                        cp_row['target'], cp_row['freq'], 0, 0, 0))
++            db.execute("INSERT OR IGNORE INTO mp_owners VALUES(?,?)", (child_mp_id, child_emp_id))
++            db.execute("INSERT OR IGNORE INTO emp_mps VALUES(?,?)", (child_emp_id, child_mp_id))
++
++    db.execute("INSERT OR REPLACE INTO cascade_links VALUES(?,?,?,?,?,?)",
++               (cid, parent_emp_id, parent_cp_id, child_emp_id, child_mp_id, d.get('note','')))
++    db.commit()
++    return jsonify({'id': cid, 'ok': True})
+ 
+ @app.route('/api/cascade/tree')
+ def cascade_tree():
+diff --git a/index.html b/index.html
+index ee38322..700dc9d 100644
+--- a/index.html
++++ b/index.html
+@@ -484,10 +484,20 @@ let charts = {}
+ 
+ // ── API ──────────────────────────────────────────────────────────────────────
+ const api = {
+-  get: url => fetch(url).then(r=>r.json()),
+-  post: (url,d) => fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()),
+-  put: (url,d) => fetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r=>r.json()),
+-  del: url => fetch(url,{method:'DELETE'}).then(r=>r.json()),
++  _json: async r => {
++    const ct = r.headers.get('content-type') || ''
++    if (!ct.includes('application/json')) {
++      const txt = await r.text()
++      throw new Error('Server HTTP ' + r.status + ' (non-JSON) — check Flask terminal')
++    }
++    const j = await r.json()
++    if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status))
++    return j
++  },
++  get:  url     => fetch(url).then(r => api._json(r)),
++  post: (url,d) => fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r => api._json(r)),
++  put:  (url,d) => fetch(url,{method:'PUT', headers:{'Content-Type':'application/json'},body:JSON.stringify(d)}).then(r => api._json(r)),
++  del:  url     => fetch(url,{method:'DELETE'}).then(r => api._json(r)),
+ }
+ 
+ async function safeGet(url, fallback=[]) {
+-- 
+2.43.0
+
+
+From dff90fab62390ae3dbdacbf5b246eee0c85e6c76 Mon Sep 17 00:00:00 2001
+From: Govinda Upadhyay <govinda.upadhyay@sipradi.com>
+Date: Sun, 12 Apr 2026 05:23:05 +0000
+Subject: [PATCH 2/5] feat: multi-sector + multi-location employee model
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+SCHEMA
+- Add emp_sectors(emp_id, sector_id, is_primary) junction table — same
+  pattern as emp_roles. Replaces the single employees.dept string for
+  sector assignment, allowing Sandeep to belong to Vehicle, WH Battery,
+  and WH Lube simultaneously.
+- Add emp_locations(emp_id, loc_id, is_primary) junction table so staff
+  who work across branches (KTM HQ + Birgunj Border) are modelled correctly.
+- Both tables created on first run and via migration on existing DBs.
+- One-time back-fill: existing employees.dept values are migrated into
+  emp_sectors automatically on startup — no data loss.
+
+BACKEND
+- enrich_emp() now returns sector_ids[] and loc_ids[] arrays on every
+  employee object. Keeps employees.dept in sync with primary sector for
+  backward compatibility (dc(), deptBadge, CSV exports all still work).
+- employees POST + PUT: accept sector_ids[] and loc_ids[], save to
+  junction tables, update dept to primary sector code.
+- employees DELETE: cleans emp_sectors + emp_locations rows.
+- NEW /api/analytics/by_sector: groups performance by emp_sectors
+  junction (not emp.dept string), so multi-sector employees appear in
+  every bucket they belong to.
+- NEW /api/analytics/by_location: groups performance by emp_locations
+  junction with fallback to sector-based location matching.
+
+FRONTEND
+- Employee form: Department single-select replaced with Sectors
+  multi-select picker (first checked = primary, shown with Primary badge).
+  Locations multi-select added below it. Same checkbox-list pattern as
+  the existing role/MP/CP pickers.
+- Employee card border colour and profile header now use primary sector
+  colour instead of hard-coded dept string.
+- Employee profile modal: shows all sector badges + all location badges
+  instead of just the single dept badge.
+- Perf entry form: Sector and Location dropdowns added. Auto-populated
+  from the selected employee's primary sector/location when left blank,
+  so existing workflows require zero extra clicks for single-sector staff.
+- Reports → By Location & Sector: now calls real /api/analytics/by_sector
+  and /api/analytics/by_location endpoints backed by junction tables,
+  replacing the client-side emp.dept grouping that produced wrong buckets
+  for multi-sector employees.
+---
+ app.py     | 163 ++++++++++++++++++++++++++++++++++++++--
+ index.html | 212 +++++++++++++++++++++++++++++++++++++++--------------
+ 2 files changed, 312 insertions(+), 63 deletions(-)
+
+diff --git a/app.py b/app.py
+index 33a23bf..bebc8df 100644
+--- a/app.py
++++ b/app.py
+@@ -145,6 +145,14 @@ CREATE TABLE IF NOT EXISTS locations(
+   id TEXT PRIMARY KEY, code TEXT NOT NULL UNIQUE,
+   name TEXT NOT NULL, address TEXT DEFAULT '',
+   sector_id TEXT DEFAULT '', active INTEGER DEFAULT 1);
++
++CREATE TABLE IF NOT EXISTS emp_sectors(
++  emp_id TEXT, sector_id TEXT, is_primary INTEGER DEFAULT 0,
++  PRIMARY KEY(emp_id, sector_id));
++
++CREATE TABLE IF NOT EXISTS emp_locations(
++  emp_id TEXT, loc_id TEXT, is_primary INTEGER DEFAULT 0,
++  PRIMARY KEY(emp_id, loc_id));
+ """
+ 
+ def init_db():
+@@ -161,6 +169,25 @@ def init_db():
+         "ALTER TABLE perf ADD COLUMN location_code TEXT DEFAULT ''",
+         "ALTER TABLE perf ADD COLUMN sector_code TEXT DEFAULT ''",
+     ]
++    # Ensure new junction tables exist (safe for existing DBs)
++    con.executescript("""
++        CREATE TABLE IF NOT EXISTS emp_sectors(
++            emp_id TEXT, sector_id TEXT, is_primary INTEGER DEFAULT 0,
++            PRIMARY KEY(emp_id, sector_id));
++        CREATE TABLE IF NOT EXISTS emp_locations(
++            emp_id TEXT, loc_id TEXT, is_primary INTEGER DEFAULT 0,
++            PRIMARY KEY(emp_id, loc_id));
++    """)
++    # Back-fill emp_sectors from existing employees.dept (one-time migration)
++    rows = con.execute("SELECT id, dept FROM employees WHERE dept != ''").fetchall()
++    for r in rows:
++        sec = con.execute("SELECT id FROM sectors WHERE code=?", (r['dept'],)).fetchone()
++        if sec:
++            try:
++                con.execute("INSERT OR IGNORE INTO emp_sectors VALUES(?,?,1)", (r['id'], sec['id']))
++            except Exception:
++                pass
++    con.commit()
+     for sql in migrations:
+         try: con.execute(sql)
+         except Exception: pass  # column already exists — ignore
+@@ -368,9 +395,18 @@ def health():
+ 
+ def enrich_emp(e, db):
+     r = dict(e)
+-    r['role_ids'] = [x['role_id'] for x in db.execute("SELECT role_id FROM emp_roles WHERE emp_id=?", (r['id'],))]
+-    r['mp_ids']   = [x['mp_id']   for x in db.execute("SELECT mp_id   FROM emp_mps   WHERE emp_id=?", (r['id'],))]
+-    r['cp_ids']   = [x['cp_id']   for x in db.execute("SELECT cp_id   FROM emp_cps   WHERE emp_id=?", (r['id'],))]
++    r['role_ids']    = [x['role_id']  for x in db.execute("SELECT role_id  FROM emp_roles     WHERE emp_id=?", (r['id'],))]
++    r['mp_ids']      = [x['mp_id']    for x in db.execute("SELECT mp_id    FROM emp_mps       WHERE emp_id=?", (r['id'],))]
++    r['cp_ids']      = [x['cp_id']    for x in db.execute("SELECT cp_id    FROM emp_cps       WHERE emp_id=?", (r['id'],))]
++    r['sector_ids']  = [x['sector_id'] for x in db.execute("SELECT sector_id FROM emp_sectors WHERE emp_id=?", (r['id'],))]
++    r['loc_ids']     = [x['loc_id']   for x in db.execute("SELECT loc_id   FROM emp_locations WHERE emp_id=?", (r['id'],))]
++    # primary sector code for backward compat (dc() / deptBadge still read emp.dept)
++    if r['sector_ids']:
++        pri = db.execute("SELECT s.code FROM emp_sectors es JOIN sectors s ON es.sector_id=s.id WHERE es.emp_id=? AND es.is_primary=1 LIMIT 1", (r['id'],)).fetchone()
++        if not pri:
++            pri = db.execute("SELECT s.code FROM emp_sectors es JOIN sectors s ON es.sector_id=s.id WHERE es.emp_id=? LIMIT 1", (r['id'],)).fetchone()
++        if pri:
++            r['dept'] = pri['code']
+     return r
+ 
+ @app.route('/api/employees', methods=['GET','POST'])
+@@ -386,9 +422,24 @@ def employees_api():
+         try: num = int(last['emp_code'].split('-')[1]) + 1 if last else 1
+         except: num = 1
+         code = f"EMP-{num:03d}"
++    # Derive dept from primary sector_id if provided
++    dept = d.get('dept', 'Ops')
++    sec_ids = d.get('sector_ids', [])
++    if sec_ids:
++        pri_sec = db.execute("SELECT code FROM sectors WHERE id=?", (sec_ids[0],)).fetchone()
++        if pri_sec:
++            dept = pri_sec['code']
+     db.execute("INSERT OR REPLACE INTO employees VALUES(?,?,?,?,?,?,?,?)",
+                (eid, code, d['name'], d.get('role',''), d.get('level',3),
+-                d.get('dept','Ops'), d.get('manager_id') or None, d.get('email','')))
++                dept, d.get('manager_id') or None, d.get('email','')))
++    # Save sector assignments
++    db.execute("DELETE FROM emp_sectors WHERE emp_id=?", (eid,))
++    for i, sid in enumerate(sec_ids):
++        db.execute("INSERT OR IGNORE INTO emp_sectors VALUES(?,?,?)", (eid, sid, 1 if i==0 else 0))
++    # Save location assignments
++    db.execute("DELETE FROM emp_locations WHERE emp_id=?", (eid,))
++    for i, lid in enumerate(d.get('loc_ids', [])):
++        db.execute("INSERT OR IGNORE INTO emp_locations VALUES(?,?,?)", (eid, lid, 1 if i==0 else 0))
+     db.commit()
+     return jsonify({'id': eid, 'emp_code': code})
+ 
+@@ -397,14 +448,27 @@ def employee_api(eid):
+     db = get_db()
+     if request.method == 'DELETE':
+         for t, c in [('employees','id'),('mp_owners','emp_id'),('cp_owners','emp_id'),
+-                     ('emp_roles','emp_id'),('emp_mps','emp_id'),('emp_cps','emp_id')]:
++                     ('emp_roles','emp_id'),('emp_mps','emp_id'),('emp_cps','emp_id'),
++                     ('emp_sectors','emp_id'),('emp_locations','emp_id')]:
+             db.execute(f"DELETE FROM {t} WHERE {c}=?", (eid,))
+         db.commit()
+         return jsonify({'ok': True})
+     d = request.json
++    dept = d.get('dept', 'Ops')
++    sec_ids = d.get('sector_ids', [])
++    if sec_ids:
++        pri_sec = db.execute("SELECT code FROM sectors WHERE id=?", (sec_ids[0],)).fetchone()
++        if pri_sec:
++            dept = pri_sec['code']
+     db.execute("UPDATE employees SET emp_code=?,name=?,role=?,level=?,dept=?,manager_id=?,email=? WHERE id=?",
+                (d.get('emp_code'), d['name'], d.get('role',''), d.get('level',3),
+-                d.get('dept','Ops'), d.get('manager_id') or None, d.get('email',''), eid))
++                dept, d.get('manager_id') or None, d.get('email',''), eid))
++    db.execute("DELETE FROM emp_sectors WHERE emp_id=?", (eid,))
++    for i, sid in enumerate(sec_ids):
++        db.execute("INSERT OR IGNORE INTO emp_sectors VALUES(?,?,?)", (eid, sid, 1 if i==0 else 0))
++    db.execute("DELETE FROM emp_locations WHERE emp_id=?", (eid,))
++    for i, lid in enumerate(d.get('loc_ids', [])):
++        db.execute("INSERT OR IGNORE INTO emp_locations VALUES(?,?,?)", (eid, lid, 1 if i==0 else 0))
+     db.commit()
+     return jsonify({'ok': True})
+ 
+@@ -970,6 +1034,93 @@ def analytics_summary():
+             for mp2 in emp_d.get('by_mp',{}).values(): pct(mp2)
+     return jsonify(result)
+ 
++@app.route('/api/analytics/by_location')
++def analytics_by_location():
++    db  = get_db()
++    fy  = request.args.get('fy', '')
++    locs = db.execute("SELECT * FROM locations ORDER BY name").fetchall()
++    result = {}
++    for loc in locs:
++        # All employees assigned to this location
++        emp_ids = [r['emp_id'] for r in db.execute(
++            "SELECT emp_id FROM emp_locations WHERE loc_id=?", (loc['id'],))]
++        if not emp_ids:
++            # fallback: employees whose primary sector matches location's sector
++            if loc['sector_id']:
++                emp_ids = [r['id'] for r in db.execute(
++                    "SELECT id FROM employees WHERE id IN (SELECT emp_id FROM emp_sectors WHERE sector_id=?)",
++                    (loc['sector_id'],))]
++        emp_codes = []
++        if emp_ids:
++            ph = ','.join('?'*len(emp_ids))
++            emp_codes = [r['emp_code'] for r in db.execute(
++                f"SELECT emp_code FROM employees WHERE id IN ({ph})", emp_ids)]
++        q2 = "SELECT * FROM perf WHERE 1=1"; args = []
++        if fy:
++            q2 += " AND fy=?"; args.append(fy)
++        if emp_codes:
++            ph = ','.join('?'*len(emp_codes))
++            q2 += f" AND emp_code IN ({ph})"; args += emp_codes
++        rows = db.execute(q2, args).fetchall()
++        tot  = sum(r['total'] or 1 for r in rows)
++        comp = sum(r['compliant'] or (1 if r['status']=='C' else 0) for r in rows)
++        nc   = tot - comp
++        # Sector breakdown for this location
++        sector_info = {}
++        if loc['sector_id']:
++            sec = db.execute("SELECT * FROM sectors WHERE id=?", (loc['sector_id'],)).fetchone()
++            if sec:
++                sector_info = {'id': sec['id'], 'code': sec['code'],
++                               'name': sec['name'], 'color': sec['color']}
++        result[loc['code']] = {
++            'id': loc['id'], 'name': loc['name'], 'address': loc['address'],
++            'active': loc['active'], 'sector': sector_info,
++            'emp_ids': emp_ids, 'emp_count': len(emp_ids),
++            'total': tot, 'compliant': comp, 'nc': nc,
++            'pct_c':  round(comp/tot*100, 2) if tot else 0,
++            'pct_nc': round(nc/tot*100,   2) if tot else 0,
++        }
++    return jsonify(result)
++
++@app.route('/api/analytics/by_sector')
++def analytics_by_sector():
++    db  = get_db()
++    fy  = request.args.get('fy', '')
++    secs = db.execute("SELECT * FROM sectors ORDER BY name").fetchall()
++    result = {}
++    for sec in secs:
++        # All employees in this sector (via junction table)
++        emp_ids = [r['emp_id'] for r in db.execute(
++            "SELECT emp_id FROM emp_sectors WHERE sector_id=?", (sec['id'],))]
++        # Also pick up employees whose dept still matches the code (legacy)
++        legacy = [r['id'] for r in db.execute(
++            "SELECT id FROM employees WHERE dept=? AND id NOT IN (SELECT emp_id FROM emp_sectors WHERE sector_id=?)",
++            (sec['code'], sec['id']))]
++        emp_ids = list(dict.fromkeys(emp_ids + legacy))
++        emp_codes = []
++        if emp_ids:
++            ph = ','.join('?'*len(emp_ids))
++            emp_codes = [r['emp_code'] for r in db.execute(
++                f"SELECT emp_code FROM employees WHERE id IN ({ph})", emp_ids)]
++        q2 = "SELECT * FROM perf WHERE 1=1"; args = []
++        if fy:
++            q2 += " AND fy=?"; args.append(fy)
++        if emp_codes:
++            ph = ','.join('?'*len(emp_codes))
++            q2 += f" AND emp_code IN ({ph})"; args += emp_codes
++        rows = db.execute(q2, args).fetchall()
++        tot  = sum(r['total'] or 1 for r in rows)
++        comp = sum(r['compliant'] or (1 if r['status']=='C' else 0) for r in rows)
++        nc   = tot - comp
++        result[sec['code']] = {
++            'id': sec['id'], 'code': sec['code'], 'name': sec['name'],
++            'color': sec['color'], 'emp_ids': emp_ids, 'emp_count': len(emp_ids),
++            'total': tot, 'compliant': comp, 'nc': nc,
++            'pct_c':  round(comp/tot*100, 2) if tot else 0,
++            'pct_nc': round(nc/tot*100,   2) if tot else 0,
++        }
++    return jsonify(result)
++
+ @app.route('/api/calendar')
+ def calendar_api():
+     return jsonify({'bs_months': BS_MONTHS, 'quarter_map': BS_Q})
+diff --git a/index.html b/index.html
+index 700dc9d..7800910 100644
+--- a/index.html
++++ b/index.html
+@@ -658,6 +658,52 @@ function buildOwnerPicker(pid, sel) {
+   </div>`).join('')}</div>`
+ }
+ function getOwnerPicked(pid) { return [...document.querySelectorAll(`#${pid} input:checked`)].map(i=>i.value) }
++
++// Multi-select picker for Sectors
++function buildSectorPicker(pid, selIds) {
++  const items = S.sectors||[]
++  if (!items.length) return '<p class="text-xs text-muted italic">No sectors defined yet — add them in Master Setup → Sectors first.</p>'
++  return `<div class="owner-list" id="${pid}">${items.map((s,i)=>`
++  <div class="owner-item">
++    <input type="checkbox" value="${s.id}" id="sp-${pid}-${s.id}" ${selIds.includes(s.id)?'checked':''}
++      onchange="markPrimary('${pid}')">
++    <div class="avatar avatar-sm" style="background:${s.color||'#475569'}">${(s.code||s.name||'?')[0].toUpperCase()}</div>
++    <div class="flex-1">
++      <p class="text-sm font-bold">${esc(s.name)}</p>
++      <p class="text-xxs text-muted">${esc(s.code)}</p>
++    </div>
++    ${selIds[0]===s.id?'<span class="badge badge-c text-xxs">Primary</span>':''}
++  </div>`).join('')}</div>`
++}
++function getSectorPicked(pid) { return [...document.querySelectorAll(`#${pid} input:checked`)].map(i=>i.value) }
++
++// Multi-select picker for Locations
++function buildLocationPicker(pid, selIds) {
++  const items = S.locations||[]
++  if (!items.length) return '<p class="text-xs text-muted italic">No locations defined yet.</p>'
++  return `<div class="owner-list" id="${pid}">${items.map(l=>`
++  <div class="owner-item">
++    <input type="checkbox" value="${l.id}" id="lp-${pid}-${l.id}" ${selIds.includes(l.id)?'checked':''}>
++    <div class="avatar avatar-sm" style="background:#0891b2">&#128205;</div>
++    <div class="flex-1">
++      <p class="text-sm font-bold">${esc(l.name)}</p>
++      <p class="text-xxs text-muted">${esc(l.code)}${l.sector_name?' · '+esc(l.sector_name):''}</p>
++    </div>
++  </div>`).join('')}</div>`
++}
++function getLocationPicked(pid) { return [...document.querySelectorAll(`#${pid} input:checked`)].map(i=>i.value) }
++
++// Re-label the first checked item as "Primary" when selections change
++function markPrimary(pid) {
++  const checked = document.querySelectorAll(`#${pid} input:checked`)
++  document.querySelectorAll(`#${pid} .badge-c`).forEach(b=>b.remove())
++  if (checked.length) {
++    const label = document.createElement('span')
++    label.className = 'badge badge-c text-xxs'
++    label.textContent = 'Primary'
++    checked[0].closest('.owner-item').appendChild(label)
++  }
++}
+ function buildItemPicker(pid, items, sel, lf) {
+   return `<div class="item-list" id="${pid}">${items.map(i=>`
+   <div class="item-row">
+@@ -695,7 +741,10 @@ function renderTeam() {
+       const myMPs=S.mps.filter(m=>(m.owner_ids||[]).includes(emp.id)).length
+       const myCPs=S.cps.filter(c=>(c.owner_ids||[]).includes(emp.id)).length
+       const eroles=(emp.role_ids||[]).map(getRole).filter(Boolean)
+-      html += `<div class="card" style="padding:14px;border-left:3px solid ${dc(emp.dept)}">
++      const empCardColor = emp.sector_ids&&emp.sector_ids.length
++        ? (S.sectors.find(s=>s.id===emp.sector_ids[0])?.color||dc(emp.dept))
++        : dc(emp.dept)
++      html += `<div class="card" style="padding:14px;border-left:3px solid ${empCardColor}">
+         <div class="flex gap-12">
+           <div class="avatar avatar-md" style="background:${dc(emp.dept)}">${av(emp.name)}</div>
+           <div class="flex-1" style="min-width:0">
+@@ -753,39 +802,71 @@ function renderOrgChart() {
+ }
+ 
+ function openEmpForm(id) {
+-  const emp = id?getEmp(id):null
+-  const DEPTS = S.sectors&&S.sectors.length ? S.sectors.map(s=>s.name) : ['HOD','Vehicle','Registration','Warehouse','Stock','Ops','Finance','HR']
+-  openModal(emp?'Edit Team Member':'Add Team Member', `
+-    <div class="form-group"><label class="form-label">Employee Code</label>
+-      <input class="form-input" id="ef-code" value="${esc(emp?.emp_code||'')}" placeholder="Auto-generated e.g. EMP-001">
+-      <p class="text-xs text-muted mt-8">Used in CSV/Excel uploads as the employee identifier.</p>
+-    </div>
+-    <div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="ef-name" value="${esc(emp?.name||'')}"></div>
+-    <div class="form-group"><label class="form-label">Role / Designation</label><input class="form-input" id="ef-role" value="${esc(emp?.role||'')}"></div>
+-    <div class="form-group"><label class="form-label">Email</label><input class="form-input" type="email" id="ef-email" value="${esc(emp?.email||'')}"></div>
++  const emp = id ? getEmp(id) : null
++  const selSectors   = emp?.sector_ids  || (emp?.dept ? (S.sectors.filter(s=>s.code===emp.dept).map(s=>s.id)) : [])
++  const selLocations = emp?.loc_ids     || []
++  openModal(emp ? 'Edit Team Member' : 'Add Team Member', `
+     <div class="form-grid-2">
+-      <div class="form-group"><label class="form-label">Department</label>
+-        <select class="form-select" id="ef-dept">${DEPTS.map(d=>`<option ${emp?.dept===d?'selected':''}>${d}</option>`).join('')}</select></div>
++      <div class="form-group"><label class="form-label">Employee Code</label>
++        <input class="form-input" id="ef-code" value="${esc(emp?.emp_code||'')}" placeholder="Auto-generated">
++      </div>
+       <div class="form-group"><label class="form-label">Level</label>
+         <select class="form-select" id="ef-level">
+           <option value="1" ${emp?.level===1?'selected':''}>1 — Head of Department</option>
+           <option value="2" ${emp?.level===2?'selected':''}>2 — Team Lead</option>
+           <option value="3" ${!emp||emp.level===3?'selected':''}>3 — Operations</option>
+-        </select></div>
++        </select>
++      </div>
++    </div>
++    <div class="form-group"><label class="form-label">Full Name *</label>
++      <input class="form-input" id="ef-name" value="${esc(emp?.name||'')}">
++    </div>
++    <div class="form-group"><label class="form-label">Role / Designation</label>
++      <input class="form-input" id="ef-role" value="${esc(emp?.role||'')}">
++    </div>
++    <div class="form-group"><label class="form-label">Email</label>
++      <input class="form-input" type="email" id="ef-email" value="${esc(emp?.email||'')}">
+     </div>
+     <div class="form-group"><label class="form-label">Reports To (Manager)</label>
+       <select class="form-select" id="ef-mgr">
+         <option value="">— None / Top Level —</option>
+         ${S.employees.filter(e=>e.id!==id).map(e=>`<option value="${e.id}" ${emp?.manager_id===e.id?'selected':''}>${esc(e.name)} (${esc(e.emp_code||'')})</option>`).join('')}
+-      </select></div>`,
+-    [{label:emp?'Save Changes':'Add Member',cls:'btn-primary',fn:async()=>{
+-      const d={name:q('#ef-name').value,role:q('#ef-role').value,email:q('#ef-email').value,
+-        emp_code:q('#ef-code').value.trim(),dept:q('#ef-dept').value,
+-        level:+q('#ef-level').value,manager_id:q('#ef-mgr').value||null}
+-      if(!d.name){toast('Name required','error');return}
+-      if(emp){d.id=emp.id;await api.put(`/api/employees/${emp.id}`,d)}
+-      else await api.post('/api/employees',d)
+-      toast(emp?'Member updated':'Member added','ok');closeModal();await loadAll()
++      </select>
++    </div>
++    <div class="form-group">
++      <label class="form-label">Sectors / Departments
++        <span class="text-xxs text-muted font-normal">&nbsp;— select all that apply, first = primary</span>
++      </label>
++      ${buildSectorPicker('ef-sectors', selSectors)}
++    </div>
++    <div class="form-group">
++      <label class="form-label">Work Locations
++        <span class="text-xxs text-muted font-normal">&nbsp;— branches / offices this employee works at</span>
++      </label>
++      ${buildLocationPicker('ef-locations', selLocations)}
++    </div>`,
++    [{label: emp ? 'Save Changes' : 'Add Member', cls: 'btn-primary', fn: async () => {
++      const sector_ids   = getSectorPicked('ef-sectors')
++      const loc_ids      = getLocationPicked('ef-locations')
++      const d = {
++        name:       q('#ef-name').value.trim(),
++        role:       q('#ef-role').value,
++        email:      q('#ef-email').value,
++        emp_code:   q('#ef-code').value.trim(),
++        level:      +q('#ef-level').value,
++        manager_id: q('#ef-mgr').value || null,
++        sector_ids,
++        loc_ids,
++        // keep dept in sync with primary sector for backward compat
++        dept: sector_ids.length
++          ? (S.sectors.find(s=>s.id===sector_ids[0])?.code || 'Ops')
++          : 'Ops'
++      }
++      if (!d.name) { toast('Name required', 'error'); return }
++      if (emp) { d.id = emp.id; await api.put(`/api/employees/${emp.id}`, d) }
++      else await api.post('/api/employees', d)
++      toast(emp ? 'Member updated' : 'Member added', 'ok')
++      closeModal(); await loadAll()
+     }}]
+   )
+ }
+@@ -832,9 +913,14 @@ function openProfile(id, e) {
+         <p class="text-sm text-muted">${esc(emp.role)}</p>
+         <div class="flex gap-8 mt-8" style="flex-wrap:wrap">
+           <span class="emp-code">${esc(emp.emp_code||'—')}</span>
+-          ${deptBadge(emp.dept)}
++          ${(emp.sector_ids&&emp.sector_ids.length
++            ? emp.sector_ids.map(sid=>{const s=S.sectors.find(x=>x.id===sid);return s?`<span class="dept-badge" style="background:${s.color||'#475569'}">${s.name}</span>`:''}).join('')
++            : deptBadge(emp.dept))}
+           <span class="badge badge-gray">Level ${emp.level}</span>
+           ${mgr?`<span class="badge badge-gray">→ ${esc(mgr.name.split(' ')[0])}</span>`:''}
++          ${(emp.loc_ids&&emp.loc_ids.length
++            ? emp.loc_ids.map(lid=>{const l=(S.locations||[]).find(x=>x.id===lid);return l?`<span class="badge badge-gray">&#128205; ${esc(l.name)}</span>`:''}).join('')
++            : '')}
+         </div>
+         ${eroles.length?`<div class="flex gap-4 mt-8">${eroles.map(r=>`<span class="badge" style="background:${r.color};color:#fff">${esc(r.name)}</span>`).join('')}</div>`:''}
+       </div>
+@@ -1650,15 +1736,38 @@ function openPerfForm(id){
+       <div class="form-group"><label class="form-label">Unit</label>
+         <select class="form-select" id="pf-unit-in">${UNITS.map(u=>`<option ${rec?.unit===u?'selected':''}>${u}</option>`).join('')}</select></div>
+     </div>
++    <div class="form-grid-2">
++      <div class="form-group"><label class="form-label">Sector</label>
++        <select class="form-select" id="pf-sec-in">
++          <option value="">— Auto from employee —</option>
++          ${S.sectors.map(s=>`<option value="${s.code}" ${rec?.sector_code===s.code?'selected':''}>${esc(s.name)}</option>`).join('')}
++        </select>
++      </div>
++      <div class="form-group"><label class="form-label">Location</label>
++        <select class="form-select" id="pf-loc-in">
++          <option value="">— Auto from employee —</option>
++          ${(S.locations||[]).map(l=>`<option value="${l.code}" ${rec?.location_code===l.code?'selected':''}>${esc(l.name)}</option>`).join('')}
++        </select>
++      </div>
++    </div>
+     <div class="form-group"><label class="form-label">Notes</label><input class="form-input" id="pf-notes-in" value="${esc(rec?.notes||'')}"></div>`,
+     [{label:rec?'Save Changes':'Add Record',cls:'btn-primary',fn:async()=>{
+       const ec=q('#pf-emp-in').value
+       const tot=+q('#pf-tot-in').value, comp=+q('#pf-c-in').value, nc=+q('#pf-nc-in').value
++      const selEmp2 = S.employees.find(e=>e.emp_code===ec||e.id===ec)
++      const autoSec2 = selEmp2 && selEmp2.sector_ids && selEmp2.sector_ids.length
++        ? (S.sectors.find(s=>s.id===selEmp2.sector_ids[0])?.code||selEmp2.dept||'')
++        : (selEmp2?.dept||'')
++      const autoLoc2 = selEmp2 && selEmp2.loc_ids && selEmp2.loc_ids.length
++        ? ((S.locations||[]).find(l=>l.id===selEmp2.loc_ids[0])?.code||'')
++        : ''
+       const d={fy:q('#pf-fy-in').value, bs_month:q('#pf-mo-in').value,
+         emp_code:ec, mp_ref:q('#pf-mp-in').value, cp_ref:q('#pf-cp-in').value,
+         metric:q('#pf-metric-in').value, total:tot, compliant:comp, non_compliant:nc,
+         target_val:+q('#pf-tgt-in').value, actual_val:+q('#pf-act-in').value,
+-        unit:q('#pf-unit-in').value, notes:q('#pf-notes-in').value}
++        unit:q('#pf-unit-in').value, notes:q('#pf-notes-in').value,
++        sector_code:  q('#pf-sec-in')?.value  || autoSec2,
++        location_code:q('#pf-loc-in')?.value  || autoLoc2}
+       if(!d.emp_code){toast('Select employee','error');return}
+       if(rec){d.id=rec.id;await api.put(`/api/perf/${rec.id}`,d)}
+       else await api.post('/api/perf',d)
+@@ -2370,49 +2479,38 @@ async function delLoc(id) {
+ // ── LOCATION REPORT ───────────────────────────────────────────────────────────
+ async function renderLocationReport() {
+     setSpinner('report-content')
+-    const data = await api.get('/api/analytics/by_location?fy='+encodeURIComponent(S.currentFY))
+-    const entries = Object.entries(data)
+-
+-    // Also build sector summary from live S.perf
+-    const fyPerf = perfByFY(S.currentFY)
+-    const sectors = {}
+-    S.employees.forEach(function(e) {
+-        if (!sectors[e.dept]) sectors[e.dept] = { emps:[], tot:0, comp:0, nc:0 }
+-        sectors[e.dept].emps.push(e)
+-    })
+-    fyPerf.forEach(function(r) {
+-        const emp = getEmpByCode(r.emp_code)
+-        if (!emp) return
+-        const s = sectors[emp.dept]
+-        if (!s) return
+-        s.tot  += (r.total||1)
+-        s.comp += (r.compliant||(r.status==='C'?1:0))
+-        s.nc   += (r.non_compliant||(r.status==='NC'?1:0))
+-    })
++    const [locData, secData] = await Promise.all([
++        api.get('/api/analytics/by_location?fy='+encodeURIComponent(S.currentFY)),
++        api.get('/api/analytics/by_sector?fy='+encodeURIComponent(S.currentFY))
++    ])
++    const locEntries = Object.entries(locData)
++    const secEntries = Object.entries(secData)
+ 
+     let html = `<div class="section-head mb-16"><div>
+         <h2>Performance by Location &amp; Sector &mdash; FY ${esc(S.currentFY)}</h2>
+-        <p>Compliance rates broken down by workstation and by department/sector.</p>
++        <p>Employees can belong to multiple sectors and locations. Each bucket counts all assigned staff.</p>
+     </div></div>`
+ 
+-    // ── SECTOR COMPLIANCE ──
++    // ── SECTOR COMPLIANCE (from real API, junction-table based) ──
+     html += `<div class="card mb-20">
+-        <div class="card-head"><p>By Sector / Department</p></div>
++        <div class="card-head"><p>By Sector / Department</p>
++          <span class="text-xs text-muted">${secEntries.length} sectors</span>
++        </div>
+         <div class="card-body"><div class="grid-4">`
+-    Object.entries(sectors).forEach(function(kv) {
+-        const sect=kv[0]; const s=kv[1]
+-        const col = SECTOR_COLORS[sect]||'#475569'
+-        const pct = s.tot ? (s.comp/s.tot*100).toFixed(1) : null
++    secEntries.forEach(function(kv) {
++        const code=kv[0]; const s=kv[1]
++        const col = s.color || SECTOR_COLORS[code] || '#475569'
++        const pct = s.total ? (s.compliant/s.total*100).toFixed(1) : null
+         html += `<div class="compliance-card" style="border-left:4px solid ${col}">
+             <div class="cc-title">
+-                <span class="dept-badge" style="background:${col}">${sect}</span>
+-                <span class="flex-1 text-xs text-muted">${s.emps.length} staff</span>
+-                <span class="cc-pct" style="color:${pct?( pct>=95?'var(--green)':pct>=80?'var(--amber)':'var(--red)'):'#94a3b8'}">${pct!==null?pct+'%':'—'}</span>
++                <span class="dept-badge" style="background:${col}">${esc(s.name||code)}</span>
++                <span class="flex-1 text-xs text-muted">${s.emp_count} staff</span>
++                <span class="cc-pct" style="color:${pct?(+pct>=95?'var(--green)':+pct>=80?'var(--amber)':'var(--red)'):'#94a3b8'}">${pct!==null?pct+'%':'—'}</span>
+             </div>
+-            ${pct!==null?`<div class="cc-bar"><span class="cc-bar-c" style="width:${Math.min(pct,100)}%;background:${pct>=95?'var(--green)':pct>=80?'var(--amber)':'var(--red)'}"></span></div>
++            ${pct!==null?`<div class="cc-bar"><span class="cc-bar-c" style="width:${Math.min(+pct,100)}%;background:${+pct>=95?'var(--green)':+pct>=80?'var(--amber)':'var(--red)'}"></span></div>
+             <div class="cc-nums">
+-                <span class="cc-total">Total: <strong>${s.tot}</strong></span>
+-                <span class="cc-c">&#10003; ${s.comp}</span>
++                <span class="cc-total">Total: <strong>${s.total}</strong></span>
++                <span class="cc-c">&#10003; ${s.compliant}</span>
+                 <span class="cc-nc">&#10007; ${s.nc}</span>
+             </div>`:'<p class="text-xs text-muted italic">No data this FY</p>'}
+         </div>`
+-- 
+2.43.0
+
+
+From 89e70d4685fd34ab400be1295aa56c9da1cc50e6 Mon Sep 17 00:00:00 2001
+From: Govinda Upadhyay <govinda.upadhyay@sipradi.com>
+Date: Sun, 12 Apr 2026 05:31:53 +0000
+Subject: [PATCH 3/5] fix: set row_factory before emp_sectors backfill in
+ init_db
+
+Plain sqlite3.connect() returns tuple rows by default. The backfill
+loop used r['dept'] and r['id'] (string keys) which raised:
+  TypeError: tuple indices must be integers or slices, not str
+Fix: set con.row_factory = sqlite3.Row before executing the SELECT
+so column-name access works correctly.
+---
+ app.py | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/app.py b/app.py
+index bebc8df..0de46a2 100644
+--- a/app.py
++++ b/app.py
+@@ -179,6 +179,8 @@ def init_db():
+             PRIMARY KEY(emp_id, loc_id));
+     """)
+     # Back-fill emp_sectors from existing employees.dept (one-time migration)
++    # Must set row_factory on con so column names work (init_db uses plain sqlite3.connect)
++    con.row_factory = sqlite3.Row
+     rows = con.execute("SELECT id, dept FROM employees WHERE dept != ''").fetchall()
+     for r in rows:
+         sec = con.execute("SELECT id FROM sectors WHERE code=?", (r['dept'],)).fetchone()
+-- 
+2.43.0
+
+
+From cc3cb53a8c1501cc57397340914c2c9ebd98fc26 Mon Sep 17 00:00:00 2001
+From: Govinda Upadhyay <govinda.upadhyay@sipradi.com>
+Date: Sun, 12 Apr 2026 05:57:00 +0000
+Subject: [PATCH 4/5] fix: sector edit - modal error surfacing, staff count,
+ code sync
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+3 bugs fixed:
+
+Bug A - Silent save failures on all modals:
+  openModal attached onclick=fn with no error handling. When api.put()
+  threw (strict api._json raises on non-2xx), the error was swallowed
+  silently — modal stayed open, appeared frozen/uneditable.
+  Fix: every modal action button now wrapped in async try/catch that
+  shows a toast with the actual error message.
+
+Bug B - Sector cards showed 0 staff for all seeded sectors:
+  renderSectors grouped by empsBySector[s.name] e.g. 'Head of Department'
+  but employees store dept=s.code e.g. 'HOD'. All sector cards showed
+  zero staff even with employees assigned.
+  Fix: index by s.code and also pick up multi-sector employees via
+  their sector_ids[] junction array.
+
+Bug C - Sector PUT crashed with KeyError on missing code:
+  d['code'] raised KeyError if code was blank. No fallback.
+  Also: renaming a sector code did not update employees.dept.
+  Fix: use d.get('code') with auto-derive from name, and sync
+  employees.dept across all affected rows when code changes.
+---
+ app.py     | 16 ++++++++++++++--
+ index.html | 27 +++++++++++++++++++++++----
+ 2 files changed, 37 insertions(+), 6 deletions(-)
+
+diff --git a/app.py b/app.py
+index 0de46a2..030a55f 100644
+--- a/app.py
++++ b/app.py
+@@ -1189,9 +1189,21 @@ def sector_api(sid):
+         db.execute("UPDATE locations SET sector_id='' WHERE sector_id=?", (sid,))
+         db.execute("DELETE FROM sectors WHERE id=?", (sid,))
+         db.commit(); return jsonify({'ok': True})
+-    d = request.json
++    d = request.json or {}
++    new_code  = d.get('code','').strip()
++    new_name  = d.get('name','').strip()
++    if not new_name:
++        return jsonify({'error': 'name required'}), 400
++    if not new_code:
++        new_code = ''.join(w[0].upper() for w in new_name.split() if w)[:8]
++    # Get old code so we can update employees.dept references
++    old = db.execute("SELECT code FROM sectors WHERE id=?", (sid,)).fetchone()
++    old_code = old['code'] if old else None
+     db.execute("UPDATE sectors SET code=?,name=?,color=?,description=? WHERE id=?",
+-               (d['code'], d['name'], d.get('color','#475569'), d.get('description',''), sid))
++               (new_code, new_name, d.get('color','#475569'), d.get('description',''), sid))
++    # Keep employees.dept in sync when the sector code changes
++    if old_code and old_code != new_code:
++        db.execute("UPDATE employees SET dept=? WHERE dept=?", (new_code, old_code))
+     db.commit(); return jsonify({'ok': True})
+ 
+ # ── LOCATIONS ────────────────────────────────────────────────────────────────
+diff --git a/index.html b/index.html
+index 7800910..25bba2a 100644
+--- a/index.html
++++ b/index.html
+@@ -639,7 +639,16 @@ function openModal(title, body, actions=[], wide=false) {
+   q('#modal-body').innerHTML = body
+   q('#modal-box').className = 'modal'+(wide?' wide':'')
+   const ft = q('#modal-foot'); ft.innerHTML = '<button class="btn btn-ghost" onclick="closeModal()">Cancel</button>'
+-  actions.forEach(a=>{const b=document.createElement('button');b.className='btn '+(a.cls||'btn-primary');b.textContent=a.label;b.onclick=a.fn;ft.appendChild(b)})
++  actions.forEach(a=>{
++    const b=document.createElement('button')
++    b.className='btn '+(a.cls||'btn-primary')
++    b.textContent=a.label
++    b.onclick=async function(){
++      try { await a.fn() }
++      catch(err) { toast('Error: '+err.message,'error'); console.error(err) }
++    }
++    ft.appendChild(b)
++  })
+   q('#modal-overlay').classList.remove('hidden')
+ }
+ function closeModal(e){if(e&&e.target!==e.currentTarget)return;q('#modal-overlay').classList.add('hidden')}
+@@ -2194,8 +2203,18 @@ function renderSectors() {
+   const sectors = S.sectors || []
+   const empsBySector = {}
+   S.employees.forEach(e => {
+-    empsBySector[e.dept] = empsBySector[e.dept] || []
+-    empsBySector[e.dept].push(e)
++    // Match by dept code (primary sector code) OR by any assigned sector
++    const deptKey = e.dept || ''
++    empsBySector[deptKey] = empsBySector[deptKey] || []
++    empsBySector[deptKey].push(e)
++    // Also index by sector_ids for multi-sector employees
++    ;(e.sector_ids||[]).forEach(sid => {
++      const sec = (S.sectors||[]).find(s=>s.id===sid)
++      if (sec && sec.code !== deptKey) {
++        empsBySector[sec.code] = empsBySector[sec.code] || []
++        if (!empsBySector[sec.code].includes(e)) empsBySector[sec.code].push(e)
++      }
++    })
+   })
+   let html = `<div class="section-head">
+     <div><h2>Sectors / Departments</h2>
+@@ -2207,7 +2226,7 @@ function renderSectors() {
+   } else {
+     html += '<div class="grid-3">'
+     sectors.forEach(s => {
+-      const emps = empsBySector[s.name] || []
++      const emps = empsBySector[s.code] || []
+       const fyPerf = S.perf.filter(p => p.fy===S.currentFY && emps.some(e=>e.emp_code===p.emp_code))
+       const tot  = fyPerf.reduce((a,r)=>a+(r.total||1),0)
+       const comp = fyPerf.reduce((a,r)=>a+(r.compliant||(r.status==='C'?1:0)),0)
+-- 
+2.43.0
+
+
+From 637f9df5a4166915e8ab66dc9c23d7babb6cc971 Mon Sep 17 00:00:00 2001
+From: Govinda Upadhyay <govinda.upadhyay@sipradi.com>
+Date: Sun, 12 Apr 2026 06:06:57 +0000
+Subject: [PATCH 5/5] fix: remove duplicate renderLocations injected in
+ chart.js script tag, rebuild sector panel
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Removed ~3200 chars of JavaScript that was accidentally injected
+  inside the Chart.js <script src> tag by a previous patch. Code inside
+  a script src tag never executes, causing renderLocations, openLocForm,
+  delLoc and a partial renderLocationReport to be silently dead. This
+  is why the Locations tab showed sectors that could not be edited or
+  deleted — it was rendering from a completely different code path.
+
+- Sector overview panel in Locations tab rebuilt from scratch:
+  Now reads from S.sectors (the real managed list from /api/sectors)
+  instead of grouping raw employees.dept strings. This means:
+  * Correct sector names and colors from the database
+  * Staff count uses emp_sectors junction table (multi-sector aware)
+  * MP/CP counts correctly attributed per sector
+  * 'Edit sectors →' button links directly to Manage Sectors tab
+  * Empty sectors show a helpful 'No staff — assign via employee form' hint
+  * Sector code shown alongside name for reference
+---
+ index.html | 165 ++++++++++-------------------------------------------
+ 1 file changed, 31 insertions(+), 134 deletions(-)
+
+diff --git a/index.html b/index.html
+index 25bba2a..a4bbe61 100644
+--- a/index.html
++++ b/index.html
+@@ -4,121 +4,7 @@
+ <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+ <title>Sipradi SC-MPCP System</title>
+ <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
+-// ── LOCATIONS ─────────────────────────────────────────────────────────────────
+-const LOC_COLORS = {Office:'#1d4ed8',Border:'#b45309',Warehouse:'#047857',Depot:'#6d28d9',Branch:'#0891b2'}
+-
+-function renderLocations() {
+-    let html = '<div class="section-head"><div><h2>Workstation Locations</h2><p>'+S.locations.length+' locations &middot; staff can belong to multiple workstations</p></div>'
+-    html += '<button class="btn btn-primary btn-sm" onclick="openLocForm()">+ New Location</button></div><div class="grid-3">'
+-    S.locations.forEach(loc => {
+-        const emps = (loc.emp_ids||[]).map(getEmp).filter(Boolean)
+-        const color = LOC_COLORS[loc.type]||'#475569'
+-        html += '<div class="card" style="border-top:3px solid '+color+';padding:16px">'
+-        html += '<div class="flex justify-between items-start mb-8">'
+-        html += '<span class="ref-badge" style="font-size:12px;font-weight:900">'+esc(loc.code)+'</span>'
+-        html += '<span class="badge" style="background:'+color+'20;color:'+color+';font-weight:700">'+esc(loc.type)+'</span></div>'
+-        html += '<p class="font-black" style="font-size:14px">'+esc(loc.name)+'</p>'
+-        if(loc.address) html += '<p class="text-xs text-muted mt-4">&#128205; '+esc(loc.address)+'</p>'
+-        html += '<div class="mt-12 flex gap-4" style="flex-wrap:wrap">'
+-        if(emps.length) emps.forEach(e=>{ html += '<span class="owner-chip" style="background:'+dc(e.dept)+'" onclick="openProfile(''+e.id+'',event)">'+e.name.split(' ')[0]+'</span>' })
+-        else html += '<span class="text-xs text-muted italic">No staff assigned</span>'
+-        html += '</div><p class="text-xxs text-muted mt-8">'+emps.length+' staff assigned</p>'
+-        html += '<div class="flex gap-6 mt-12" style="border-top:1px solid var(--border);padding-top:10px">'
+-        html += '<button class="btn btn-ghost btn-sm flex-1" onclick="openLocForm(''+loc.id+'')">Edit</button>'
+-        html += '<button class="btn btn-sm flex-1" style="background:#fee2e2;color:#b91c1c" onclick="delLoc(''+loc.id+'')">Delete</button>'
+-        html += '</div></div>'
+-    })
+-    html += '</div>'
+-    q('#master-content').innerHTML = html
+-}
+-
+-function openLocForm(id) {
+-    const loc = id ? S.locations.find(function(l){return l.id===id}) : null
+-    const TYPES = ['Office','Border','Warehouse','Depot','Branch']
+-    const typeOpts = TYPES.map(function(t){return '<option'+(loc&&loc.type===t?' selected':'')+'>'+t+'</option>'}).join('')
+-    const body = '<div class="form-grid-2">'
+-        + '<div class="form-group"><label class="form-label">Location Code</label>'
+-        + '<input class="form-input" id="lf-code" value="'+(loc?esc(loc.code):'')+'" placeholder="e.g. BORDER, WH-KTM"></div>'
+-        + '<div class="form-group"><label class="form-label">Type</label>'
+-        + '<select class="form-select" id="lf-type">'+typeOpts+'</select></div></div>'
+-        + '<div class="form-group"><label class="form-label">Location Name</label>'
+-        + '<input class="form-input" id="lf-name" value="'+(loc?esc(loc.name):'')+'"></div>'
+-        + '<div class="form-group"><label class="form-label">Address / Description</label>'
+-        + '<input class="form-input" id="lf-addr" value="'+(loc?esc(loc.address||''):'')+'"></div>'
+-        + '<div class="form-group"><label class="form-label">Staff at this Location</label>'
+-        + buildOwnerPicker('lf-emps', loc?loc.emp_ids||[]:[])+' </div>'
+-    openModal(loc?'Edit Location':'Add Workstation Location', body,
+-    [{label: loc?'Save Changes':'Create Location', cls:'btn-primary', fn: async function(){
+-        const d = {code:q('#lf-code').value.trim(), name:q('#lf-name').value.trim(),
+-                   type:q('#lf-type').value, address:q('#lf-addr').value.trim(),
+-                   emp_ids: getOwnerPicked('lf-emps')}
+-        if(!d.code||!d.name){toast('Code and name required','error');return}
+-        if(loc){d.id=loc.id; await api.put('/api/locations/'+loc.id,d)}
+-        else await api.post('/api/locations',d)
+-        toast(loc?'Location updated':'Location created','ok'); closeModal(); await loadAll()
+-    }}], true)
+-}
+-
+-async function delLoc(id){
+-    if(!confirm('Delete this location? Staff assignments will be removed.'))return
+-    await api.del('/api/locations/'+id); toast('Deleted','ok'); await loadAll()
+-}
+-
+-async function renderLocationReport() {
+-    setSpinner('report-content')
+-    const data = await api.get('/api/analytics/by_location?fy='+encodeURIComponent(S.currentFY))
+-    const entries = Object.entries(data)
+-    let html = '<div class="section-head mb-20"><div>'
+-    html += '<h2>Performance by Location &mdash; FY '+esc(S.currentFY)+'</h2>'
+-    html += '<p>Compliance rates aggregated by workstation. Staff may appear in multiple locations.</p>'
+-    html += '</div></div>'
+-    html += '<div class="grid-3 mb-20">'
+-    entries.forEach(function(kv){
+-        const loc = kv[1]
+-        html += compCard({ref:kv[0], title:loc.name+' · '+loc.type,
+-            tot:loc.total, comp:loc.compliant, nc:loc.nc,
+-            pct_c:loc.pct_c, pct_nc:loc.pct_nc,
+-            color: LOC_COLORS[loc.type]||'#475569'})
+-    })
+-    html += '</div>'
+-    html += '<div class="card mb-20"><div class="card-head"><p>Staff Assignments by Location</p></div><div class="card-body">'
+-    html += '<div class="tbl-wrap"><table><thead><tr>'
+-    html += '<th>Location</th><th>Type</th><th>Address</th><th>Staff</th><th>Compliance</th>'
+-    html += '</tr></thead><tbody>'
+-    entries.forEach(function(kv){
+-        const code=kv[0]; const loc=kv[1]
+-        const color = LOC_COLORS[loc.type]||'#475569'
+-        const emps = (loc.emp_ids||[]).map(getEmp).filter(Boolean)
+-        html += '<tr>'
+-        html += '<td><span class="ref-badge" style="font-weight:900">'+esc(code)+'</span> <span class="font-bold">'+esc(loc.name)+'</span></td>'
+-        html += '<td><span class="badge" style="background:'+color+'20;color:'+color+'">'+esc(loc.type)+'</span></td>'
+-        html += '<td class="text-muted text-xs">'+esc(loc.address||'&mdash;')+'</td>'
+-        html += '<td>'+emps.map(function(e){return '<span class="owner-chip" style="background:'+dc(e.dept)+'" onclick="openProfile(''+e.id+'',event)">'+e.name.split(' ')[0]+'</span>'}).join('')+'</td>'
+-        if(loc.total>0){
+-            const col = loc.pct_c>=95?'var(--green)':loc.pct_c>=80?'var(--amber)':'var(--red)'
+-            html += '<td><span class="font-black" style="color:'+col+'">'+loc.pct_c+'%</span> <span class="text-xs text-muted">('+loc.compliant+'/'+loc.total+')</span></td>'
+-        } else { html += '<td><span class="text-muted text-xs">No data</span></td>' }
+-        html += '</tr>'
+-    })
+-    html += '</tbody></table></div></div></div>'
+-    html += '<div class="card"><div class="card-head"><p>Location Compliance Chart</p></div>'
+-    html += '<div class="card-body"><canvas id="loc-chart" height="80"></canvas></div></div>'
+-    q('#report-content').innerHTML = html
+-    destroyChart('loc-chart')
+-    const labels = entries.map(function(kv){return kv[1].name})
+-    const pcts   = entries.map(function(kv){return kv[1].pct_c})
+-    const bgs    = entries.map(function(kv){return LOC_COLORS[kv[1].type]||'#475569'})
+-    charts['loc-chart'] = new Chart(q('#loc-chart'), {
+-        type:'bar',
+-        data:{labels:labels, datasets:[{label:'Compliance %', data:pcts, backgroundColor:bgs, borderRadius:8}]},
+-        options:{responsive:true, plugins:{legend:{display:false}},
+-            scales:{y:{min:0,max:100,ticks:{callback:function(v){return v+'%'}},grid:{color:'#f1f5f9'}},
+-                    x:{grid:{display:false}}}}
+-    })
+-}
+-
+-</script>
++<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+ <style>
+ :root{
+   --bg:#f0f2f7;--surface:#fff;--border:#e2e6ef;--text:#0f1a2e;--muted:#6b7a99;
+@@ -2334,31 +2220,36 @@ async function delSector(id,name){
+ function renderLocations() {
+     const TYPES = ['Office','Border','Warehouse','Depot','Branch']
+ 
+-    // Group employees by dept = sector
+-    const sectors = {}
+-    S.employees.forEach(e => {
+-        if (!sectors[e.dept]) sectors[e.dept] = []
+-        sectors[e.dept].push(e)
+-    })
++    // Build sector → employees map using junction table (sector_ids) with dept fallback
++    function empsInSector(sec) {
++        return S.employees.filter(e =>
++            (e.sector_ids && e.sector_ids.includes(sec.id)) ||
++            (!e.sector_ids || !e.sector_ids.length) && e.dept === sec.code
++        )
++    }
++
++    const totalSectorStaff = new Set(S.employees.map(e=>e.id)).size
+ 
+     let html = `
+     <div class="section-head">
+         <div><h2>Workstations &amp; Sectors</h2>
+-        <p>${S.locations.length} locations &middot; ${Object.keys(sectors).length} sectors &middot; ${S.employees.length} staff</p></div>
++        <p>${S.locations.length} locations &middot; ${(S.sectors||[]).length} sectors &middot; ${S.employees.length} staff</p></div>
+         <div style="display:flex;gap:8px">
+           <button class="btn btn-ghost btn-sm" onclick="switchMaster('sectors')">⚙ Manage Sectors</button>
+           <button class="btn btn-primary btn-sm" onclick="openLocForm()">+ New Location</button>
+         </div>
+     </div>`
+ 
+-    // ── SECTOR OVERVIEW ──
++    // ── SECTOR OVERVIEW (from S.sectors — the real list, editable in Manage Sectors) ──
+     html += `<div class="card mb-20">
+-        <div class="card-head"><p>Sectors / Departments</p></div>
+-        <div class="card-body">
+-        <div class="grid-4">`
+-    Object.entries(sectors).forEach(function(kv) {
+-        const sect = kv[0]; const emps = kv[1]
+-        const col = SECTOR_COLORS[sect] || '#475569'
++        <div class="card-head">
++          <p>Sectors / Departments</p>
++          <button class="btn btn-ghost btn-sm" style="font-size:11px" onclick="switchMaster('sectors')">Edit sectors →</button>
++        </div>
++        <div class="card-body"><div class="grid-4">`
++    ;(S.sectors||[]).forEach(function(sec) {
++        const emps = empsInSector(sec)
++        const col  = sec.color || '#475569'
+         const myMPs = S.mps.filter(m => emps.some(e => (m.owner_ids||[]).includes(e.id))).length
+         const myCPs = S.cps.filter(c => emps.some(e => (c.owner_ids||[]).includes(e.id))).length
+         const fyPerf = S.perf.filter(p => p.fy === S.currentFY && emps.some(e => e.emp_code === p.emp_code))
+@@ -2366,23 +2257,29 @@ function renderLocations() {
+         const comp = fyPerf.reduce((s,r) => s + (r.compliant||(r.status==='C'?1:0)), 0)
+         const pct  = tot ? (comp/tot*100).toFixed(1) : null
+         html += `<div class="stat-box" style="border-left:4px solid ${col};text-align:left;padding:14px 16px">
+-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+-                <span class="dept-badge" style="background:${col}">${sect}</span>
++            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
++                <span class="dept-badge" style="background:${col}">${esc(sec.name)}</span>
++                <span class="text-xxs text-muted" style="background:#f1f5f9;padding:2px 6px;border-radius:4px">${esc(sec.code)}</span>
+             </div>
+             <div style="display:flex;gap:12px;flex-wrap:wrap">
+-                <span class="text-xs text-muted"><strong>${emps.length}</strong> staff</span>
++                <span class="text-xs text-muted"><strong style="color:var(--blue)">${emps.length}</strong> staff</span>
+                 <span class="text-xs text-muted"><strong>${myMPs}</strong> MPs</span>
+                 <span class="text-xs text-muted"><strong>${myCPs}</strong> CPs</span>
+             </div>
+             ${pct !== null
+-                ? `<div style="margin-top:8px;font-size:18px;font-weight:900;font-family:'Syne',sans-serif;color:${pct>=95?'var(--green)':pct>=80?'var(--amber)':'var(--red)'}">${pct}%</div>
++                ? `<div style="margin-top:8px;font-size:18px;font-weight:900;font-family:'Syne',sans-serif;color:${+pct>=95?'var(--green)':+pct>=80?'var(--amber)':'var(--red)'}">${pct}%</div>
+                    <div class="text-xxs text-muted">FY ${S.currentFY} compliance</div>`
+                 : '<div class="text-xs text-muted italic mt-8">No performance data</div>'}
+             <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:4px">
+-                ${emps.map(e => `<span class="owner-chip" style="background:${col}" onclick="openProfile('${e.id}',event)">${e.name.split(' ')[0]}</span>`).join('')}
++                ${emps.map(e => `<span class="owner-chip" style="background:${col}" onclick="openProfile('${e.id}',event)" title="${esc(e.role)}">${e.name.split(' ')[0]}</span>`).join('')}
++                ${emps.length===0?'<span class="text-xs text-muted italic">No staff — assign via employee form</span>':''}
+             </div>
++            ${sec.description?`<p class="text-xxs text-muted mt-8" style="border-top:1px solid var(--border);padding-top:6px">${esc(sec.description)}</p>`:''}
+         </div>`
+     })
++    if (!(S.sectors||[]).length) {
++        html += `<div class="info-box"><p>No sectors yet. <button class="btn btn-ghost btn-sm" onclick="switchMaster('sectors')">+ Add Sectors</button></p></div>`
++    }
+     html += '</div></div></div>'
+ 
+     // ── LOCATION CARDS ──
+-- 
+2.43.0
+

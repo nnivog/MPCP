@@ -150,91 +150,6 @@ def init_db():
         if not db.execute("SELECT 1 FROM employees LIMIT 1").fetchone():
             _seed(db)
 
-        # ── Schema migrations: add columns missing in older DB versions ──────────
-        def _migrate(table, migrations):
-            existing = {row[1] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
-            for col, sql in migrations:
-                if col not in existing:
-                    try: db.execute(sql)
-                    except Exception: pass
-
-        _migrate("perf", [
-            ("quarter",       "ALTER TABLE perf ADD COLUMN quarter TEXT DEFAULT 'Q1'"),
-            ("emp_id",        "ALTER TABLE perf ADD COLUMN emp_id TEXT DEFAULT ''"),
-            ("emp_code",      "ALTER TABLE perf ADD COLUMN emp_code TEXT DEFAULT ''"),
-            ("mp_ref",        "ALTER TABLE perf ADD COLUMN mp_ref TEXT DEFAULT ''"),
-            ("metric",        "ALTER TABLE perf ADD COLUMN metric TEXT DEFAULT ''"),
-            ("non_compliant", "ALTER TABLE perf ADD COLUMN non_compliant INTEGER DEFAULT 0"),
-            ("pct_nc",        "ALTER TABLE perf ADD COLUMN pct_nc REAL DEFAULT 0"),
-            ("target_val",    "ALTER TABLE perf ADD COLUMN target_val REAL DEFAULT 0"),
-            ("actual_val",    "ALTER TABLE perf ADD COLUMN actual_val REAL DEFAULT 0"),
-            ("unit",          "ALTER TABLE perf ADD COLUMN unit TEXT DEFAULT '%'"),
-            ("status",        "ALTER TABLE perf ADD COLUMN status TEXT DEFAULT 'C'"),
-            ("notes",         "ALTER TABLE perf ADD COLUMN notes TEXT DEFAULT ''"),
-        ])
-        _migrate("perf_cache", [
-            ("locked", "ALTER TABLE perf_cache ADD COLUMN locked INTEGER DEFAULT 0"),
-        ])
-        _migrate("employees", [
-            ("email", "ALTER TABLE employees ADD COLUMN email TEXT DEFAULT ''"),
-        ])
-        _migrate("cps", [
-            ("source", "ALTER TABLE cps ADD COLUMN source TEXT DEFAULT ''"),
-            ("mp_id",  "ALTER TABLE cps ADD COLUMN mp_id TEXT DEFAULT ''"),
-        ])
-
-        # cascade_links: old DB may use parent_/child_ naming instead of superior_/subordinate_
-        cl_cols = {row[1] for row in db.execute("PRAGMA table_info(cascade_links)").fetchall()}
-        if cl_cols and 'superior_emp_id' not in cl_cols:
-            # Old schema — rebuild with new column names preserving data
-            try:
-                db.execute("""CREATE TABLE IF NOT EXISTS cascade_links_new(
-                  id TEXT PRIMARY KEY,
-                  superior_emp_id    TEXT NOT NULL DEFAULT '',
-                  superior_cp_id     TEXT NOT NULL DEFAULT '',
-                  subordinate_emp_id TEXT NOT NULL DEFAULT '',
-                  subordinate_mp_id  TEXT DEFAULT '',
-                  auto_created       INTEGER DEFAULT 0,
-                  created_at         TEXT DEFAULT '')""")
-                # Map old columns to new — try both naming conventions
-                old_sup  = 'parent_emp_id'  if 'parent_emp_id'  in cl_cols else ('sup_emp_id'  if 'sup_emp_id'  in cl_cols else 'superior_emp_id')
-                old_cp   = 'parent_cp_id'   if 'parent_cp_id'   in cl_cols else ('sup_cp_id'   if 'sup_cp_id'   in cl_cols else 'superior_cp_id')
-                old_sub  = 'child_emp_id'   if 'child_emp_id'   in cl_cols else ('sub_emp_id'  if 'sub_emp_id'  in cl_cols else 'subordinate_emp_id')
-                old_mp   = 'child_mp_id'    if 'child_mp_id'    in cl_cols else ('sub_mp_id'   if 'sub_mp_id'   in cl_cols else 'subordinate_mp_id')
-                old_auto = 'auto_created'   if 'auto_created'   in cl_cols else '0'
-                old_ts   = 'created_at'     if 'created_at'     in cl_cols else "datetime('now')"
-                db.execute(f"""INSERT OR IGNORE INTO cascade_links_new
-                    (id, superior_emp_id, superior_cp_id, subordinate_emp_id,
-                     subordinate_mp_id, auto_created, created_at)
-                    SELECT id, {old_sup}, {old_cp}, {old_sub}, {old_mp}, {old_auto}, {old_ts}
-                    FROM cascade_links""")
-                db.execute("DROP TABLE cascade_links")
-                db.execute("ALTER TABLE cascade_links_new RENAME TO cascade_links")
-            except Exception as e:
-                pass  # If migration fails, table stays as-is; new rows will fail gracefully
-        elif not cl_cols:
-            pass  # Table doesn't exist yet — SCHEMA will create it
-        else:
-            # Table exists with correct schema — add any missing columns
-            _migrate("cascade_links", [
-                ("subordinate_mp_id", "ALTER TABLE cascade_links ADD COLUMN subordinate_mp_id TEXT DEFAULT ''"),
-                ("auto_created",      "ALTER TABLE cascade_links ADD COLUMN auto_created INTEGER DEFAULT 0"),
-                ("created_at",        "ALTER TABLE cascade_links ADD COLUMN created_at TEXT DEFAULT ''"),
-            ])
-
-        db.commit()
-
-        # ── Ensure current FY exists in cache ─────────────────────────────────────
-        import datetime as _dt
-        _today = _dt.date.today()
-        for _start, _end, _fy in FY_MAP:
-            if _start <= _today <= _end:
-                _now = _dt.datetime.now().isoformat()
-                db.execute("INSERT OR IGNORE INTO perf_cache VALUES(?,?,?,?,?,?)",
-                           (_fy, f"FY {_fy}", 0, _now, _now, 0))
-                db.commit()
-                break
-
 def _upd_cache(db, fy):
     cnt = db.execute("SELECT COUNT(*) FROM perf WHERE fy=?", (fy,)).fetchone()[0]
     now = datetime.datetime.now().isoformat()
@@ -769,14 +684,14 @@ def cascade_links_api():
         cp = db.execute('SELECT * FROM cps WHERE id=?', (d['superior_cp_id'],)).fetchone()
         if cp:
             new_ref   = f"AUTO-{cp['ref']}"
-            new_title = f"[Auto] {(cp['title'] or cp['ref'] or 'Untitled')}"
+            new_title = f"[Auto] {cp['title']}"
             ex_mp = db.execute('SELECT id FROM mps WHERE ref=?', (new_ref,)).fetchone()
             if ex_mp:
                 sub_mp_id = ex_mp['id']
             else:
                 sub_mp_id = uid()
                 db.execute('INSERT INTO mps VALUES(?,?,?,?,?,?,?,?)',
-                           (sub_mp_id,new_ref,new_title,(cp['target'] or ''),(cp['freq'] or 'Monthly'),0,0,0))
+                           (sub_mp_id,new_ref,new_title,cp['target'],cp['freq'],0,0,0))
                 db.execute('INSERT OR IGNORE INTO mp_owners VALUES(?,?)',
                            (sub_mp_id, d['subordinate_emp_id']))
             auto_created = 1
@@ -888,11 +803,7 @@ def perf_api():
     pct_c  = round(comp/tot*100,2) if tot else 0
     pct_nc = round(nc/tot*100,2)   if tot else 0
     st  = d.get('status') or calc_status(d.get('actual_val',0), d.get('target_val',0), d.get('unit','%'))
-    db.execute("""INSERT OR REPLACE INTO perf
-               (id,fy,bs_month,quarter,emp_id,emp_code,mp_ref,cp_ref,
-                metric,total,compliant,non_compliant,pct_compliant,pct_nc,
-                target_val,actual_val,unit,status,notes)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+    db.execute("INSERT OR REPLACE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                (pid,fy,bsm,bs_q(bsm),eid,ec,d.get('mp_ref',''),d.get('cp_ref',''),d.get('metric',''),
                 tot,comp,nc,pct_c,pct_nc,d.get('target_val',0),d.get('actual_val',0),d.get('unit','%'),st,d.get('notes','')))
     _upd_cache(db, fy)
@@ -948,16 +859,15 @@ def perf_quick():
     pct_nc = round(nc / total * 100, 2)
 
     # Parse target from CP
-    raw_tgt = (cp['target'] or '').strip()
+    raw_tgt = cp['target'].strip()
     tgt_num = ''.join(c for c in raw_tgt if c.isdigit() or c == '.')
     try: tgt_val = float(tgt_num)
     except: tgt_val = 0.0
 
     actual_val = float(d.get('actual_val', 0) or 0)
-    tgt_parts = raw_tgt.split()
-    unit       = d.get('unit', tgt_parts[-1] if tgt_parts else '%')
+    unit       = d.get('unit', raw_tgt.split()[-1] if raw_tgt else '%')
     status     = calc_status(actual_val, tgt_val, unit)
-    metric     = d.get('metric', (cp['title'] or '')[:60])
+    metric     = d.get('metric', cp['title'][:60])
 
     # DUPLICATE CHECK
     existing = db.execute(
@@ -974,11 +884,7 @@ def perf_quick():
         }), 409
 
     pid = existing['id'] if existing else uid()
-    db.execute("""INSERT OR REPLACE INTO perf
-               (id,fy,bs_month,quarter,emp_id,emp_code,mp_ref,cp_ref,
-                metric,total,compliant,non_compliant,pct_compliant,pct_nc,
-                target_val,actual_val,unit,status,notes)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+    db.execute("INSERT OR REPLACE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                (pid, fy, bsm, bs_q(bsm), eid, ec, mp_ref, d['cp_ref'],
                 metric, total, compliant, nc, pct_c, pct_nc,
                 tgt_val, actual_val, unit, status, d.get('notes','')))
@@ -990,247 +896,6 @@ def perf_quick():
         'pct_compliant': pct_c, 'pct_nc': pct_nc, 'status': status
     })
 
-
-@app.route('/api/perf/exceptions')
-def perf_exceptions():
-    db  = get_db()
-    fy  = request.args.get('fy', '')
-    q2  = "SELECT p.*, e.name as emp_name FROM perf p LEFT JOIN employees e ON p.emp_id=e.id WHERE p.status='NC'"
-    args= []
-    if fy: q2 += " AND p.fy=?"; args.append(fy)
-    rows = R(db.execute(q2 + " ORDER BY p.fy DESC,p.bs_month", args).fetchall())
-    repeat = {}
-    for r in rows:
-        cp = r.get('cp_ref','')
-        if cp: repeat[cp] = repeat.get(cp,0)+1
-    return jsonify({'total_nc': len(rows), 'exceptions': rows[:50],
-                    'repeat_failures': {k:v for k,v in repeat.items() if v>1}})
-
-# ── ORG TREE ──────────────────────────────────────────────────────────────
-@app.route('/api/perf/simple_template')
-def perf_simple_template():
-    """Generate a rich Excel template pre-filled with real employees & CPs from DB."""
-    db   = get_db()
-    emps = db.execute("SELECT emp_code, name FROM employees ORDER BY emp_code").fetchall()
-    cps  = db.execute("SELECT ref, title, target FROM cps ORDER BY ref").fetchall()
-
-    if not HAS_OPENPYXL:
-        # Fallback to CSV if openpyxl not installed
-        out = io.StringIO()
-        w   = csv.writer(out)
-        w.writerow(['Date','Emp_Code','CP_Ref','Total','Compliant','Actual_Val','Notes'])
-        for e in emps[:3]:
-            for c in cps[:2]:
-                w.writerow([datetime.date.today().isoformat(), e['emp_code'], c['ref'], '', '', '', ''])
-        out.seek(0)
-        return send_file(io.BytesIO(out.getvalue().encode()), mimetype='text/csv',
-                         as_attachment=True, download_name='MPCP_Simple_Template.csv')
-
-    wb = openpyxl.Workbook()
-
-    # ── Sheet 1: Data Entry ─────────────────────────────────────────────
-    ws = wb.active
-    ws.title = 'Performance Data'
-
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils  import get_column_letter
-    from openpyxl.worksheet.datavalidation import DataValidation
-
-    HDR_FILL = PatternFill('solid', fgColor='0A1628')
-    HDR_FONT = Font(color='FFFFFF', bold=True, size=11)
-    INFO_FILL = PatternFill('solid', fgColor='DBEAFE')
-    INFO_FONT = Font(color='1E3A8A', size=10)
-    REQ_FILL  = PatternFill('solid', fgColor='FEF9C3')
-    thin = Side(style='thin', color='CBD5E1')
-    border = Border(left=thin, right=thin, top=thin, bottom=thin)
-
-    headers = ['Date *', 'Emp_Code *', 'CP_Ref *', 'Total *', 'Compliant *', 'Actual_Val', 'Notes']
-    col_widths = [14, 16, 20, 10, 12, 13, 30]
-
-    # Title row
-    ws.merge_cells('A1:G1')
-    ws['A1'] = '⚡ MPCP Performance Upload Template  —  Fill Date · Emp_Code · CP_Ref · Total · Compliant. Everything else is auto-calculated on import.'
-    ws['A1'].font      = Font(bold=True, color='1E3A8A', size=11)
-    ws['A1'].fill      = INFO_FILL
-    ws['A1'].alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
-    ws.row_dimensions[1].height = 32
-
-    # Header row
-    for col_idx, (hdr, width) in enumerate(zip(headers, col_widths), 1):
-        cell = ws.cell(row=2, column=col_idx, value=hdr)
-        cell.font      = HDR_FONT
-        cell.fill      = HDR_FILL
-        cell.alignment = Alignment(horizontal='center', vertical='center')
-        cell.border    = border
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
-
-    # Hint row
-    hints = [
-        'YYYY-MM-DD  e.g. 2025-07-16',
-        'Employee code  (see Emp List sheet)',
-        'CP reference  (see CP List sheet)',
-        'Total units done this period',
-        'How many were compliant/on-time',
-        'Actual measured value (optional)',
-        'Optional remarks'
-    ]
-    for col_idx, hint in enumerate(hints, 1):
-        cell = ws.cell(row=3, column=col_idx, value=hint)
-        cell.font      = Font(color='6B7A99', italic=True, size=9)
-        cell.fill      = PatternFill('solid', fgColor='F8FAFC')
-        cell.alignment = Alignment(horizontal='left', vertical='center')
-        cell.border    = border
-    ws.row_dimensions[3].height = 18
-
-    # Sample rows using real data
-    today = datetime.date.today().isoformat()
-    sample_rows = []
-    for e in emps[:3]:
-        for c in cps[:2]:
-            sample_rows.append([today, e['emp_code'], c['ref'], 100, 95, '', ''])
-    if not sample_rows:
-        sample_rows = [[today, 'EMP-001', 'CP-REF', 100, 95, '', '']]
-
-    for row_idx, row_data in enumerate(sample_rows, 4):
-        for col_idx, val in enumerate(row_data, 1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=val)
-            cell.alignment = Alignment(horizontal='left', vertical='center')
-            cell.border    = border
-            if col_idx <= 5:
-                cell.fill = REQ_FILL
-        ws.row_dimensions[row_idx].height = 16
-
-    # Blank data rows (rows 4+sample to 53)
-    start_blank = 4 + len(sample_rows)
-    for row_idx in range(start_blank, 54):
-        for col_idx in range(1, 8):
-            cell = ws.cell(row=row_idx, column=col_idx, value='')
-            cell.alignment = Alignment(horizontal='left', vertical='center')
-            cell.border    = border
-            if col_idx <= 5:
-                cell.fill = REQ_FILL
-
-    # Data validation for Emp_Code column (col B = 2)
-    if emps:
-        emp_codes = ','.join(f'"{e["emp_code"]}"' for e in emps[:50])
-        dv_emp = DataValidation(type='list', formula1=f'"{emp_codes}"', allow_blank=True,
-                                showDropDown=False, showErrorMessage=True,
-                                error='Use an employee code from the Emp List sheet',
-                                errorTitle='Invalid Employee Code')
-        ws.add_data_validation(dv_emp)
-        dv_emp.sqref = f'B4:B200'
-
-    # Data validation for CP_Ref column (col C = 3)
-    if cps:
-        cp_refs = ','.join(f'"{c["ref"]}"' for c in cps[:50])
-        dv_cp = DataValidation(type='list', formula1=f'"{cp_refs}"', allow_blank=True,
-                               showDropDown=False, showErrorMessage=True,
-                               error='Use a CP reference from the CP List sheet',
-                               errorTitle='Invalid CP Reference')
-        ws.add_data_validation(dv_cp)
-        dv_cp.sqref = f'C4:C200'
-
-    ws.freeze_panes = 'A4'
-
-    # ── Sheet 2: Employee List ──────────────────────────────────────────
-    ws2 = wb.create_sheet('Emp List')
-    ws2.column_dimensions['A'].width = 14
-    ws2.column_dimensions['B'].width = 30
-    ws2.cell(1,1,'Emp_Code').font = Font(bold=True); ws2.cell(1,1).fill = HDR_FILL; ws2.cell(1,1).font = HDR_FONT
-    ws2.cell(1,2,'Name').font     = HDR_FONT;        ws2.cell(1,2).fill = HDR_FILL; ws2.cell(1,2).font = HDR_FONT
-    for i, e in enumerate(emps, 2):
-        ws2.cell(i, 1, e['emp_code'])
-        ws2.cell(i, 2, e['name'])
-
-    # ── Sheet 3: CP List ───────────────────────────────────────────────
-    ws3 = wb.create_sheet('CP List')
-    ws3.column_dimensions['A'].width = 20
-    ws3.column_dimensions['B'].width = 50
-    ws3.column_dimensions['C'].width = 16
-    for col, hdr in enumerate(['CP_Ref','Title','Target'], 1):
-        c = ws3.cell(1, col, hdr); c.fill = HDR_FILL; c.font = HDR_FONT
-    for i, c in enumerate(cps, 2):
-        ws3.cell(i, 1, c['ref'])
-        ws3.cell(i, 2, c['title'])
-        ws3.cell(i, 3, c['target'] or '')
-
-    buf = io.BytesIO()
-    wb.save(buf); buf.seek(0)
-    return send_file(buf, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                     as_attachment=True, download_name='MPCP_Upload_Template.xlsx')
-
-
-@app.route('/api/perf/template')
-def perf_template():
-    out = io.StringIO(); w = csv.writer(out); w.writerow(PHDR)
-    for s in [
-        ["2081-82","Shrawan","EMP-002","HODL-1","LM-VEH-1","Vehicle Border Tracking",410,398,12,97.07,2.93,100,97,"%","C","All tracked"],
-        ["2081-82","Shrawan","EMP-002","HODL-1","LM-VEH-2-B","CC within 3 Days",410,390,20,95.12,4.88,3,2.6,"Days","C","On track"],
-        ["2081-82","Bhadra","EMP-004","HODL-3","LM-VEH-5-A","Registration 15 Days",380,370,10,97.37,2.63,15,13,"Days","C","Improved"],
-    ]: w.writerow(s)
-    out.seek(0)
-    return send_file(io.BytesIO(out.getvalue().encode()), mimetype='text/csv',
-                     as_attachment=True, download_name='MPCP_Perf_Template.csv')
-
-
-@app.route('/api/perf/export')
-def export_perf():
-    db = get_db(); fy = request.args.get('fy')
-    q  = "SELECT p.*,e.name as emp_name FROM perf p LEFT JOIN employees e ON p.emp_id=e.id"
-    args = []
-    if fy: q += " WHERE p.fy=?"; args.append(fy)
-    rows = db.execute(q+' ORDER BY p.fy DESC,p.bs_month', args).fetchall()
-    out  = io.StringIO(); w = csv.writer(out)
-    w.writerow(['FY','BS_Month','Quarter','Emp_Code','Emp_Name','MP_Ref','CP_Ref','Metric',
-                'Total','Compliant','Non_Compliant','Pct_Compliant','Pct_NC',
-                'Target_Val','Actual_Val','Unit','Status','Notes'])
-    for r in rows:
-        w.writerow([r['fy'],r['bs_month'],r['quarter'],r['emp_code'],r['emp_name'] or '',
-                    r['mp_ref'],r['cp_ref'],r['metric'],r['total'],r['compliant'],r['non_compliant'],
-                    r['pct_compliant'],r['pct_nc'],r['target_val'],r['actual_val'],r['unit'],r['status'],r['notes']])
-    out.seek(0)
-    return send_file(io.BytesIO(out.getvalue().encode()), mimetype='text/csv',
-                     as_attachment=True, download_name=f'MPCP_Perf_{fy or "All"}.csv')
-
-
-@app.route('/api/perf/import', methods=['POST'])
-def import_perf():
-    f = request.files.get('file')
-    if not f: return json_error('No file')
-    text   = f.read().decode('utf-8-sig'); reader = csv.DictReader(io.StringIO(text))
-    db     = get_db()
-    code_map = {r['emp_code']:r['id'] for r in db.execute("SELECT id,emp_code FROM employees WHERE emp_code IS NOT NULL")}
-    count  = 0; errs = []; fys_seen = set()
-    for i,row in enumerate(reader,2):
-        try:
-            fy = str(row.get('FY','') or row.get('fy','')).strip()
-            if not fy: continue
-            fys_seen.add(fy)
-            bsm = norm_month(row.get('BS_Month','') or row.get('bs_month',''))
-            ec  = str(row.get('Emp_Code','') or row.get('emp_code','')).strip()
-            eid = code_map.get(ec,'')
-            tot = int(float(row.get('Total','0') or 0)); comp = int(float(row.get('Compliant','0') or 0))
-            nc  = tot - comp
-            pct_c  = float(row.get('Pct_Compliant','0') or (round(comp/tot*100,2) if tot else 0))
-            pct_nc = float(row.get('Pct_NC','0') or (round(nc/tot*100,2) if tot else 0))
-            tgt = float(row.get('Target_Val','0') or 0); act = float(row.get('actual_val','0') or 0)
-            unit = str(row.get('Unit','%') or '%')
-            st   = str(row.get('Status','') or calc_status(act,tgt,unit))
-            if st not in ('C','NC'): st = calc_status(act,tgt,unit)
-            db.execute("""INSERT OR IGNORE INTO perf
-                       (id,fy,bs_month,quarter,emp_id,emp_code,mp_ref,cp_ref,
-                        metric,total,compliant,non_compliant,pct_compliant,pct_nc,
-                        target_val,actual_val,unit,status,notes)
-                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                       (uid(),fy,bsm,bs_q(bsm),eid,ec,str(row.get('MP_Ref','') or ''),str(row.get('CP_Ref','') or ''),
-                        str(row.get('Metric','') or ''),tot,comp,nc,pct_c,pct_nc,tgt,act,unit,st,str(row.get('Notes','') or '')))
-            count += 1
-        except Exception as e: errs.append(f"Row {i}: {e}")
-    for fy in fys_seen: _upd_cache(db, fy)
-    db.commit()
-    return jsonify({'imported': count, 'errors': errs[:10]})
-
-# ── ANALYTICS — SQL-based  (UPGRADED) ─────────────────────────────────────
 @app.route('/api/perf/<pid>', methods=['PUT','DELETE'])
 def perf_record(pid):
     db = get_db()
@@ -1259,9 +924,71 @@ PHDR = ['FY','BS_Month','Emp_Code','MP_Ref','CP_Ref','Metric',
         'Total','Compliant','Non_Compliant','Pct_Compliant','Pct_NC',
         'Target_Val','Actual_Val','Unit','Status','Notes']
 
+@app.route('/api/perf/template')
+def perf_template():
+    out = io.StringIO(); w = csv.writer(out); w.writerow(PHDR)
+    for s in [
+        ["2081-82","Shrawan","EMP-002","HODL-1","LM-VEH-1","Vehicle Border Tracking",410,398,12,97.07,2.93,100,97,"%","C","All tracked"],
+        ["2081-82","Shrawan","EMP-002","HODL-1","LM-VEH-2-B","CC within 3 Days",410,390,20,95.12,4.88,3,2.6,"Days","C","On track"],
+        ["2081-82","Bhadra","EMP-004","HODL-3","LM-VEH-5-A","Registration 15 Days",380,370,10,97.37,2.63,15,13,"Days","C","Improved"],
+    ]: w.writerow(s)
+    out.seek(0)
+    return send_file(io.BytesIO(out.getvalue().encode()), mimetype='text/csv',
+                     as_attachment=True, download_name='MPCP_Perf_Template.csv')
 
+@app.route('/api/perf/export')
+def export_perf():
+    db = get_db(); fy = request.args.get('fy')
+    q  = "SELECT p.*,e.name as emp_name FROM perf p LEFT JOIN employees e ON p.emp_id=e.id"
+    args = []
+    if fy: q += " WHERE p.fy=?"; args.append(fy)
+    rows = db.execute(q+' ORDER BY p.fy DESC,p.bs_month', args).fetchall()
+    out  = io.StringIO(); w = csv.writer(out)
+    w.writerow(['FY','BS_Month','Quarter','Emp_Code','Emp_Name','MP_Ref','CP_Ref','Metric',
+                'Total','Compliant','Non_Compliant','Pct_Compliant','Pct_NC',
+                'Target_Val','Actual_Val','Unit','Status','Notes'])
+    for r in rows:
+        w.writerow([r['fy'],r['bs_month'],r['quarter'],r['emp_code'],r['emp_name'] or '',
+                    r['mp_ref'],r['cp_ref'],r['metric'],r['total'],r['compliant'],r['non_compliant'],
+                    r['pct_compliant'],r['pct_nc'],r['target_val'],r['actual_val'],r['unit'],r['status'],r['notes']])
+    out.seek(0)
+    return send_file(io.BytesIO(out.getvalue().encode()), mimetype='text/csv',
+                     as_attachment=True, download_name=f'MPCP_Perf_{fy or "All"}.csv')
 
+@app.route('/api/perf/import', methods=['POST'])
+def import_perf():
+    f = request.files.get('file')
+    if not f: return json_error('No file')
+    text   = f.read().decode('utf-8-sig'); reader = csv.DictReader(io.StringIO(text))
+    db     = get_db()
+    code_map = {r['emp_code']:r['id'] for r in db.execute("SELECT id,emp_code FROM employees WHERE emp_code IS NOT NULL")}
+    count  = 0; errs = []; fys_seen = set()
+    for i,row in enumerate(reader,2):
+        try:
+            fy = str(row.get('FY','') or row.get('fy','')).strip()
+            if not fy: continue
+            fys_seen.add(fy)
+            bsm = norm_month(row.get('BS_Month','') or row.get('bs_month',''))
+            ec  = str(row.get('Emp_Code','') or row.get('emp_code','')).strip()
+            eid = code_map.get(ec,'')
+            tot = int(float(row.get('Total','0') or 0)); comp = int(float(row.get('Compliant','0') or 0))
+            nc  = tot - comp
+            pct_c  = float(row.get('Pct_Compliant','0') or (round(comp/tot*100,2) if tot else 0))
+            pct_nc = float(row.get('Pct_NC','0') or (round(nc/tot*100,2) if tot else 0))
+            tgt = float(row.get('Target_Val','0') or 0); act = float(row.get('Actual_Val','0') or 0)
+            unit = str(row.get('Unit','%') or '%')
+            st   = str(row.get('Status','') or calc_status(act,tgt,unit))
+            if st not in ('C','NC'): st = calc_status(act,tgt,unit)
+            db.execute("INSERT OR IGNORE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                       (uid(),fy,bsm,bs_q(bsm),eid,ec,str(row.get('MP_Ref','') or ''),str(row.get('CP_Ref','') or ''),
+                        str(row.get('Metric','') or ''),tot,comp,nc,pct_c,pct_nc,tgt,act,unit,st,str(row.get('Notes','') or '')))
+            count += 1
+        except Exception as e: errs.append(f"Row {i}: {e}")
+    for fy in fys_seen: _upd_cache(db, fy)
+    db.commit()
+    return jsonify({'imported': count, 'errors': errs[:10]})
 
+# ── ANALYTICS — SQL-based  (UPGRADED) ─────────────────────────────────────
 @app.route('/api/analytics/summary')
 def analytics_summary():
     db    = get_db()
@@ -1334,203 +1061,6 @@ def sample_file(fname):
     if not os.path.exists(path): return 'File not found', 404
     return send_file(path, as_attachment=True, download_name=safe[fname])
 
-
-
-# ── CASCADE LINKS (frontend-compatible URLs) ──────────────────────────────
-# Frontend calls /api/cascade  (not /api/cascade_links)
-
-@app.route('/api/cascade', methods=['GET', 'POST'])
-def cascade_api():
-    db = get_db()
-    if request.method == 'GET':
-        rows = db.execute("""
-            SELECT cl.*,
-              se.name  as sup_name,  se.emp_code as sup_code,
-              sub.name as sub_name, sub.emp_code as sub_code,
-              cp.ref   as cp_ref,   cp.title     as cp_title,
-              mp.ref   as mp_ref,   mp.title     as mp_title
-            FROM cascade_links cl
-            LEFT JOIN employees se   ON cl.superior_emp_id    = se.id
-            LEFT JOIN employees sub  ON cl.subordinate_emp_id = sub.id
-            LEFT JOIN cps       cp   ON cl.superior_cp_id     = cp.id
-            LEFT JOIN mps       mp   ON cl.subordinate_mp_id  = mp.id
-            ORDER BY se.name
-        """).fetchall()
-        return jsonify(R(rows))
-
-    d = request.json or {}
-    # Support both field naming conventions from frontend
-    sup_emp  = d.get('superior_emp_id') or d.get('sup_emp_id') or d.get('parent_emp_id')
-    sup_cp   = d.get('superior_cp_id')  or d.get('sup_cp_id')  or d.get('cp_id')
-    sub_emp  = d.get('subordinate_emp_id') or d.get('sub_emp_id') or d.get('child_emp_id')
-    sub_mp   = d.get('subordinate_mp_id') or d.get('sub_mp_id') or d.get('mp_id') or ''
-
-    if not sup_emp or not sup_cp or not sub_emp:
-        return jsonify({'error': 'Missing required fields: superior_emp_id, superior_cp_id, subordinate_emp_id'}), 400
-
-    # Duplicate check
-    existing = db.execute(
-        'SELECT id FROM cascade_links WHERE superior_cp_id=? AND subordinate_emp_id=?',
-        (sup_cp, sub_emp)
-    ).fetchone()
-    if existing:
-        return jsonify({'error': 'Link already exists', 'id': existing['id']}), 409
-
-    auto_created = 0
-    sub_mp = sub_mp.strip()
-    if not sub_mp:
-        cp = db.execute('SELECT * FROM cps WHERE id=?', (sup_cp,)).fetchone()
-        if not cp:
-            # Try by ref
-            cp = db.execute('SELECT * FROM cps WHERE ref=?', (sup_cp,)).fetchone()
-        if cp:
-            new_ref   = f"AUTO-{cp['ref']}"
-            new_title = f"[Auto] {(cp['title'] or cp['ref'] or 'Untitled')}"
-            ex_mp = db.execute('SELECT id FROM mps WHERE ref=?', (new_ref,)).fetchone()
-            if ex_mp:
-                sub_mp = ex_mp['id']
-            else:
-                sub_mp = uid()
-                db.execute('INSERT INTO mps VALUES(?,?,?,?,?,?,?,?)',
-                           (sub_mp, new_ref, new_title, (cp['target'] or ''), (cp['freq'] or 'Monthly'), 0, 0, 0))
-                db.execute('INSERT OR IGNORE INTO mp_owners VALUES(?,?)', (sub_mp, sub_emp))
-            auto_created = 1
-
-    link_id = uid()
-    db.execute('INSERT INTO cascade_links VALUES(?,?,?,?,?,?,?)',
-               (link_id, sup_emp, sup_cp, sub_emp, sub_mp, auto_created,
-                datetime.datetime.now().isoformat()))
-    db.commit()
-    return jsonify({
-        'id': link_id, 'subordinate_mp_id': sub_mp,
-        'auto_created': bool(auto_created), 'ok': True
-    })
-
-
-@app.route('/api/cascade/<lid>', methods=['DELETE'])
-def cascade_del(lid):
-    db = get_db()
-    row = db.execute('SELECT * FROM cascade_links WHERE id=?', (lid,)).fetchone()
-    if not row: return jsonify({'error': 'Not found'}), 404
-    if row['auto_created']:
-        db.execute('DELETE FROM mps WHERE id=?', (row['subordinate_mp_id'],))
-        db.execute('DELETE FROM mp_owners WHERE mp_id=?', (row['subordinate_mp_id'],))
-    db.execute('DELETE FROM cascade_links WHERE id=?', (lid,))
-    db.commit()
-    return jsonify({'ok': True})
-
-
-@app.route('/api/cascade/tree')
-def cascade_tree():
-    db  = get_db()
-    eid = request.args.get('emp_id')
-
-    # Build tree: emp → roles → mps → cps → cascade children
-    emp_q = "SELECT * FROM employees" + (" WHERE id=?" if eid else "") + " ORDER BY level, name"
-    emps  = R(db.execute(emp_q, (eid,) if eid else ()).fetchall())
-
-    links = R(db.execute("""
-        SELECT cl.*,
-          se.name as sup_name, sub.name as sub_name,
-          cp.ref as cp_ref, cp.title as cp_title,
-          mp.ref as mp_ref
-        FROM cascade_links cl
-        LEFT JOIN employees se  ON cl.superior_emp_id    = se.id
-        LEFT JOIN employees sub ON cl.subordinate_emp_id = sub.id
-        LEFT JOIN cps cp        ON cl.superior_cp_id     = cp.id
-        LEFT JOIN mps mp        ON cl.subordinate_mp_id  = mp.id
-    """).fetchall())
-
-    # Index links by superior_cp_id for fast lookup
-    by_cp = {}
-    for lnk in links:
-        key = lnk['superior_cp_id']
-        by_cp.setdefault(key, []).append(lnk)
-
-    tree = []
-    for emp in emps:
-        eid_  = emp['id']
-        roles = R(db.execute("""
-            SELECT r.* FROM roles r
-            JOIN emp_roles er ON r.id = er.role_id
-            WHERE er.emp_id=?
-        """, (eid_,)).fetchall())
-
-        role_nodes = []
-        for role in roles:
-            mps_ = R(db.execute("""
-                SELECT m.* FROM mps m
-                JOIN role_mps rm ON m.id = rm.mp_id
-                WHERE rm.role_id=?
-            """, (role['id'],)).fetchall())
-
-            mp_nodes = []
-            for mp in mps_:
-                cps_ = R(db.execute("""
-                    SELECT c.* FROM cps c WHERE c.mp_id=?
-                """, (mp['id'],)).fetchall())
-
-                cp_nodes = []
-                for cp in cps_:
-                    children = by_cp.get(cp['id'], [])
-                    cp_nodes.append({**cp, 'cascade_children': children})
-
-                mp_nodes.append({**mp, 'cps': cp_nodes})
-            role_nodes.append({**role, 'mps': mp_nodes})
-
-        tree.append({**emp, 'roles': role_nodes})
-
-    return jsonify({'tree': tree, 'links': links})
-
-
-@app.route('/api/org/cascade_assign', methods=['POST'])
-def cascade_assign():
-    """Alternative cascade creation endpoint used by org chart view"""
-    d       = request.json or {}
-    sup_emp = d.get('parent_emp_id') or d.get('superior_emp_id')
-    cp_id   = d.get('cp_id') or d.get('superior_cp_id')
-    sub_emp = d.get('child_emp_id') or d.get('subordinate_emp_id')
-    sub_mp  = (d.get('mp_id') or d.get('subordinate_mp_id') or '').strip()
-
-    if not sup_emp or not cp_id or not sub_emp:
-        return jsonify({'error': 'Missing fields: superior_emp_id, superior_cp_id, subordinate_emp_id'}), 400
-
-    db = get_db()
-
-    # Duplicate check
-    existing = db.execute(
-        'SELECT id FROM cascade_links WHERE superior_cp_id=? AND subordinate_emp_id=?',
-        (cp_id, sub_emp)
-    ).fetchone()
-    if existing:
-        return jsonify({'ok': True, 'id': existing['id'], 'existing': True})
-
-    auto_created = 0
-    if not sub_mp:
-        cp = db.execute('SELECT * FROM cps WHERE id=?', (cp_id,)).fetchone()
-        if not cp:
-            cp = db.execute('SELECT * FROM cps WHERE ref=?', (cp_id,)).fetchone()
-        if cp:
-            new_ref   = f"AUTO-{cp['ref'] or uid()}"
-            new_title = f"[Auto] {(cp['title'] or cp['ref'] or 'Untitled')}"
-            ex_mp = db.execute('SELECT id FROM mps WHERE ref=?', (new_ref,)).fetchone()
-            if ex_mp:
-                sub_mp = ex_mp['id']
-            else:
-                sub_mp = uid()
-                db.execute('INSERT INTO mps VALUES(?,?,?,?,?,?,?,?)',
-                           (sub_mp, new_ref, new_title,
-                            (cp['target'] or ''), (cp['freq'] or 'Monthly'), 0, 0, 0))
-                db.execute('INSERT OR IGNORE INTO mp_owners VALUES(?,?)', (sub_mp, sub_emp))
-            auto_created = 1
-
-    lid = uid()
-    db.execute('INSERT INTO cascade_links VALUES(?,?,?,?,?,?,?)',
-               (lid, sup_emp, cp_id, sub_emp, sub_mp, auto_created,
-                datetime.datetime.now().isoformat()))
-    db.commit()
-    return jsonify({'ok': True, 'id': lid, 'auto_created': bool(auto_created)})
-
 if __name__ == '__main__':
     init_db()
     print("\n" + "="*55)
@@ -1538,431 +1068,3 @@ if __name__ == '__main__':
     print(" http://localhost:5050")
     print("="*55 + "\n")
     app.run(debug=False, port=5050, host='0.0.0.0')
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# PATCH: Missing routes that fix all 5 reported issues
-# 1. Data save: bulk_delete, bs_today, locations, sectors stubs
-# 2. Auto-calc: handled in perf_quick (already correct) + frontend
-# 3. Modal backdrop: fixed in index.html (JS patch)
-# 4. FY detection: fy_from_date already exists; bs_today added here
-# 5. Cascade new entry: cascade_assign field-name mapping fixed
-# ══════════════════════════════════════════════════════════════════════════
-
-# ── BS TODAY ──────────────────────────────────────────────────────────────
-@app.route('/api/bs_today')
-def bs_today():
-    dt  = datetime.datetime.now()
-    fy, bsm = ad_date_to_fy_and_month(dt)
-    return jsonify({'date': dt.strftime('%Y-%m-%d'), 'fy': fy,
-                    'bs_month': bsm, 'quarter': bs_q(bsm)})
-
-# ── SECTORS (stub — keeps frontend from 404-ing) ──────────────────────────
-@app.route('/api/sectors', methods=['GET','POST'])
-def sectors_api():
-    db = get_db()
-    # Ensure table exists
-    db.execute('''CREATE TABLE IF NOT EXISTS sectors(
-        id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL,
-        description TEXT DEFAULT '', color TEXT DEFAULT '#475569',
-        sort_order INTEGER DEFAULT 0)''')
-    if request.method == 'GET':
-        rows = db.execute("SELECT * FROM sectors ORDER BY sort_order,name").fetchall()
-        return jsonify(R(rows))
-    d   = request.json or {}
-    sid = d.get('id') or uid()
-    db.execute("INSERT OR REPLACE INTO sectors VALUES(?,?,?,?,?,?)",
-               (sid, d.get('code',''), d.get('name',''), d.get('description',''),
-                d.get('color','#475569'), d.get('sort_order',0)))
-    db.commit()
-    return jsonify({'id': sid})
-
-@app.route('/api/sectors/<sid>', methods=['PUT','DELETE'])
-def sector_api(sid):
-    db = get_db()
-    if request.method == 'DELETE':
-        db.execute("DELETE FROM sectors WHERE id=?", (sid,)); db.commit()
-        return jsonify({'ok': True})
-    d = request.json or {}
-    db.execute("UPDATE sectors SET code=?,name=?,description=?,color=?,sort_order=? WHERE id=?",
-               (d.get('code',''), d.get('name',''), d.get('description',''),
-                d.get('color','#475569'), d.get('sort_order',0), sid))
-    db.commit()
-    return jsonify({'ok': True})
-
-# ── LOCATIONS ─────────────────────────────────────────────────────────────
-@app.route('/api/locations', methods=['GET','POST'])
-def locations_api():
-    db = get_db()
-    db.execute('''CREATE TABLE IF NOT EXISTS locations(
-        id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL,
-        type TEXT DEFAULT 'Office', address TEXT DEFAULT '')''')
-    db.execute('''CREATE TABLE IF NOT EXISTS loc_emps(
-        loc_id TEXT, emp_id TEXT, PRIMARY KEY(loc_id,emp_id))''')
-    if request.method == 'GET':
-        locs = R(db.execute("SELECT * FROM locations ORDER BY code").fetchall())
-        for loc in locs:
-            loc['emp_ids'] = [r['emp_id'] for r in db.execute(
-                "SELECT emp_id FROM loc_emps WHERE loc_id=?", (loc['id'],))]
-        return jsonify(locs)
-    d   = request.json or {}
-    lid = d.get('id') or uid()
-    db.execute("INSERT OR REPLACE INTO locations VALUES(?,?,?,?,?)",
-               (lid, d.get('code',''), d.get('name',''), d.get('type','Office'), d.get('address','')))
-    db.execute("DELETE FROM loc_emps WHERE loc_id=?", (lid,))
-    for eid in d.get('emp_ids',[]): db.execute("INSERT OR IGNORE INTO loc_emps VALUES(?,?)", (lid, eid))
-    db.commit()
-    return jsonify({'id': lid})
-
-@app.route('/api/locations/<lid>', methods=['PUT','DELETE'])
-def location_api(lid):
-    db = get_db()
-    if request.method == 'DELETE':
-        db.execute("DELETE FROM locations WHERE id=?", (lid,))
-        db.execute("DELETE FROM loc_emps WHERE loc_id=?", (lid,))
-        db.commit(); return jsonify({'ok': True})
-    d = request.json or {}
-    db.execute("UPDATE locations SET code=?,name=?,type=?,address=? WHERE id=?",
-               (d.get('code',''), d.get('name',''), d.get('type','Office'), d.get('address',''), lid))
-    db.execute("DELETE FROM loc_emps WHERE loc_id=?", (lid,))
-    for eid in d.get('emp_ids',[]): db.execute("INSERT OR IGNORE INTO loc_emps VALUES(?,?)", (lid, eid))
-    db.commit(); return jsonify({'ok': True})
-
-# ── BULK DELETES ───────────────────────────────────────────────────────────
-@app.route('/api/perf/bulk_delete', methods=['POST'])
-def perf_bulk_delete():
-    d   = request.json or {}
-    fy  = d.get('fy','').strip()
-    if not fy: return json_error('FY required')
-    lock = get_db().execute('SELECT locked FROM perf_cache WHERE fy=?', (fy,)).fetchone()
-    if lock and lock['locked']: return json_error(f'FY {fy} is locked', 403)
-    db   = get_db()
-    q2   = "SELECT id FROM perf WHERE fy=?"; args = [fy]
-    if d.get('month'):    q2 += " AND bs_month=?";  args.append(d['month'])
-    if d.get('emp_code'): q2 += " AND emp_code=?";  args.append(d['emp_code'])
-    if d.get('mp_ref'):   q2 += " AND mp_ref=?";    args.append(d['mp_ref'])
-    if d.get('cp_ref'):   q2 += " AND cp_ref=?";    args.append(d['cp_ref'])
-    rows = db.execute(q2, args).fetchall()
-    if d.get('preview'): return jsonify({'count': len(rows)})
-    db.execute(q2.replace("SELECT id","DELETE"), args)
-    _upd_cache(db, fy); db.commit()
-    return jsonify({'deleted': len(rows)})
-
-@app.route('/api/perf/bulk_delete_fy', methods=['POST'])
-def perf_bulk_delete_fy():
-    d  = request.json or {}
-    fy = d.get('fy','').strip()
-    if not fy: return json_error('FY required')
-    db = get_db()
-    cnt = db.execute("SELECT COUNT(*) FROM perf WHERE fy=?", (fy,)).fetchone()[0]
-    db.execute("DELETE FROM perf WHERE fy=?", (fy,))
-    _upd_cache(db, fy); db.commit()
-    return jsonify({'deleted': cnt})
-
-@app.route('/api/employees/bulk_delete', methods=['POST'])
-def employees_bulk_delete():
-    ids = (request.json or {}).get('ids', [])
-    if not ids: return jsonify({'deleted': 0})
-    db = get_db()
-    for eid in ids:
-        for t,c in [('employees','id'),('mp_owners','emp_id'),('cp_owners','emp_id'),
-                    ('emp_roles','emp_id'),('emp_mps','emp_id'),('emp_cps','emp_id')]:
-            db.execute(f"DELETE FROM {t} WHERE {c}=?", (eid,))
-    db.commit(); return jsonify({'deleted': len(ids)})
-
-@app.route('/api/mps/bulk_delete', methods=['POST'])
-def mps_bulk_delete():
-    ids = (request.json or {}).get('ids', [])
-    db  = get_db()
-    for mid in ids:
-        db.execute("DELETE FROM mps WHERE id=?", (mid,))
-        db.execute("DELETE FROM mp_owners WHERE mp_id=?", (mid,))
-        db.execute("UPDATE cps SET mp_id='' WHERE mp_id=?", (mid,))
-    db.commit(); return jsonify({'deleted': len(ids)})
-
-@app.route('/api/cps/bulk_delete', methods=['POST'])
-def cps_bulk_delete():
-    ids = (request.json or {}).get('ids', [])
-    db  = get_db()
-    for cid in ids:
-        db.execute("DELETE FROM cps WHERE id=?", (cid,))
-        db.execute("DELETE FROM cp_owners WHERE cp_id=?", (cid,))
-    db.commit(); return jsonify({'deleted': len(ids)})
-
-# ── SIMPLE PERF IMPORT TEMPLATE ────────────────────────────────────────────
-
-@app.route('/api/perf/import_simple', methods=['POST'])
-def import_perf_simple():
-    f = request.files.get('file')
-    if not f: return json_error('No file')
-    ext  = f.filename.lower().split('.')[-1]
-    db   = get_db()
-    code_map = {r['emp_code']:r['id'] for r in db.execute(
-        "SELECT id,emp_code FROM employees WHERE emp_code IS NOT NULL")}
-    cp_map   = {r['ref']:dict(r) for r in db.execute("SELECT * FROM cps")}
-    mp_map   = {r['id']:r['ref'] for r in db.execute("SELECT id,ref FROM mps")}
-    count = 0; errs = []; total_rows = 0; fys_seen = set()
-    rows = []
-    if ext in ('xlsx','xls'):
-        if not HAS_OPENPYXL: return json_error('pip install openpyxl')
-        wb = openpyxl.load_workbook(f, data_only=True); ws = wb.active
-        hdrs = [str(c.value or '').strip().lower() for c in next(ws.iter_rows(min_row=1,max_row=1))]
-        for row in ws.iter_rows(min_row=2, values_only=True):
-            rows.append({h: str(v if v is not None else '').strip() for h,v in zip(hdrs, row)})
-    else:
-        text = f.read().decode('utf-8-sig')
-        rows = list(csv.DictReader(io.StringIO(text)))
-    total_rows = len(rows)
-    for i, row in enumerate(rows, 2):
-        try:
-            row = {k.lower().strip(): v for k, v in row.items()}  # normalize to lowercase
-            date_str = (row.get('date') or '').strip()
-            ec  = (row.get('emp_code') or '').strip()
-            cpr = (row.get('cp_ref')   or '').strip()
-            if not date_str or not ec or not cpr: continue
-            # Skip hint/instruction rows
-            if date_str.lower().startswith('yyyy') or ec.lower().startswith('employee'): continue
-            try:
-                dt  = datetime.datetime.strptime(date_str, '%Y-%m-%d')
-                fy, bsm = ad_date_to_fy_and_month(dt)
-            except:
-                errs.append(f"Row {i}: invalid date '{date_str}'"); continue
-            fys_seen.add(fy)
-            lock = db.execute('SELECT locked FROM perf_cache WHERE fy=?', (fy,)).fetchone()
-            if lock and lock['locked']:
-                errs.append(f"Row {i}: FY {fy} is locked"); continue
-            eid = code_map.get(ec,'')
-            cp  = cp_map.get(cpr)
-            if not cp: errs.append(f"Row {i}: CP '{cpr}' not found"); continue
-            mp_ref = mp_map.get(cp['mp_id'],'') if cp.get('mp_id') else ''
-            raw_tgt = (cp.get('target') or '').strip()
-            tgt_num = ''.join(c for c in raw_tgt if c.isdigit() or c=='.')
-            try: tgt_val = float(tgt_num)
-            except: tgt_val = 0.0
-            unit = raw_tgt.split()[-1] if raw_tgt else '%'
-            total    = int(float(row.get('total','0')    or 0))
-            compliant= int(float(row.get('compliant','0')or 0))
-            if total <= 0: errs.append(f"Row {i}: total must be > 0"); continue
-            if compliant > total: compliant = total
-            nc     = total - compliant
-            pct_c  = round(compliant/total*100,2)
-            pct_nc = round(nc/total*100,2)
-            act_val= float(row.get('Actual_Val','0') or 0)
-            status = calc_status(act_val, tgt_val, unit)
-            metric = (cp['title'] or cp['ref'] or '')[:60]
-            notes  = (row.get('notes') or '').strip()
-            existing = db.execute(
-                'SELECT id FROM perf WHERE fy=? AND bs_month=? AND emp_id=? AND cp_ref=?',
-                (fy, bsm, eid, cpr)).fetchone()
-            pid = existing['id'] if existing else uid()
-            db.execute("""INSERT OR REPLACE INTO perf
-               (id,fy,bs_month,quarter,emp_id,emp_code,mp_ref,cp_ref,
-                metric,total,compliant,non_compliant,pct_compliant,pct_nc,
-                target_val,actual_val,unit,status,notes)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                       (pid,fy,bsm,bs_q(bsm),eid,ec,mp_ref,cpr,metric,
-                        total,compliant,nc,pct_c,pct_nc,tgt_val,act_val,unit,status,notes))
-            count += 1
-        except Exception as e: errs.append(f"Row {i}: {e}")
-    for fy in fys_seen: _upd_cache(db, fy)
-    db.commit()
-    return jsonify({'imported': count, 'total_rows': total_rows, 'errors': errs[:20]})
-
-# ── PERF EXCEPTIONS ────────────────────────────────────────────────────────
-
-@app.route('/api/org/tree')
-def org_tree():
-    db   = get_db()
-    fy   = request.args.get('fy', '2081-82')
-    loc  = request.args.get('loc','')
-    sect = request.args.get('sect','')
-    emps = R(db.execute("SELECT * FROM employees ORDER BY level,name").fetchall())
-    perf_rows = R(db.execute("SELECT * FROM perf WHERE fy=?", (fy,)).fetchall())
-    # Build compliance per emp
-    def emp_perf(eid, ec):
-        rows = [p for p in perf_rows if p['emp_id']==eid or p['emp_code']==ec]
-        tot  = sum(r.get('total',1) for r in rows)
-        comp = sum(r.get('compliant', 1 if r.get('status')=='C' else 0) for r in rows)
-        pct  = round(comp/tot*100,1) if tot else None
-        return {'tot':tot,'comp':comp,'pct':pct}
-    def build(eid):
-        emp  = next((e for e in emps if e['id']==eid), None)
-        if not emp: return None
-        children_raw = [e for e in emps if e.get('manager_id')==eid]
-        children = [build(c['id']) for c in children_raw]
-        children = [c for c in children if c]
-        own = emp_perf(eid, emp.get('emp_code',''))
-        # rollup
-        def rollup(node):
-            t = node['own']['tot']; c = node['own']['comp']
-            for ch in (node.get('children') or []):
-                rt,rc = rollup(ch); t+=rt; c+=rc
-            return t,c
-        rt,rc = rollup({'own':own,'children':children})
-        rpct  = round(rc/rt*100,1) if rt else None
-        mps_  = R(db.execute("SELECT m.* FROM mps m JOIN mp_owners o ON m.id=o.mp_id WHERE o.emp_id=?", (eid,)).fetchall())
-        roles_= R(db.execute("SELECT r.* FROM roles r JOIN emp_roles er ON r.id=er.role_id WHERE er.emp_id=?", (eid,)).fetchall())
-        for mp in mps_:
-            mp['cps'] = R(db.execute("SELECT * FROM cps WHERE mp_id=?", (mp['id'],)).fetchall())
-        return {**emp, 'own':own, 'rollup':{'tot':rt,'comp':rc,'pct':rpct},
-                'children':children, 'mps':mps_, 'roles':roles_, 'locations':[]}
-    roots = [e for e in emps if not e.get('manager_id') or
-             not any(x['id']==e['manager_id'] for x in emps)]
-    tree  = [build(r['id']) for r in roots]
-    tree  = [t for t in tree if t]
-    return jsonify(tree)
-
-@app.route('/api/org/move', methods=['POST'])
-def org_move():
-    d   = request.json or {}
-    eid = d.get('emp_id'); mgr = d.get('new_manager_id')
-    if not eid: return json_error('emp_id required')
-    db  = get_db()
-    db.execute("UPDATE employees SET manager_id=? WHERE id=?", (mgr or None, eid))
-    db.commit(); return jsonify({'ok': True})
-
-@app.route('/api/org/assign_mp', methods=['POST'])
-def org_assign_mp():
-    d  = request.json or {}
-    db = get_db()
-    db.execute("INSERT OR IGNORE INTO emp_mps VALUES(?,?)", (d.get('emp_id',''), d.get('mp_id','')))
-    db.execute("INSERT OR IGNORE INTO mp_owners VALUES(?,?)", (d.get('mp_id',''), d.get('emp_id','')))
-    db.commit(); return jsonify({'ok': True})
-
-@app.route('/api/org/assign_cp', methods=['POST'])
-def org_assign_cp():
-    d  = request.json or {}
-    db = get_db()
-    db.execute("INSERT OR IGNORE INTO emp_cps VALUES(?,?)", (d.get('emp_id',''), d.get('cp_id','')))
-    db.execute("INSERT OR IGNORE INTO cp_owners VALUES(?,?)", (d.get('cp_id',''), d.get('emp_id','')))
-    db.commit(); return jsonify({'ok': True})
-
-# ── ANALYTICS WIDGET ───────────────────────────────────────────────────────
-@app.route('/api/analytics/widget')
-def analytics_widget():
-    db  = get_db()
-    fy  = request.args.get('fy','2081-82')
-    metric = request.args.get('metric','overall')
-    loc    = request.args.get('loc','')
-    emp_id = request.args.get('emp_id','')
-    sector = request.args.get('sector','')
-    mp_ref = request.args.get('mp_ref','')
-    q2  = "SELECT * FROM perf WHERE fy=?"; args=[fy]
-    if emp_id: q2+=" AND emp_id=?";  args.append(emp_id)
-    if mp_ref: q2+=" AND mp_ref=?";  args.append(mp_ref)
-    rows = R(db.execute(q2, args).fetchall())
-    tot  = sum(r.get('total',1) for r in rows)
-    comp = sum(r.get('compliant',0) for r in rows)
-    nc   = tot - comp
-    pct  = round(comp/tot*100,2) if tot else 0
-    summary = {'tot':tot,'comp':comp,'nc':nc,'pct':pct}
-    if metric == 'overall':
-        return jsonify({'summary': summary, 'labels': ['Compliant','NC'], 'values': [comp, nc]})
-    if metric == 'by_month':
-        BS_M = ["Shrawan","Bhadra","Ashwin","Kartik","Mangsir","Poush","Magh","Falgun","Chaitra","Baisakh","Jestha","Ashadh"]
-        labels=[]; values=[]
-        for m in BS_M:
-            mr = [r for r in rows if r['bs_month']==m]
-            if not mr: continue
-            mt = sum(r.get('total',1) for r in mr)
-            mc = sum(r.get('compliant',0) for r in mr)
-            labels.append(m[:3]); values.append(round(mc/mt*100,1) if mt else 0)
-        return jsonify({'summary':summary,'labels':labels,'values':values})
-    if metric == 'by_mp':
-        by_mp = {}
-        for r in rows:
-            ref = r.get('mp_ref','')
-            if not ref: continue
-            by_mp.setdefault(ref, {'tot':0,'comp':0})
-            by_mp[ref]['tot']+=r.get('total',1); by_mp[ref]['comp']+=r.get('compliant',0)
-        labels=[]; values=[]
-        for ref,d2 in sorted(by_mp.items()):
-            labels.append(ref)
-            values.append(round(d2['comp']/d2['tot']*100,1) if d2['tot'] else 0)
-        return jsonify({'summary':summary,'labels':labels,'values':values})
-    if metric == 'by_emp':
-        by_e = {}
-        for r in rows:
-            ec = r.get('emp_code',''); 
-            if not ec: continue
-            by_e.setdefault(ec, {'tot':0,'comp':0})
-            by_e[ec]['tot']+=r.get('total',1); by_e[ec]['comp']+=r.get('compliant',0)
-        labels=[]; values=[]
-        for ec,d2 in sorted(by_e.items()):
-            labels.append(ec)
-            values.append(round(d2['comp']/d2['tot']*100,1) if d2['tot'] else 0)
-        return jsonify({'summary':summary,'labels':labels,'values':values})
-    return jsonify({'summary':summary,'labels':[],'values':[]})
-
-@app.route('/api/analytics/by_location')
-def analytics_by_location():
-    return jsonify({})
-
-@app.route('/api/analytics/by_sector')
-def analytics_by_sector():
-    return jsonify({})
-
-# ── DASHBOARD LAYOUTS ──────────────────────────────────────────────────────
-@app.route('/api/dashboard_layouts', methods=['GET','POST'])
-def dashboard_layouts():
-    db = get_db()
-    db.execute('''CREATE TABLE IF NOT EXISTS dashboard_layouts(
-        id TEXT PRIMARY KEY, user TEXT DEFAULT 'default',
-        name TEXT NOT NULL, layout TEXT DEFAULT '[]', created_at TEXT)''')
-    if request.method == 'GET':
-        user = request.args.get('user','default')
-        rows = R(db.execute("SELECT * FROM dashboard_layouts WHERE user=? ORDER BY created_at", (user,)).fetchall())
-        for r in rows: r['layout'] = json.loads(r.get('layout','[]'))
-        return jsonify(rows)
-    d    = request.json or {}
-    lid  = d.get('id') or uid()
-    now  = datetime.datetime.now().isoformat()
-    db.execute("INSERT OR REPLACE INTO dashboard_layouts VALUES(?,?,?,?,?)",
-               (lid, d.get('user','default'), d.get('name','Layout'),
-                json.dumps(d.get('layout',[])), now))
-    db.commit(); return jsonify({'id': lid})
-
-@app.route('/api/dashboard_layouts/<lid>', methods=['DELETE'])
-def delete_dashboard_layout(lid):
-    db = get_db()
-    db.execute("DELETE FROM dashboard_layouts WHERE id=?", (lid,)); db.commit()
-    return jsonify({'ok': True})
-
-
-@app.route('/api/analytics/summary_yoy')
-def analytics_summary_yoy():
-    """Returns analytics indexed by FY for YoY report."""
-    db = get_db()
-    all_fys = [r['fy'] for r in db.execute("SELECT DISTINCT fy FROM perf ORDER BY fy").fetchall()]
-    result = {}
-    for fy in all_fys:
-        rows = R(db.execute("SELECT * FROM perf WHERE fy=?", (fy,)).fetchall())
-        tot  = sum(r.get('total',1) for r in rows)
-        comp = sum(r.get('compliant',0) for r in rows)
-        nc   = tot-comp
-        pct_c = round(comp/tot*100,2) if tot else 0
-        pct_nc= round(nc/tot*100,2) if tot else 0
-        # by_month
-        by_month = {}
-        for r in rows:
-            m = r.get('bs_month','')
-            by_month.setdefault(m,{'total':0,'compliant':0,'nc':0})
-            by_month[m]['total']+=r.get('total',1)
-            by_month[m]['compliant']+=r.get('compliant',0)
-            by_month[m]['nc']+=r.get('non_compliant',0)
-        # by_mp
-        by_mp = {}
-        for r in rows:
-            ref = r.get('mp_ref','')
-            if not ref: continue
-            by_mp.setdefault(ref,{'total':0,'compliant':0,'nc':0})
-            by_mp[ref]['total']+=r.get('total',1)
-            by_mp[ref]['compliant']+=r.get('compliant',0)
-            by_mp[ref]['nc']+=r.get('non_compliant',0)
-        for ref in by_mp:
-            t=by_mp[ref]['total']
-            c=by_mp[ref]['compliant']
-            by_mp[ref]['pct_c'] = round(c/t*100,2) if t else 0
-        result[fy] = {'total':tot,'compliant':comp,'nc':nc,'pct_c':pct_c,'pct_nc':pct_nc,
-                      'by_month':by_month,'by_mp':by_mp}
-    return jsonify(result)

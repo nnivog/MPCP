@@ -694,14 +694,14 @@ def cascade_links_api():
         cp = db.execute('SELECT * FROM cps WHERE id=?', (d['superior_cp_id'],)).fetchone()
         if cp:
             new_ref   = f"AUTO-{cp['ref']}"
-            new_title = f"[Auto] {cp['title']}"
+            new_title = f"[Auto] {(cp['title'] or cp['ref'] or 'Untitled')}"
             ex_mp = db.execute('SELECT id FROM mps WHERE ref=?', (new_ref,)).fetchone()
             if ex_mp:
                 sub_mp_id = ex_mp['id']
             else:
                 sub_mp_id = uid()
                 db.execute('INSERT INTO mps VALUES(?,?,?,?,?,?,?,?)',
-                           (sub_mp_id,new_ref,new_title,cp['target'],cp['freq'],0,0,0))
+                           (sub_mp_id,new_ref,new_title,(cp['target'] or ''),(cp['freq'] or 'Monthly'),0,0,0))
                 db.execute('INSERT OR IGNORE INTO mp_owners VALUES(?,?)',
                            (sub_mp_id, d['subordinate_emp_id']))
             auto_created = 1
@@ -869,15 +869,16 @@ def perf_quick():
     pct_nc = round(nc / total * 100, 2)
 
     # Parse target from CP
-    raw_tgt = cp['target'].strip()
+    raw_tgt = (cp['target'] or '').strip()
     tgt_num = ''.join(c for c in raw_tgt if c.isdigit() or c == '.')
     try: tgt_val = float(tgt_num)
     except: tgt_val = 0.0
 
     actual_val = float(d.get('actual_val', 0) or 0)
-    unit       = d.get('unit', raw_tgt.split()[-1] if raw_tgt else '%')
+    tgt_parts = raw_tgt.split()
+    unit       = d.get('unit', tgt_parts[-1] if tgt_parts else '%')
     status     = calc_status(actual_val, tgt_val, unit)
-    metric     = d.get('metric', cp['title'][:60])
+    metric     = d.get('metric', (cp['title'] or '')[:60])
 
     # DUPLICATE CHECK
     existing = db.execute(
@@ -1122,14 +1123,14 @@ def cascade_api():
             cp = db.execute('SELECT * FROM cps WHERE ref=?', (sup_cp,)).fetchone()
         if cp:
             new_ref   = f"AUTO-{cp['ref']}"
-            new_title = f"[Auto] {cp['title']}"
+            new_title = f"[Auto] {(cp['title'] or cp['ref'] or 'Untitled')}"
             ex_mp = db.execute('SELECT id FROM mps WHERE ref=?', (new_ref,)).fetchone()
             if ex_mp:
                 sub_mp = ex_mp['id']
             else:
                 sub_mp = uid()
                 db.execute('INSERT INTO mps VALUES(?,?,?,?,?,?,?,?)',
-                           (sub_mp, new_ref, new_title, cp['target'], cp['freq'], 0, 0, 0))
+                           (sub_mp, new_ref, new_title, (cp['target'] or ''), (cp['freq'] or 'Monthly'), 0, 0, 0))
                 db.execute('INSERT OR IGNORE INTO mp_owners VALUES(?,?)', (sub_mp, sub_emp))
             auto_created = 1
 
@@ -1227,53 +1228,46 @@ def cascade_assign():
     sup_emp = d.get('parent_emp_id') or d.get('superior_emp_id')
     cp_id   = d.get('cp_id') or d.get('superior_cp_id')
     sub_emp = d.get('child_emp_id') or d.get('subordinate_emp_id')
-    sub_mp  = d.get('mp_id') or d.get('subordinate_mp_id') or ''
+    sub_mp  = (d.get('mp_id') or d.get('subordinate_mp_id') or '').strip()
 
     if not sup_emp or not cp_id or not sub_emp:
-        return jsonify({'error': 'Missing fields'}), 400
+        return jsonify({'error': 'Missing fields: superior_emp_id, superior_cp_id, subordinate_emp_id'}), 400
 
-    # Reuse the cascade_api logic via internal call
-    from flask import current_app
-    with current_app.test_request_context(
-        '/api/cascade',
-        method='POST',
-        json={
-            'superior_emp_id':    sup_emp,
-            'superior_cp_id':     cp_id,
-            'subordinate_emp_id': sub_emp,
-            'subordinate_mp_id':  sub_mp,
-        }
-    ):
-        db = get_db()
-        existing = db.execute(
-            'SELECT id FROM cascade_links WHERE superior_cp_id=? AND subordinate_emp_id=?',
-            (cp_id, sub_emp)
-        ).fetchone()
-        if existing:
-            return jsonify({'ok': True, 'id': existing['id'], 'existing': True})
+    db = get_db()
 
-        auto_created = 0
-        if not sub_mp.strip():
-            cp = db.execute('SELECT * FROM cps WHERE id=?', (cp_id,)).fetchone()
-            if cp:
-                new_ref = f"AUTO-{cp['ref']}"
-                ex_mp   = db.execute('SELECT id FROM mps WHERE ref=?', (new_ref,)).fetchone()
-                if ex_mp:
-                    sub_mp = ex_mp['id']
-                else:
-                    sub_mp = uid()
-                    db.execute('INSERT INTO mps VALUES(?,?,?,?,?,?,?,?)',
-                               (sub_mp, new_ref, f"[Auto] {cp['title']}",
-                                cp['target'], cp['freq'], 0, 0, 0))
-                    db.execute('INSERT OR IGNORE INTO mp_owners VALUES(?,?)', (sub_mp, sub_emp))
-                auto_created = 1
+    # Duplicate check
+    existing = db.execute(
+        'SELECT id FROM cascade_links WHERE superior_cp_id=? AND subordinate_emp_id=?',
+        (cp_id, sub_emp)
+    ).fetchone()
+    if existing:
+        return jsonify({'ok': True, 'id': existing['id'], 'existing': True})
 
-        lid = uid()
-        db.execute('INSERT INTO cascade_links VALUES(?,?,?,?,?,?,?)',
-                   (lid, sup_emp, cp_id, sub_emp, sub_mp, auto_created,
-                    datetime.datetime.now().isoformat()))
-        db.commit()
-        return jsonify({'ok': True, 'id': lid, 'auto_created': bool(auto_created)})
+    auto_created = 0
+    if not sub_mp:
+        cp = db.execute('SELECT * FROM cps WHERE id=?', (cp_id,)).fetchone()
+        if not cp:
+            cp = db.execute('SELECT * FROM cps WHERE ref=?', (cp_id,)).fetchone()
+        if cp:
+            new_ref   = f"AUTO-{cp['ref'] or uid()}"
+            new_title = f"[Auto] {(cp['title'] or cp['ref'] or 'Untitled')}"
+            ex_mp = db.execute('SELECT id FROM mps WHERE ref=?', (new_ref,)).fetchone()
+            if ex_mp:
+                sub_mp = ex_mp['id']
+            else:
+                sub_mp = uid()
+                db.execute('INSERT INTO mps VALUES(?,?,?,?,?,?,?,?)',
+                           (sub_mp, new_ref, new_title,
+                            (cp['target'] or ''), (cp['freq'] or 'Monthly'), 0, 0, 0))
+                db.execute('INSERT OR IGNORE INTO mp_owners VALUES(?,?)', (sub_mp, sub_emp))
+            auto_created = 1
+
+    lid = uid()
+    db.execute('INSERT INTO cascade_links VALUES(?,?,?,?,?,?,?)',
+               (lid, sup_emp, cp_id, sub_emp, sub_mp, auto_created,
+                datetime.datetime.now().isoformat()))
+    db.commit()
+    return jsonify({'ok': True, 'id': lid, 'auto_created': bool(auto_created)})
 
 if __name__ == '__main__':
     init_db()
@@ -1500,7 +1494,7 @@ def import_perf_simple():
             pct_nc = round(nc/total*100,2)
             act_val= float(row.get('Actual_Val','0') or 0)
             status = calc_status(act_val, tgt_val, unit)
-            metric = cp['title'][:60]
+            metric = (cp['title'] or cp['ref'] or '')[:60]
             notes  = (row.get('Notes') or row.get('notes') or '').strip()
             existing = db.execute(
                 'SELECT id FROM perf WHERE fy=? AND bs_month=? AND emp_id=? AND cp_ref=?',

@@ -4,7 +4,8 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Sipradi SC-MPCP System</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
 // ── FY AUTO-DETECT ───────────────────────────────────────────────────────
 async function fyFromDate(dateStr) {
   if (!dateStr) return null;
@@ -14,7 +15,6 @@ async function fyFromDate(dateStr) {
   } catch(e) { return null; }
 }
 function todayISO() { return new Date().toISOString().split('T')[0]; }
-
 </script>
 <style>
 :root{
@@ -549,15 +549,12 @@ function openModal(title, body, actions=[], wide=false) {
   q('#modal-overlay').classList.remove('hidden')
 }
 function handleBackdrop(e) {
-  // Only close if clicking the dark overlay itself, not the white card
+  // Close modal when clicking the dark overlay (outside the white card)
   if (e.target === $('modal-overlay')) {
-    const card = $('modal-box');
-    card.style.transform = 'scale(1.015)';
-    setTimeout(() => card.style.transform = '', 150);
+    closeModal();
   }
 }
-function closeModal(e) {
-  // Only called from the × button
+function closeModal() {
   $('modal-overlay').classList.add('hidden');
   $('modal-body').innerHTML = '';
   $('modal-foot').innerHTML = '';
@@ -1845,8 +1842,8 @@ async function openQuickEntry() {
       <input type="text" id="qe-notes" class="form-input" placeholder="Optional notes">
     </div>
   `, [
-    {label:'Cancel', cls:'btn-ghost', fn:'closeModal()'},
-    {label:'💾 Save Entry', cls:'btn-primary', fn:'qeSave()'},
+    {label:'Cancel', cls:'btn-ghost', fn: ()=>closeModal()},
+    {label:'💾 Save Entry', cls:'btn-primary', fn: ()=>qeSave()},
   ]);
 }
 
@@ -2306,7 +2303,7 @@ async function loadExceptions() {
 
 
 async function renderYoYReport(){
-  const data=await api.get('/api/analytics/summary')
+  const data=await api.get('/api/analytics/summary_yoy')
   const fys=Object.keys(data).sort((a,b)=>b.localeCompare(a))
   if(!fys.length){q('#report-content').innerHTML='<p class="text-sm text-muted italic" style="padding:40px;text-align:center">No performance data. Upload records in Data Manager.</p>';return}
 
@@ -3569,9 +3566,9 @@ function openCascadeForm(){
     const btn=q('#modal-foot .btn-primary')
     if(btn){btn.disabled=true;btn.textContent='Saving...'}
     try{
-      const payload={parent_emp_id:pid,parent_cp_id:cid,child_emp_id:eid}
-      if(mid)payload.child_mp_id=mid
-      const res=await api.post('/api/org/cascade_assign',payload)
+      const payload={superior_emp_id:pid,superior_cp_id:cid,subordinate_emp_id:eid}
+      if(mid)payload.subordinate_mp_id=mid
+      const res=await api.post('/api/cascade',payload)
       if(res&&res.ok){
         toast('Cascade link created ✓','ok');closeModal()
         await loadAll()
@@ -4215,8 +4212,6 @@ async function deleteBuilderLayout() {
 // ── INIT ─────────────────────────────────────────────────────────────────────
 loadAll()
 </script>
-
-<script src="patch.js"></script>
 
 </body>
 </html>

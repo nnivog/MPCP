@@ -149,6 +149,16 @@ def init_db():
         db.executescript(SCHEMA)
         if not db.execute("SELECT 1 FROM employees LIMIT 1").fetchone():
             _seed(db)
+        # Ensure current FY exists in cache
+        import datetime as _dt
+        _today = _dt.date.today()
+        for _start, _end, _fy in FY_MAP:
+            if _start <= _today <= _end:
+                _now = _dt.datetime.now().isoformat()
+                db.execute("INSERT OR IGNORE INTO perf_cache VALUES(?,?,?,?,?,?)",
+                           (_fy, f"FY {_fy}", 0, _now, _now, 0))
+                db.commit()
+                break
 
 def _upd_cache(db, fy):
     cnt = db.execute("SELECT COUNT(*) FROM perf WHERE fy=?", (fy,)).fetchone()[0]
@@ -1272,3 +1282,449 @@ if __name__ == '__main__':
     print(" http://localhost:5050")
     print("="*55 + "\n")
     app.run(debug=False, port=5050, host='0.0.0.0')
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# PATCH: Missing routes that fix all 5 reported issues
+# 1. Data save: bulk_delete, bs_today, locations, sectors stubs
+# 2. Auto-calc: handled in perf_quick (already correct) + frontend
+# 3. Modal backdrop: fixed in index.html (JS patch)
+# 4. FY detection: fy_from_date already exists; bs_today added here
+# 5. Cascade new entry: cascade_assign field-name mapping fixed
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── BS TODAY ──────────────────────────────────────────────────────────────
+@app.route('/api/bs_today')
+def bs_today():
+    dt  = datetime.datetime.now()
+    fy, bsm = ad_date_to_fy_and_month(dt)
+    return jsonify({'date': dt.strftime('%Y-%m-%d'), 'fy': fy,
+                    'bs_month': bsm, 'quarter': bs_q(bsm)})
+
+# ── SECTORS (stub — keeps frontend from 404-ing) ──────────────────────────
+@app.route('/api/sectors', methods=['GET','POST'])
+def sectors_api():
+    db = get_db()
+    # Ensure table exists
+    db.execute('''CREATE TABLE IF NOT EXISTS sectors(
+        id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL,
+        description TEXT DEFAULT '', color TEXT DEFAULT '#475569',
+        sort_order INTEGER DEFAULT 0)''')
+    if request.method == 'GET':
+        rows = db.execute("SELECT * FROM sectors ORDER BY sort_order,name").fetchall()
+        return jsonify(R(rows))
+    d   = request.json or {}
+    sid = d.get('id') or uid()
+    db.execute("INSERT OR REPLACE INTO sectors VALUES(?,?,?,?,?,?)",
+               (sid, d.get('code',''), d.get('name',''), d.get('description',''),
+                d.get('color','#475569'), d.get('sort_order',0)))
+    db.commit()
+    return jsonify({'id': sid})
+
+@app.route('/api/sectors/<sid>', methods=['PUT','DELETE'])
+def sector_api(sid):
+    db = get_db()
+    if request.method == 'DELETE':
+        db.execute("DELETE FROM sectors WHERE id=?", (sid,)); db.commit()
+        return jsonify({'ok': True})
+    d = request.json or {}
+    db.execute("UPDATE sectors SET code=?,name=?,description=?,color=?,sort_order=? WHERE id=?",
+               (d.get('code',''), d.get('name',''), d.get('description',''),
+                d.get('color','#475569'), d.get('sort_order',0), sid))
+    db.commit()
+    return jsonify({'ok': True})
+
+# ── LOCATIONS ─────────────────────────────────────────────────────────────
+@app.route('/api/locations', methods=['GET','POST'])
+def locations_api():
+    db = get_db()
+    db.execute('''CREATE TABLE IF NOT EXISTS locations(
+        id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL,
+        type TEXT DEFAULT 'Office', address TEXT DEFAULT '')''')
+    db.execute('''CREATE TABLE IF NOT EXISTS loc_emps(
+        loc_id TEXT, emp_id TEXT, PRIMARY KEY(loc_id,emp_id))''')
+    if request.method == 'GET':
+        locs = R(db.execute("SELECT * FROM locations ORDER BY code").fetchall())
+        for loc in locs:
+            loc['emp_ids'] = [r['emp_id'] for r in db.execute(
+                "SELECT emp_id FROM loc_emps WHERE loc_id=?", (loc['id'],))]
+        return jsonify(locs)
+    d   = request.json or {}
+    lid = d.get('id') or uid()
+    db.execute("INSERT OR REPLACE INTO locations VALUES(?,?,?,?,?)",
+               (lid, d.get('code',''), d.get('name',''), d.get('type','Office'), d.get('address','')))
+    db.execute("DELETE FROM loc_emps WHERE loc_id=?", (lid,))
+    for eid in d.get('emp_ids',[]): db.execute("INSERT OR IGNORE INTO loc_emps VALUES(?,?)", (lid, eid))
+    db.commit()
+    return jsonify({'id': lid})
+
+@app.route('/api/locations/<lid>', methods=['PUT','DELETE'])
+def location_api(lid):
+    db = get_db()
+    if request.method == 'DELETE':
+        db.execute("DELETE FROM locations WHERE id=?", (lid,))
+        db.execute("DELETE FROM loc_emps WHERE loc_id=?", (lid,))
+        db.commit(); return jsonify({'ok': True})
+    d = request.json or {}
+    db.execute("UPDATE locations SET code=?,name=?,type=?,address=? WHERE id=?",
+               (d.get('code',''), d.get('name',''), d.get('type','Office'), d.get('address',''), lid))
+    db.execute("DELETE FROM loc_emps WHERE loc_id=?", (lid,))
+    for eid in d.get('emp_ids',[]): db.execute("INSERT OR IGNORE INTO loc_emps VALUES(?,?)", (lid, eid))
+    db.commit(); return jsonify({'ok': True})
+
+# ── BULK DELETES ───────────────────────────────────────────────────────────
+@app.route('/api/perf/bulk_delete', methods=['POST'])
+def perf_bulk_delete():
+    d   = request.json or {}
+    fy  = d.get('fy','').strip()
+    if not fy: return json_error('FY required')
+    lock = get_db().execute('SELECT locked FROM perf_cache WHERE fy=?', (fy,)).fetchone()
+    if lock and lock['locked']: return json_error(f'FY {fy} is locked', 403)
+    db   = get_db()
+    q2   = "SELECT id FROM perf WHERE fy=?"; args = [fy]
+    if d.get('month'):    q2 += " AND bs_month=?";  args.append(d['month'])
+    if d.get('emp_code'): q2 += " AND emp_code=?";  args.append(d['emp_code'])
+    if d.get('mp_ref'):   q2 += " AND mp_ref=?";    args.append(d['mp_ref'])
+    if d.get('cp_ref'):   q2 += " AND cp_ref=?";    args.append(d['cp_ref'])
+    rows = db.execute(q2, args).fetchall()
+    if d.get('preview'): return jsonify({'count': len(rows)})
+    db.execute(q2.replace("SELECT id","DELETE"), args)
+    _upd_cache(db, fy); db.commit()
+    return jsonify({'deleted': len(rows)})
+
+@app.route('/api/perf/bulk_delete_fy', methods=['POST'])
+def perf_bulk_delete_fy():
+    d  = request.json or {}
+    fy = d.get('fy','').strip()
+    if not fy: return json_error('FY required')
+    db = get_db()
+    cnt = db.execute("SELECT COUNT(*) FROM perf WHERE fy=?", (fy,)).fetchone()[0]
+    db.execute("DELETE FROM perf WHERE fy=?", (fy,))
+    _upd_cache(db, fy); db.commit()
+    return jsonify({'deleted': cnt})
+
+@app.route('/api/employees/bulk_delete', methods=['POST'])
+def employees_bulk_delete():
+    ids = (request.json or {}).get('ids', [])
+    if not ids: return json_error('No IDs provided')
+    db = get_db()
+    for eid in ids:
+        for t,c in [('employees','id'),('mp_owners','emp_id'),('cp_owners','emp_id'),
+                    ('emp_roles','emp_id'),('emp_mps','emp_id'),('emp_cps','emp_id')]:
+            db.execute(f"DELETE FROM {t} WHERE {c}=?", (eid,))
+    db.commit(); return jsonify({'deleted': len(ids)})
+
+@app.route('/api/mps/bulk_delete', methods=['POST'])
+def mps_bulk_delete():
+    ids = (request.json or {}).get('ids', [])
+    db  = get_db()
+    for mid in ids:
+        db.execute("DELETE FROM mps WHERE id=?", (mid,))
+        db.execute("DELETE FROM mp_owners WHERE mp_id=?", (mid,))
+        db.execute("UPDATE cps SET mp_id='' WHERE mp_id=?", (mid,))
+    db.commit(); return jsonify({'deleted': len(ids)})
+
+@app.route('/api/cps/bulk_delete', methods=['POST'])
+def cps_bulk_delete():
+    ids = (request.json or {}).get('ids', [])
+    db  = get_db()
+    for cid in ids:
+        db.execute("DELETE FROM cps WHERE id=?", (cid,))
+        db.execute("DELETE FROM cp_owners WHERE cp_id=?", (cid,))
+    db.commit(); return jsonify({'deleted': len(ids)})
+
+# ── SIMPLE PERF IMPORT TEMPLATE ────────────────────────────────────────────
+@app.route('/api/perf/simple_template')
+def perf_simple_template():
+    out = io.StringIO()
+    w   = csv.writer(out)
+    w.writerow(['Date','Emp_Code','CP_Ref','Total','Compliant','Actual_Val','Notes'])
+    w.writerow(['2025-07-20','EMP-002','LM-VEH-1',410,398,97,'All tracked'])
+    w.writerow(['2025-07-20','EMP-002','LM-VEH-2-B',410,390,2.6,'On track'])
+    out.seek(0)
+    return send_file(io.BytesIO(out.getvalue().encode()), mimetype='text/csv',
+                     as_attachment=True, download_name='MPCP_Simple_Template.csv')
+
+@app.route('/api/perf/import_simple', methods=['POST'])
+def import_perf_simple():
+    f = request.files.get('file')
+    if not f: return json_error('No file')
+    ext  = f.filename.lower().split('.')[-1]
+    db   = get_db()
+    code_map = {r['emp_code']:r['id'] for r in db.execute(
+        "SELECT id,emp_code FROM employees WHERE emp_code IS NOT NULL")}
+    cp_map   = {r['ref']:dict(r) for r in db.execute("SELECT * FROM cps")}
+    mp_map   = {r['id']:r['ref'] for r in db.execute("SELECT id,ref FROM mps")}
+    count = 0; errs = []; total_rows = 0; fys_seen = set()
+    rows = []
+    if ext in ('xlsx','xls'):
+        if not HAS_OPENPYXL: return json_error('pip install openpyxl')
+        wb = openpyxl.load_workbook(f, data_only=True); ws = wb.active
+        hdrs = [str(c.value or '').strip().lower() for c in next(ws.iter_rows(min_row=1,max_row=1))]
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            rows.append({h: str(v or '').strip() for h,v in zip(hdrs, row)})
+    else:
+        text = f.read().decode('utf-8-sig')
+        rows = list(csv.DictReader(io.StringIO(text)))
+    total_rows = len(rows)
+    for i, row in enumerate(rows, 2):
+        try:
+            date_str = (row.get('Date') or row.get('date') or '').strip()
+            ec  = (row.get('Emp_Code') or row.get('emp_code') or '').strip()
+            cpr = (row.get('CP_Ref')   or row.get('cp_ref')   or '').strip()
+            if not date_str or not ec or not cpr: continue
+            try:
+                dt  = datetime.datetime.strptime(date_str, '%Y-%m-%d')
+                fy, bsm = ad_date_to_fy_and_month(dt)
+            except:
+                errs.append(f"Row {i}: invalid date '{date_str}'"); continue
+            fys_seen.add(fy)
+            lock = db.execute('SELECT locked FROM perf_cache WHERE fy=?', (fy,)).fetchone()
+            if lock and lock['locked']:
+                errs.append(f"Row {i}: FY {fy} is locked"); continue
+            eid = code_map.get(ec,'')
+            cp  = cp_map.get(cpr)
+            if not cp: errs.append(f"Row {i}: CP '{cpr}' not found"); continue
+            mp_ref = mp_map.get(cp['mp_id'],'') if cp.get('mp_id') else ''
+            raw_tgt = (cp.get('target') or '').strip()
+            tgt_num = ''.join(c for c in raw_tgt if c.isdigit() or c=='.')
+            try: tgt_val = float(tgt_num)
+            except: tgt_val = 0.0
+            unit = raw_tgt.split()[-1] if raw_tgt else '%'
+            total    = int(float(row.get('Total','0')    or 0))
+            compliant= int(float(row.get('Compliant','0')or 0))
+            if total <= 0: errs.append(f"Row {i}: total must be > 0"); continue
+            if compliant > total: compliant = total
+            nc     = total - compliant
+            pct_c  = round(compliant/total*100,2)
+            pct_nc = round(nc/total*100,2)
+            act_val= float(row.get('Actual_Val','0') or 0)
+            status = calc_status(act_val, tgt_val, unit)
+            metric = cp['title'][:60]
+            notes  = (row.get('Notes') or row.get('notes') or '').strip()
+            existing = db.execute(
+                'SELECT id FROM perf WHERE fy=? AND bs_month=? AND emp_id=? AND cp_ref=?',
+                (fy, bsm, eid, cpr)).fetchone()
+            pid = existing['id'] if existing else uid()
+            db.execute("INSERT OR REPLACE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                       (pid,fy,bsm,bs_q(bsm),eid,ec,mp_ref,cpr,metric,
+                        total,compliant,nc,pct_c,pct_nc,tgt_val,act_val,unit,status,notes))
+            count += 1
+        except Exception as e: errs.append(f"Row {i}: {e}")
+    for fy in fys_seen: _upd_cache(db, fy)
+    db.commit()
+    return jsonify({'imported': count, 'total_rows': total_rows, 'errors': errs[:20]})
+
+# ── PERF EXCEPTIONS ────────────────────────────────────────────────────────
+@app.route('/api/perf/exceptions')
+def perf_exceptions():
+    db  = get_db()
+    fy  = request.args.get('fy', '')
+    q2  = "SELECT p.*, e.name as emp_name FROM perf p LEFT JOIN employees e ON p.emp_id=e.id WHERE p.status='NC'"
+    args= []
+    if fy: q2 += " AND p.fy=?"; args.append(fy)
+    rows = R(db.execute(q2 + " ORDER BY p.fy DESC,p.bs_month", args).fetchall())
+    repeat = {}
+    for r in rows:
+        cp = r.get('cp_ref','')
+        if cp: repeat[cp] = repeat.get(cp,0)+1
+    return jsonify({'total_nc': len(rows), 'exceptions': rows[:50],
+                    'repeat_failures': {k:v for k,v in repeat.items() if v>1}})
+
+# ── ORG TREE ──────────────────────────────────────────────────────────────
+@app.route('/api/org/tree')
+def org_tree():
+    db   = get_db()
+    fy   = request.args.get('fy', '2081-82')
+    loc  = request.args.get('loc','')
+    sect = request.args.get('sect','')
+    emps = R(db.execute("SELECT * FROM employees ORDER BY level,name").fetchall())
+    perf_rows = R(db.execute("SELECT * FROM perf WHERE fy=?", (fy,)).fetchall())
+    # Build compliance per emp
+    def emp_perf(eid, ec):
+        rows = [p for p in perf_rows if p['emp_id']==eid or p['emp_code']==ec]
+        tot  = sum(r.get('total',1) for r in rows)
+        comp = sum(r.get('compliant', 1 if r.get('status')=='C' else 0) for r in rows)
+        pct  = round(comp/tot*100,1) if tot else None
+        return {'tot':tot,'comp':comp,'pct':pct}
+    def build(eid):
+        emp  = next((e for e in emps if e['id']==eid), None)
+        if not emp: return None
+        children_raw = [e for e in emps if e.get('manager_id')==eid]
+        children = [build(c['id']) for c in children_raw]
+        children = [c for c in children if c]
+        own = emp_perf(eid, emp.get('emp_code',''))
+        # rollup
+        def rollup(node):
+            t = node['own']['tot']; c = node['own']['comp']
+            for ch in (node.get('children') or []):
+                rt,rc = rollup(ch); t+=rt; c+=rc
+            return t,c
+        rt,rc = rollup({'own':own,'children':children})
+        rpct  = round(rc/rt*100,1) if rt else None
+        mps_  = R(db.execute("SELECT m.* FROM mps m JOIN mp_owners o ON m.id=o.mp_id WHERE o.emp_id=?", (eid,)).fetchall())
+        roles_= R(db.execute("SELECT r.* FROM roles r JOIN emp_roles er ON r.id=er.role_id WHERE er.emp_id=?", (eid,)).fetchall())
+        for mp in mps_:
+            mp['cps'] = R(db.execute("SELECT * FROM cps WHERE mp_id=?", (mp['id'],)).fetchall())
+        return {**emp, 'own':own, 'rollup':{'tot':rt,'comp':rc,'pct':rpct},
+                'children':children, 'mps':mps_, 'roles':roles_, 'locations':[]}
+    roots = [e for e in emps if not e.get('manager_id') or
+             not any(x['id']==e['manager_id'] for x in emps)]
+    tree  = [build(r['id']) for r in roots]
+    tree  = [t for t in tree if t]
+    return jsonify(tree)
+
+@app.route('/api/org/move', methods=['POST'])
+def org_move():
+    d   = request.json or {}
+    eid = d.get('emp_id'); mgr = d.get('new_manager_id')
+    if not eid: return json_error('emp_id required')
+    db  = get_db()
+    db.execute("UPDATE employees SET manager_id=? WHERE id=?", (mgr or None, eid))
+    db.commit(); return jsonify({'ok': True})
+
+@app.route('/api/org/assign_mp', methods=['POST'])
+def org_assign_mp():
+    d  = request.json or {}
+    db = get_db()
+    db.execute("INSERT OR IGNORE INTO emp_mps VALUES(?,?)", (d.get('emp_id',''), d.get('mp_id','')))
+    db.execute("INSERT OR IGNORE INTO mp_owners VALUES(?,?)", (d.get('mp_id',''), d.get('emp_id','')))
+    db.commit(); return jsonify({'ok': True})
+
+@app.route('/api/org/assign_cp', methods=['POST'])
+def org_assign_cp():
+    d  = request.json or {}
+    db = get_db()
+    db.execute("INSERT OR IGNORE INTO emp_cps VALUES(?,?)", (d.get('emp_id',''), d.get('cp_id','')))
+    db.execute("INSERT OR IGNORE INTO cp_owners VALUES(?,?)", (d.get('cp_id',''), d.get('emp_id','')))
+    db.commit(); return jsonify({'ok': True})
+
+# ── ANALYTICS WIDGET ───────────────────────────────────────────────────────
+@app.route('/api/analytics/widget')
+def analytics_widget():
+    db  = get_db()
+    fy  = request.args.get('fy','2081-82')
+    metric = request.args.get('metric','overall')
+    loc    = request.args.get('loc','')
+    emp_id = request.args.get('emp_id','')
+    sector = request.args.get('sector','')
+    mp_ref = request.args.get('mp_ref','')
+    q2  = "SELECT * FROM perf WHERE fy=?"; args=[fy]
+    if emp_id: q2+=" AND emp_id=?";  args.append(emp_id)
+    if mp_ref: q2+=" AND mp_ref=?";  args.append(mp_ref)
+    rows = R(db.execute(q2, args).fetchall())
+    tot  = sum(r.get('total',1) for r in rows)
+    comp = sum(r.get('compliant',0) for r in rows)
+    nc   = tot - comp
+    pct  = round(comp/tot*100,2) if tot else 0
+    summary = {'tot':tot,'comp':comp,'nc':nc,'pct':pct}
+    if metric == 'overall':
+        return jsonify({'summary': summary, 'labels': ['Compliant','NC'], 'values': [comp, nc]})
+    if metric == 'by_month':
+        BS_M = ["Shrawan","Bhadra","Ashwin","Kartik","Mangsir","Poush","Magh","Falgun","Chaitra","Baisakh","Jestha","Ashadh"]
+        labels=[]; values=[]
+        for m in BS_M:
+            mr = [r for r in rows if r['bs_month']==m]
+            if not mr: continue
+            mt = sum(r.get('total',1) for r in mr)
+            mc = sum(r.get('compliant',0) for r in mr)
+            labels.append(m[:3]); values.append(round(mc/mt*100,1) if mt else 0)
+        return jsonify({'summary':summary,'labels':labels,'values':values})
+    if metric == 'by_mp':
+        by_mp = {}
+        for r in rows:
+            ref = r.get('mp_ref','')
+            if not ref: continue
+            by_mp.setdefault(ref, {'tot':0,'comp':0})
+            by_mp[ref]['tot']+=r.get('total',1); by_mp[ref]['comp']+=r.get('compliant',0)
+        labels=[]; values=[]
+        for ref,d2 in sorted(by_mp.items()):
+            labels.append(ref)
+            values.append(round(d2['comp']/d2['tot']*100,1) if d2['tot'] else 0)
+        return jsonify({'summary':summary,'labels':labels,'values':values})
+    if metric == 'by_emp':
+        by_e = {}
+        for r in rows:
+            ec = r.get('emp_code',''); 
+            if not ec: continue
+            by_e.setdefault(ec, {'tot':0,'comp':0})
+            by_e[ec]['tot']+=r.get('total',1); by_e[ec]['comp']+=r.get('compliant',0)
+        labels=[]; values=[]
+        for ec,d2 in sorted(by_e.items()):
+            labels.append(ec)
+            values.append(round(d2['comp']/d2['tot']*100,1) if d2['tot'] else 0)
+        return jsonify({'summary':summary,'labels':labels,'values':values})
+    return jsonify({'summary':summary,'labels':[],'values':[]})
+
+@app.route('/api/analytics/by_location')
+def analytics_by_location():
+    return jsonify({})
+
+@app.route('/api/analytics/by_sector')
+def analytics_by_sector():
+    return jsonify({})
+
+# ── DASHBOARD LAYOUTS ──────────────────────────────────────────────────────
+@app.route('/api/dashboard_layouts', methods=['GET','POST'])
+def dashboard_layouts():
+    db = get_db()
+    db.execute('''CREATE TABLE IF NOT EXISTS dashboard_layouts(
+        id TEXT PRIMARY KEY, user TEXT DEFAULT 'default',
+        name TEXT NOT NULL, layout TEXT DEFAULT '[]', created_at TEXT)''')
+    if request.method == 'GET':
+        user = request.args.get('user','default')
+        rows = R(db.execute("SELECT * FROM dashboard_layouts WHERE user=? ORDER BY created_at", (user,)).fetchall())
+        for r in rows: r['layout'] = json.loads(r.get('layout','[]'))
+        return jsonify(rows)
+    d    = request.json or {}
+    lid  = d.get('id') or uid()
+    now  = datetime.datetime.now().isoformat()
+    db.execute("INSERT OR REPLACE INTO dashboard_layouts VALUES(?,?,?,?,?)",
+               (lid, d.get('user','default'), d.get('name','Layout'),
+                json.dumps(d.get('layout',[])), now))
+    db.commit(); return jsonify({'id': lid})
+
+@app.route('/api/dashboard_layouts/<lid>', methods=['DELETE'])
+def delete_dashboard_layout(lid):
+    db = get_db()
+    db.execute("DELETE FROM dashboard_layouts WHERE id=?", (lid,)); db.commit()
+    return jsonify({'ok': True})
+
+
+@app.route('/api/analytics/summary_yoy')
+def analytics_summary_yoy():
+    """Returns analytics indexed by FY for YoY report."""
+    db = get_db()
+    all_fys = [r['fy'] for r in db.execute("SELECT DISTINCT fy FROM perf ORDER BY fy").fetchall()]
+    result = {}
+    for fy in all_fys:
+        rows = R(db.execute("SELECT * FROM perf WHERE fy=?", (fy,)).fetchall())
+        tot  = sum(r.get('total',1) for r in rows)
+        comp = sum(r.get('compliant',0) for r in rows)
+        nc   = tot-comp
+        pct_c = round(comp/tot*100,2) if tot else 0
+        pct_nc= round(nc/tot*100,2) if tot else 0
+        # by_month
+        by_month = {}
+        for r in rows:
+            m = r.get('bs_month','')
+            by_month.setdefault(m,{'total':0,'compliant':0,'nc':0})
+            by_month[m]['total']+=r.get('total',1)
+            by_month[m]['compliant']+=r.get('compliant',0)
+            by_month[m]['nc']+=r.get('non_compliant',0)
+        # by_mp
+        by_mp = {}
+        for r in rows:
+            ref = r.get('mp_ref','')
+            if not ref: continue
+            by_mp.setdefault(ref,{'total':0,'compliant':0,'nc':0})
+            by_mp[ref]['total']+=r.get('total',1)
+            by_mp[ref]['compliant']+=r.get('compliant',0)
+            by_mp[ref]['nc']+=r.get('non_compliant',0)
+        for ref in by_mp:
+            t=by_mp[ref]['total']
+            c=by_mp[ref]['compliant']
+            by_mp[ref]['pct_c'] = round(c/t*100,2) if t else 0
+        result[fy] = {'total':tot,'compliant':comp,'nc':nc,'pct_c':pct_c,'pct_nc':pct_nc,
+                      'by_month':by_month,'by_mp':by_mp}
+    return jsonify(result)

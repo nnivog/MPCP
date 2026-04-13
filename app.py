@@ -149,7 +149,82 @@ def init_db():
         db.executescript(SCHEMA)
         if not db.execute("SELECT 1 FROM employees LIMIT 1").fetchone():
             _seed(db)
-        # Ensure current FY exists in cache
+
+        # ── Schema migrations: add columns missing in older DB versions ──────────
+        def _migrate(table, migrations):
+            existing = {row[1] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
+            for col, sql in migrations:
+                if col not in existing:
+                    try: db.execute(sql)
+                    except Exception: pass
+
+        _migrate("perf", [
+            ("quarter",       "ALTER TABLE perf ADD COLUMN quarter TEXT DEFAULT 'Q1'"),
+            ("emp_id",        "ALTER TABLE perf ADD COLUMN emp_id TEXT DEFAULT ''"),
+            ("emp_code",      "ALTER TABLE perf ADD COLUMN emp_code TEXT DEFAULT ''"),
+            ("mp_ref",        "ALTER TABLE perf ADD COLUMN mp_ref TEXT DEFAULT ''"),
+            ("metric",        "ALTER TABLE perf ADD COLUMN metric TEXT DEFAULT ''"),
+            ("non_compliant", "ALTER TABLE perf ADD COLUMN non_compliant INTEGER DEFAULT 0"),
+            ("pct_nc",        "ALTER TABLE perf ADD COLUMN pct_nc REAL DEFAULT 0"),
+            ("target_val",    "ALTER TABLE perf ADD COLUMN target_val REAL DEFAULT 0"),
+            ("actual_val",    "ALTER TABLE perf ADD COLUMN actual_val REAL DEFAULT 0"),
+            ("unit",          "ALTER TABLE perf ADD COLUMN unit TEXT DEFAULT '%'"),
+            ("status",        "ALTER TABLE perf ADD COLUMN status TEXT DEFAULT 'C'"),
+            ("notes",         "ALTER TABLE perf ADD COLUMN notes TEXT DEFAULT ''"),
+        ])
+        _migrate("perf_cache", [
+            ("locked", "ALTER TABLE perf_cache ADD COLUMN locked INTEGER DEFAULT 0"),
+        ])
+        _migrate("employees", [
+            ("email", "ALTER TABLE employees ADD COLUMN email TEXT DEFAULT ''"),
+        ])
+        _migrate("cps", [
+            ("source", "ALTER TABLE cps ADD COLUMN source TEXT DEFAULT ''"),
+            ("mp_id",  "ALTER TABLE cps ADD COLUMN mp_id TEXT DEFAULT ''"),
+        ])
+
+        # cascade_links: old DB may use parent_/child_ naming instead of superior_/subordinate_
+        cl_cols = {row[1] for row in db.execute("PRAGMA table_info(cascade_links)").fetchall()}
+        if cl_cols and 'superior_emp_id' not in cl_cols:
+            # Old schema — rebuild with new column names preserving data
+            try:
+                db.execute("""CREATE TABLE IF NOT EXISTS cascade_links_new(
+                  id TEXT PRIMARY KEY,
+                  superior_emp_id    TEXT NOT NULL DEFAULT '',
+                  superior_cp_id     TEXT NOT NULL DEFAULT '',
+                  subordinate_emp_id TEXT NOT NULL DEFAULT '',
+                  subordinate_mp_id  TEXT DEFAULT '',
+                  auto_created       INTEGER DEFAULT 0,
+                  created_at         TEXT DEFAULT '')""")
+                # Map old columns to new — try both naming conventions
+                old_sup  = 'parent_emp_id'  if 'parent_emp_id'  in cl_cols else ('sup_emp_id'  if 'sup_emp_id'  in cl_cols else 'superior_emp_id')
+                old_cp   = 'parent_cp_id'   if 'parent_cp_id'   in cl_cols else ('sup_cp_id'   if 'sup_cp_id'   in cl_cols else 'superior_cp_id')
+                old_sub  = 'child_emp_id'   if 'child_emp_id'   in cl_cols else ('sub_emp_id'  if 'sub_emp_id'  in cl_cols else 'subordinate_emp_id')
+                old_mp   = 'child_mp_id'    if 'child_mp_id'    in cl_cols else ('sub_mp_id'   if 'sub_mp_id'   in cl_cols else 'subordinate_mp_id')
+                old_auto = 'auto_created'   if 'auto_created'   in cl_cols else '0'
+                old_ts   = 'created_at'     if 'created_at'     in cl_cols else "datetime('now')"
+                db.execute(f"""INSERT OR IGNORE INTO cascade_links_new
+                    (id, superior_emp_id, superior_cp_id, subordinate_emp_id,
+                     subordinate_mp_id, auto_created, created_at)
+                    SELECT id, {old_sup}, {old_cp}, {old_sub}, {old_mp}, {old_auto}, {old_ts}
+                    FROM cascade_links""")
+                db.execute("DROP TABLE cascade_links")
+                db.execute("ALTER TABLE cascade_links_new RENAME TO cascade_links")
+            except Exception as e:
+                pass  # If migration fails, table stays as-is; new rows will fail gracefully
+        elif not cl_cols:
+            pass  # Table doesn't exist yet — SCHEMA will create it
+        else:
+            # Table exists with correct schema — add any missing columns
+            _migrate("cascade_links", [
+                ("subordinate_mp_id", "ALTER TABLE cascade_links ADD COLUMN subordinate_mp_id TEXT DEFAULT ''"),
+                ("auto_created",      "ALTER TABLE cascade_links ADD COLUMN auto_created INTEGER DEFAULT 0"),
+                ("created_at",        "ALTER TABLE cascade_links ADD COLUMN created_at TEXT DEFAULT ''"),
+            ])
+
+        db.commit()
+
+        # ── Ensure current FY exists in cache ─────────────────────────────────────
         import datetime as _dt
         _today = _dt.date.today()
         for _start, _end, _fy in FY_MAP:
@@ -813,7 +888,11 @@ def perf_api():
     pct_c  = round(comp/tot*100,2) if tot else 0
     pct_nc = round(nc/tot*100,2)   if tot else 0
     st  = d.get('status') or calc_status(d.get('actual_val',0), d.get('target_val',0), d.get('unit','%'))
-    db.execute("INSERT OR REPLACE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    db.execute("""INSERT OR REPLACE INTO perf
+               (id,fy,bs_month,quarter,emp_id,emp_code,mp_ref,cp_ref,
+                metric,total,compliant,non_compliant,pct_compliant,pct_nc,
+                target_val,actual_val,unit,status,notes)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                (pid,fy,bsm,bs_q(bsm),eid,ec,d.get('mp_ref',''),d.get('cp_ref',''),d.get('metric',''),
                 tot,comp,nc,pct_c,pct_nc,d.get('target_val',0),d.get('actual_val',0),d.get('unit','%'),st,d.get('notes','')))
     _upd_cache(db, fy)
@@ -895,7 +974,11 @@ def perf_quick():
         }), 409
 
     pid = existing['id'] if existing else uid()
-    db.execute("INSERT OR REPLACE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+    db.execute("""INSERT OR REPLACE INTO perf
+               (id,fy,bs_month,quarter,emp_id,emp_code,mp_ref,cp_ref,
+                metric,total,compliant,non_compliant,pct_compliant,pct_nc,
+                target_val,actual_val,unit,status,notes)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                (pid, fy, bsm, bs_q(bsm), eid, ec, mp_ref, d['cp_ref'],
                 metric, total, compliant, nc, pct_c, pct_nc,
                 tgt_val, actual_val, unit, status, d.get('notes','')))
@@ -986,11 +1069,15 @@ def import_perf():
             nc  = tot - comp
             pct_c  = float(row.get('Pct_Compliant','0') or (round(comp/tot*100,2) if tot else 0))
             pct_nc = float(row.get('Pct_NC','0') or (round(nc/tot*100,2) if tot else 0))
-            tgt = float(row.get('Target_Val','0') or 0); act = float(row.get('Actual_Val','0') or 0)
+            tgt = float(row.get('Target_Val','0') or 0); act = float(row.get('actual_val','0') or 0)
             unit = str(row.get('Unit','%') or '%')
             st   = str(row.get('Status','') or calc_status(act,tgt,unit))
             if st not in ('C','NC'): st = calc_status(act,tgt,unit)
-            db.execute("INSERT OR IGNORE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            db.execute("""INSERT OR IGNORE INTO perf
+                       (id,fy,bs_month,quarter,emp_id,emp_code,mp_ref,cp_ref,
+                        metric,total,compliant,non_compliant,pct_compliant,pct_nc,
+                        target_val,actual_val,unit,status,notes)
+                       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                        (uid(),fy,bsm,bs_q(bsm),eid,ec,str(row.get('MP_Ref','') or ''),str(row.get('CP_Ref','') or ''),
                         str(row.get('Metric','') or ''),tot,comp,nc,pct_c,pct_nc,tgt,act,unit,st,str(row.get('Notes','') or '')))
             count += 1
@@ -1400,7 +1487,7 @@ def perf_bulk_delete_fy():
 @app.route('/api/employees/bulk_delete', methods=['POST'])
 def employees_bulk_delete():
     ids = (request.json or {}).get('ids', [])
-    if not ids: return json_error('No IDs provided')
+    if not ids: return jsonify({'deleted': 0})
     db = get_db()
     for eid in ids:
         for t,c in [('employees','id'),('mp_owners','emp_id'),('cp_owners','emp_id'),
@@ -1430,14 +1517,155 @@ def cps_bulk_delete():
 # ── SIMPLE PERF IMPORT TEMPLATE ────────────────────────────────────────────
 @app.route('/api/perf/simple_template')
 def perf_simple_template():
-    out = io.StringIO()
-    w   = csv.writer(out)
-    w.writerow(['Date','Emp_Code','CP_Ref','Total','Compliant','Actual_Val','Notes'])
-    w.writerow(['2025-07-20','EMP-002','LM-VEH-1',410,398,97,'All tracked'])
-    w.writerow(['2025-07-20','EMP-002','LM-VEH-2-B',410,390,2.6,'On track'])
-    out.seek(0)
-    return send_file(io.BytesIO(out.getvalue().encode()), mimetype='text/csv',
-                     as_attachment=True, download_name='MPCP_Simple_Template.csv')
+    """Generate a rich Excel template pre-filled with real employees & CPs from DB."""
+    db   = get_db()
+    emps = db.execute("SELECT emp_code, name FROM employees ORDER BY emp_code").fetchall()
+    cps  = db.execute("SELECT ref, title, target FROM cps ORDER BY ref").fetchall()
+
+    if not HAS_OPENPYXL:
+        # Fallback to CSV if openpyxl not installed
+        out = io.StringIO()
+        w   = csv.writer(out)
+        w.writerow(['Date','Emp_Code','CP_Ref','Total','Compliant','Actual_Val','Notes'])
+        for e in emps[:3]:
+            for c in cps[:2]:
+                w.writerow([datetime.date.today().isoformat(), e['emp_code'], c['ref'], '', '', '', ''])
+        out.seek(0)
+        return send_file(io.BytesIO(out.getvalue().encode()), mimetype='text/csv',
+                         as_attachment=True, download_name='MPCP_Simple_Template.csv')
+
+    wb = openpyxl.Workbook()
+
+    # ── Sheet 1: Data Entry ─────────────────────────────────────────────
+    ws = wb.active
+    ws.title = 'Performance Data'
+
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils  import get_column_letter
+    from openpyxl.worksheet.datavalidation import DataValidation
+
+    HDR_FILL = PatternFill('solid', fgColor='0A1628')
+    HDR_FONT = Font(color='FFFFFF', bold=True, size=11)
+    INFO_FILL = PatternFill('solid', fgColor='DBEAFE')
+    INFO_FONT = Font(color='1E3A8A', size=10)
+    REQ_FILL  = PatternFill('solid', fgColor='FEF9C3')
+    thin = Side(style='thin', color='CBD5E1')
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+
+    headers = ['Date *', 'Emp_Code *', 'CP_Ref *', 'Total *', 'Compliant *', 'Actual_Val', 'Notes']
+    col_widths = [14, 16, 20, 10, 12, 13, 30]
+
+    # Title row
+    ws.merge_cells('A1:G1')
+    ws['A1'] = '⚡ MPCP Performance Upload Template  —  Fill Date · Emp_Code · CP_Ref · Total · Compliant. Everything else is auto-calculated on import.'
+    ws['A1'].font      = Font(bold=True, color='1E3A8A', size=11)
+    ws['A1'].fill      = INFO_FILL
+    ws['A1'].alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    ws.row_dimensions[1].height = 32
+
+    # Header row
+    for col_idx, (hdr, width) in enumerate(zip(headers, col_widths), 1):
+        cell = ws.cell(row=2, column=col_idx, value=hdr)
+        cell.font      = HDR_FONT
+        cell.fill      = HDR_FILL
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.border    = border
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    # Hint row
+    hints = [
+        'YYYY-MM-DD  e.g. 2025-07-16',
+        'Employee code  (see Emp List sheet)',
+        'CP reference  (see CP List sheet)',
+        'Total units done this period',
+        'How many were compliant/on-time',
+        'Actual measured value (optional)',
+        'Optional remarks'
+    ]
+    for col_idx, hint in enumerate(hints, 1):
+        cell = ws.cell(row=3, column=col_idx, value=hint)
+        cell.font      = Font(color='6B7A99', italic=True, size=9)
+        cell.fill      = PatternFill('solid', fgColor='F8FAFC')
+        cell.alignment = Alignment(horizontal='left', vertical='center')
+        cell.border    = border
+    ws.row_dimensions[3].height = 18
+
+    # Sample rows using real data
+    today = datetime.date.today().isoformat()
+    sample_rows = []
+    for e in emps[:3]:
+        for c in cps[:2]:
+            sample_rows.append([today, e['emp_code'], c['ref'], 100, 95, '', ''])
+    if not sample_rows:
+        sample_rows = [[today, 'EMP-001', 'CP-REF', 100, 95, '', '']]
+
+    for row_idx, row_data in enumerate(sample_rows, 4):
+        for col_idx, val in enumerate(row_data, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=val)
+            cell.alignment = Alignment(horizontal='left', vertical='center')
+            cell.border    = border
+            if col_idx <= 5:
+                cell.fill = REQ_FILL
+        ws.row_dimensions[row_idx].height = 16
+
+    # Blank data rows (rows 4+sample to 53)
+    start_blank = 4 + len(sample_rows)
+    for row_idx in range(start_blank, 54):
+        for col_idx in range(1, 8):
+            cell = ws.cell(row=row_idx, column=col_idx, value='')
+            cell.alignment = Alignment(horizontal='left', vertical='center')
+            cell.border    = border
+            if col_idx <= 5:
+                cell.fill = REQ_FILL
+
+    # Data validation for Emp_Code column (col B = 2)
+    if emps:
+        emp_codes = ','.join(f'"{e["emp_code"]}"' for e in emps[:50])
+        dv_emp = DataValidation(type='list', formula1=f'"{emp_codes}"', allow_blank=True,
+                                showDropDown=False, showErrorMessage=True,
+                                error='Use an employee code from the Emp List sheet',
+                                errorTitle='Invalid Employee Code')
+        ws.add_data_validation(dv_emp)
+        dv_emp.sqref = f'B4:B200'
+
+    # Data validation for CP_Ref column (col C = 3)
+    if cps:
+        cp_refs = ','.join(f'"{c["ref"]}"' for c in cps[:50])
+        dv_cp = DataValidation(type='list', formula1=f'"{cp_refs}"', allow_blank=True,
+                               showDropDown=False, showErrorMessage=True,
+                               error='Use a CP reference from the CP List sheet',
+                               errorTitle='Invalid CP Reference')
+        ws.add_data_validation(dv_cp)
+        dv_cp.sqref = f'C4:C200'
+
+    ws.freeze_panes = 'A4'
+
+    # ── Sheet 2: Employee List ──────────────────────────────────────────
+    ws2 = wb.create_sheet('Emp List')
+    ws2.column_dimensions['A'].width = 14
+    ws2.column_dimensions['B'].width = 30
+    ws2.cell(1,1,'Emp_Code').font = Font(bold=True); ws2.cell(1,1).fill = HDR_FILL; ws2.cell(1,1).font = HDR_FONT
+    ws2.cell(1,2,'Name').font     = HDR_FONT;        ws2.cell(1,2).fill = HDR_FILL; ws2.cell(1,2).font = HDR_FONT
+    for i, e in enumerate(emps, 2):
+        ws2.cell(i, 1, e['emp_code'])
+        ws2.cell(i, 2, e['name'])
+
+    # ── Sheet 3: CP List ───────────────────────────────────────────────
+    ws3 = wb.create_sheet('CP List')
+    ws3.column_dimensions['A'].width = 20
+    ws3.column_dimensions['B'].width = 50
+    ws3.column_dimensions['C'].width = 16
+    for col, hdr in enumerate(['CP_Ref','Title','Target'], 1):
+        c = ws3.cell(1, col, hdr); c.fill = HDR_FILL; c.font = HDR_FONT
+    for i, c in enumerate(cps, 2):
+        ws3.cell(i, 1, c['ref'])
+        ws3.cell(i, 2, c['title'])
+        ws3.cell(i, 3, c['target'] or '')
+
+    buf = io.BytesIO()
+    wb.save(buf); buf.seek(0)
+    return send_file(buf, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                     as_attachment=True, download_name='MPCP_Upload_Template.xlsx')
 
 @app.route('/api/perf/import_simple', methods=['POST'])
 def import_perf_simple():
@@ -1456,17 +1684,20 @@ def import_perf_simple():
         wb = openpyxl.load_workbook(f, data_only=True); ws = wb.active
         hdrs = [str(c.value or '').strip().lower() for c in next(ws.iter_rows(min_row=1,max_row=1))]
         for row in ws.iter_rows(min_row=2, values_only=True):
-            rows.append({h: str(v or '').strip() for h,v in zip(hdrs, row)})
+            rows.append({h: str(v if v is not None else '').strip() for h,v in zip(hdrs, row)})
     else:
         text = f.read().decode('utf-8-sig')
         rows = list(csv.DictReader(io.StringIO(text)))
     total_rows = len(rows)
     for i, row in enumerate(rows, 2):
         try:
-            date_str = (row.get('Date') or row.get('date') or '').strip()
-            ec  = (row.get('Emp_Code') or row.get('emp_code') or '').strip()
-            cpr = (row.get('CP_Ref')   or row.get('cp_ref')   or '').strip()
+            row = {k.lower().strip(): v for k, v in row.items()}  # normalize to lowercase
+            date_str = (row.get('date') or '').strip()
+            ec  = (row.get('emp_code') or '').strip()
+            cpr = (row.get('cp_ref')   or '').strip()
             if not date_str or not ec or not cpr: continue
+            # Skip hint/instruction rows
+            if date_str.lower().startswith('yyyy') or ec.lower().startswith('employee'): continue
             try:
                 dt  = datetime.datetime.strptime(date_str, '%Y-%m-%d')
                 fy, bsm = ad_date_to_fy_and_month(dt)
@@ -1485,8 +1716,8 @@ def import_perf_simple():
             try: tgt_val = float(tgt_num)
             except: tgt_val = 0.0
             unit = raw_tgt.split()[-1] if raw_tgt else '%'
-            total    = int(float(row.get('Total','0')    or 0))
-            compliant= int(float(row.get('Compliant','0')or 0))
+            total    = int(float(row.get('total','0')    or 0))
+            compliant= int(float(row.get('compliant','0')or 0))
             if total <= 0: errs.append(f"Row {i}: total must be > 0"); continue
             if compliant > total: compliant = total
             nc     = total - compliant
@@ -1495,12 +1726,16 @@ def import_perf_simple():
             act_val= float(row.get('Actual_Val','0') or 0)
             status = calc_status(act_val, tgt_val, unit)
             metric = (cp['title'] or cp['ref'] or '')[:60]
-            notes  = (row.get('Notes') or row.get('notes') or '').strip()
+            notes  = (row.get('notes') or '').strip()
             existing = db.execute(
                 'SELECT id FROM perf WHERE fy=? AND bs_month=? AND emp_id=? AND cp_ref=?',
                 (fy, bsm, eid, cpr)).fetchone()
             pid = existing['id'] if existing else uid()
-            db.execute("INSERT OR REPLACE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            db.execute("""INSERT OR REPLACE INTO perf
+               (id,fy,bs_month,quarter,emp_id,emp_code,mp_ref,cp_ref,
+                metric,total,compliant,non_compliant,pct_compliant,pct_nc,
+                target_val,actual_val,unit,status,notes)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                        (pid,fy,bsm,bs_q(bsm),eid,ec,mp_ref,cpr,metric,
                         total,compliant,nc,pct_c,pct_nc,tgt_val,act_val,unit,status,notes))
             count += 1

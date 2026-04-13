@@ -1508,14 +1508,15 @@ function renderPerfData() {
     <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:12px">
       <div style="flex:1;min-width:260px">
         <h4 style="font-size:12px;font-weight:800;color:#15803d;font-family:'Syne',sans-serif;text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">
-          ✅ Simplified Upload — Just 4 Columns
+          ✅ Simplified Upload — Just 5 Columns
         </h4>
         <p style="font-size:12px;color:#166534;line-height:1.7;margin-bottom:10px">
-          Fill only: <strong>Date · Emp Code · CP Ref · Actual Value</strong><br>
-          Everything else (FY, Month, Target, Unit, Status, MP) is <strong>auto-calculated</strong> from your masters.
+          Fill only: <strong>Date · Emp_Code · CP_Ref · Total · Compliant</strong><br>
+          FY, Month, Target, Unit, Status &amp; MP are <strong>auto-calculated</strong> from your masters.<br>
+          <span style="color:#15803d;font-weight:700">⬇ Download Template</span> to get a pre-filled xlsx with your real employees &amp; CPs.
         </p>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <a href="/api/perf/simple_template" class="sample-link" style="background:#15803d;color:#fff;border:none">⬇ Download Template</a>
+          <a href="/api/perf/simple_template" class="sample-link" style="background:#15803d;color:#fff;border:none">⬇ Download Template (xlsx)</a>
           <a href="/api/perf/export?fy=${encodeURIComponent(S.currentFY)}" class="sample-link">⬇ Export FY ${S.currentFY}</a>
           <a href="/api/perf/export" class="sample-link">⬇ Export All</a>
         </div>

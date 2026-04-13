@@ -4,7 +4,18 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Sipradi SC-MPCP System</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
+// ── FY AUTO-DETECT ───────────────────────────────────────────────────────
+async function fyFromDate(dateStr) {
+  if (!dateStr) return null;
+  try {
+    const r = await fetch(`/api/fy_from_date?date=${dateStr}`);
+    return await r.json();
+  } catch(e) { return null; }
+}
+function todayISO() { return new Date().toISOString().split('T')[0]; }
+
+</script>
 <style>
 :root{
   --bg:#f0f2f7;--surface:#fff;--border:#e2e6ef;--text:#0f1a2e;--muted:#6b7a99;
@@ -344,7 +355,7 @@ tbody tr:hover .row-actions{opacity:1}
   </div>
 </div>
 
-<div class="modal-overlay hidden" id="modal-overlay" onclick="closeModal(event)">
+<div class="modal-overlay hidden" id="modal-overlay" onmousedown="handleBackdrop(event)">
   <div class="modal" id="modal-box">
     <div class="modal-head">
       <h3 id="modal-title"></h3>
@@ -537,7 +548,20 @@ function openModal(title, body, actions=[], wide=false) {
   })
   q('#modal-overlay').classList.remove('hidden')
 }
-function closeModal(e){if(e&&e.target!==e.currentTarget)return;q('#modal-overlay').classList.add('hidden')}
+function handleBackdrop(e) {
+  // Only close if clicking the dark overlay itself, not the white card
+  if (e.target === $('modal-overlay')) {
+    const card = $('modal-box');
+    card.style.transform = 'scale(1.015)';
+    setTimeout(() => card.style.transform = '', 150);
+  }
+}
+function closeModal(e) {
+  // Only called from the × button
+  $('modal-overlay').classList.add('hidden');
+  $('modal-body').innerHTML = '';
+  $('modal-foot').innerHTML = '';
+}
 
 // ── PICKERS ──────────────────────────────────────────────────────────────────
 function buildOwnerPicker(pid, sel) {
@@ -1733,72 +1757,219 @@ async function uploadPerfSimple(input) {
   await loadAll(); input.value = ''
 }
 
-function openQuickEntry() {
+
+// ── QUICK PERF ENTRY (dual-mode) ─────────────────────────────────────────
+let _qMode = 'count'; // 'count' | 'percent'
+let _qFY = ''; let _qMonth = '';
+
+async function openQuickEntry() {
+  const today = todayISO();
+  const fyData = await fyFromDate(today);
+  _qFY    = fyData ? fyData.fy       : S.currentFY;
+  _qMonth = fyData ? fyData.bs_month : '';
+
   const empOpts = S.employees.map(e =>
-    `<option value="${e.emp_code||e.id}">${esc(e.name)} — ${esc(e.emp_code||'')}</option>`).join('')
+    `<option value="${esc(e.emp_code)}">${esc(e.name)} — ${esc(e.emp_code)}</option>`
+  ).join('');
+
   const cpOpts = S.cps.map(c =>
-    `<option value="${c.ref}" data-target="${esc(c.target||'')}" data-mp="${esc(c.mp_id||'')}">[${esc(c.ref)}] ${esc(c.title.slice(0,55))}</option>`).join('')
-  openModal('⚡ Quick Performance Entry',
-    `<p class="text-xs text-muted mb-16">Fill just 4 fields. Everything else is auto-calculated from your CP masters.</p>
+    `<option value="${esc(c.ref)}">[${esc(c.ref)}] ${esc(c.title.slice(0,55))}${c.title.length>55?'…':''}</option>`
+  ).join('');
+
+  openModal('⚡ Quick Performance Entry', `
+    <p class="text-xs text-muted mb-12">Fill 4 fields. FY, month &amp; status are auto-calculated.</p>
+
     <div class="form-grid-2">
-      <div class="form-group"><label class="form-label">Date *</label>
-        <input class="form-input" type="date" id="qe-date" value="${new Date().toISOString().slice(0,10)}"></div>
-      <div class="form-group"><label class="form-label">Employee *</label>
-        <select class="form-select" id="qe-emp">
-          <option value="">— Select —</option>${empOpts}
-        </select></div>
-    </div>
-    <div class="form-group"><label class="form-label">Checking Point (CP) *</label>
-      <select class="form-select" id="qe-cp" onchange="qeUpdateTarget()">
-        <option value="">— Select CP —</option>${cpOpts}
-      </select>
-    </div>
-    <div id="qe-target-hint" class="info-box" style="display:none;padding:8px 12px;margin-bottom:10px;font-size:12px"></div>
-    <div class="form-grid-2">
-      <div class="form-group"><label class="form-label">Actual Value *</label>
-        <input class="form-input" type="number" step="0.01" id="qe-actual" placeholder="e.g. 2.8" oninput="qeUpdateStatus()"></div>
-      <div class="form-group"><label class="form-label">Status (auto)</label>
-        <div id="qe-status-preview" style="padding:8px 12px;border-radius:8px;background:#f1f5f9;font-weight:700;font-size:13px;margin-top:2px">—</div>
+      <div class="form-group">
+        <label class="form-label">Date *</label>
+        <input type="date" id="qe-date" class="form-input" value="${today}"
+          onchange="qeUpdateFY(this.value)">
+        <div id="qe-fy-pill" class="text-xs mt-8" style="color:#1d4ed8;font-weight:700">
+          FY: ${_qFY} | ${_qMonth}
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Employee *</label>
+        <select id="qe-emp" class="form-select"><option value="">— Select —</option>${empOpts}</select>
       </div>
     </div>
-    <div class="form-group"><label class="form-label">Remarks</label>
-      <input class="form-input" id="qe-remarks" placeholder="Optional notes"></div>`,
-    [{label:'Save Entry', cls:'btn-primary', fn: async function() {
-      const date = q('#qe-date').value
-      const emp  = q('#qe-emp').value
-      const cp   = q('#qe-cp').value
-      const actual = q('#qe-actual').value
-      if (!date||!emp||!cp||actual==='') { toast('Date, Employee, CP and Actual are required','error'); return }
-      const fd = new FormData()
-      const csv = 'Date (YYYY-MM-DD),Emp_Code,CP_Ref,Actual_Value,Remarks\n' +
-                  `${date},${emp},${cp},${actual},${q('#qe-remarks').value}`
-      fd.append('file', new Blob([csv], {type:'text/csv'}), 'quick_entry.csv')
-      const r = await fetch('/api/perf/import_simple', {method:'POST', body:fd}).then(r=>r.json())
-      if (r.imported > 0) {
-        toast(`✅ Entry saved — Status: ${q('#qe-status-preview').textContent}`, 'ok')
-        closeModal(); await loadAll()
-      } else {
-        toast('Error: ' + (r.errors&&r.errors[0] ? r.errors[0] : r.error||'Unknown'), 'error')
-      }
-    }}, {label:'Save & Add Another', cls:'btn-ghost', fn: async function() {
-      const date = q('#qe-date').value; const emp = q('#qe-emp').value
-      const cp = q('#qe-cp').value; const actual = q('#qe-actual').value
-      if (!date||!emp||!cp||actual==='') { toast('All fields required','error'); return }
-      const fd = new FormData()
-      const csv = 'Date (YYYY-MM-DD),Emp_Code,CP_Ref,Actual_Value,Remarks\n' +
-                  `${date},${emp},${cp},${actual},${q('#qe-remarks').value}`
-      fd.append('file', new Blob([csv], {type:'text/csv'}), 'quick_entry.csv')
-      const r = await fetch('/api/perf/import_simple', {method:'POST', body:fd}).then(r=>r.json())
-      if (r.imported > 0) {
-        toast('Saved! Add another.','ok')
-        q('#qe-actual').value = ''; q('#qe-remarks').value = ''
-        q('#qe-status-preview').textContent = '—'
-        q('#qe-status-preview').style.background = '#f1f5f9'
-        await loadAll()
-      } else {
-        toast('Error: ' + (r.errors&&r.errors[0] ? r.errors[0] : r.error||'Unknown'), 'error')
-      }
-    }}], true)
+
+    <div class="form-group">
+      <label class="form-label">Checking Point (CP) *</label>
+      <select id="qe-cp" class="form-select" onchange="qeLoadTarget()">
+        <option value="">— Select CP —</option>${cpOpts}
+      </select>
+      <div id="qe-target-info" class="info-box mt-8 hidden"></div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Input Mode</label>
+      <div style="display:flex;gap:8px">
+        <button id="qe-btn-count" onclick="qeSetMode('count')"
+          class="btn btn-primary btn-sm">📊 Count Mode</button>
+        <button id="qe-btn-pct" onclick="qeSetMode('percent')"
+          class="btn btn-ghost btn-sm">% Mode</button>
+      </div>
+      <p class="text-xs text-muted mt-8" id="qe-mode-hint">
+        Count Mode: enter total done + how many were on-time/compliant
+      </p>
+    </div>
+
+    <div id="qe-inputs">
+      <div class="form-grid-2">
+        <div class="form-group">
+          <label class="form-label" id="qe-lbl-total">Total Units Done *</label>
+          <input type="number" id="qe-total" class="form-input" min="1"
+            placeholder="e.g. 250" oninput="qeAutoCalc()">
+        </div>
+        <div class="form-group">
+          <label class="form-label" id="qe-lbl-b">Compliant / On-Time *</label>
+          <input type="number" id="qe-valb" class="form-input" min="0"
+            placeholder="e.g. 240" oninput="qeAutoCalc()">
+        </div>
+      </div>
+    </div>
+
+    <div id="qe-calc-display" class="hidden" style="background:#f8fafc;border:1px solid #e2e6ef;
+      border-radius:10px;padding:12px 16px;margin-bottom:14px">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Actual Value (optional)</label>
+      <input type="number" step="0.01" id="qe-actual" class="form-input"
+        placeholder="e.g. 2.3 days">
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Remarks</label>
+      <input type="text" id="qe-notes" class="form-input" placeholder="Optional notes">
+    </div>
+  `, [
+    {label:'Cancel', cls:'btn-ghost', fn:'closeModal()'},
+    {label:'💾 Save Entry', cls:'btn-primary', fn:'qeSave()'},
+  ]);
+}
+
+function qeSetMode(mode) {
+  _qMode = mode;
+  const isCount = mode === 'count';
+  $('qe-btn-count').className = isCount ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
+  $('qe-btn-pct').className   = isCount ? 'btn btn-ghost btn-sm'   : 'btn btn-primary btn-sm';
+  $('qe-lbl-b').textContent   = isCount ? 'Compliant / On-Time *'  : '% Achieved (0–100) *';
+  $('qe-valb').placeholder    = isCount ? 'e.g. 240'               : 'e.g. 96.5';
+  $('qe-mode-hint').textContent = isCount
+    ? 'Count Mode: enter total done + how many were on-time/compliant'
+    : 'Percent Mode: enter total done + overall % achieved';
+  qeAutoCalc();
+}
+
+async function qeUpdateFY(dateVal) {
+  const d = await fyFromDate(dateVal);
+  if (d) {
+    _qFY = d.fy; _qMonth = d.bs_month;
+    $('qe-fy-pill').textContent = `FY: ${d.fy} | ${d.bs_month} | ${d.quarter}`;
+  }
+}
+
+function qeLoadTarget() {
+  const ref = $('qe-cp').value;
+  const cp  = S.cps.find(c => c.ref === ref);
+  const box = $('qe-target-info');
+  if (cp && cp.target) {
+    box.classList.remove('hidden');
+    box.innerHTML = `<p>Target for <strong>${esc(ref)}</strong>: 
+      <strong style="color:#1d4ed8">${esc(cp.target)}</strong> — enter the actual value achieved</p>`;
+  } else {
+    box.classList.add('hidden');
+  }
+}
+
+function qeAutoCalc() {
+  const total = parseInt($('qe-total')?.value || 0);
+  const display = $('qe-calc-display');
+  if (!display || !total || total <= 0) { display?.classList.add('hidden'); return; }
+
+  let compliant, nc, pctC;
+  const valB = parseFloat($('qe-valb')?.value || 0);
+
+  if (_qMode === 'count') {
+    compliant = Math.floor(valB);
+    if (compliant > total) {
+      display.classList.remove('hidden');
+      display.innerHTML = '<span style="color:#dc2626;font-weight:700">⚠ Compliant cannot exceed total</span>';
+      return;
+    }
+    nc   = total - compliant;
+    pctC = (compliant / total * 100).toFixed(2);
+  } else {
+    if (valB < 0 || valB > 100) {
+      display.classList.remove('hidden');
+      display.innerHTML = '<span style="color:#dc2626;font-weight:700">⚠ % must be between 0 and 100</span>';
+      return;
+    }
+    compliant = Math.round(total * valB / 100);
+    nc   = total - compliant;
+    pctC = parseFloat(valB).toFixed(2);
+  }
+
+  const isC     = parseFloat(pctC) >= 95;
+  const statClr = isC ? '#16a34a' : '#dc2626';
+  const statLbl = isC ? '✓ Compliant' : '✗ Non-Compliant';
+
+  display.classList.remove('hidden');
+  display.innerHTML = `
+    <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:12px">
+      <span>Total: <strong>${total.toLocaleString()}</strong></span>
+      <span style="color:#16a34a">✓ Compliant: <strong>${compliant.toLocaleString()}</strong></span>
+      <span style="color:#dc2626">✗ NC: <strong>${nc.toLocaleString()}</strong></span>
+      <span>Rate: <strong>${pctC}%</strong></span>
+      <span style="color:${statClr};font-weight:700">${statLbl}</span>
+    </div>`;
+
+  window._qPayload = { total, compliant, nc, pct_c: parseFloat(pctC) };
+}
+
+async function qeSave(overwrite = false) {
+  const date    = $('qe-date')?.value;
+  const empCode = $('qe-emp')?.value;
+  const cpRef   = $('qe-cp')?.value;
+  const actual  = parseFloat($('qe-actual')?.value || 0);
+  const notes   = $('qe-notes')?.value || '';
+
+  if (!date || !empCode || !cpRef) { toast('Fill Date, Employee and CP', 'err'); return; }
+  if (!window._qPayload)           { toast('Enter total and compliant/% values', 'err'); return; }
+  if (!_qFY)                       { toast('FY not detected — check date', 'err'); return; }
+
+  const { total, compliant, pct_c } = window._qPayload;
+  const body = {
+    date, emp_code: empCode, cp_ref: cpRef,
+    total, compliant,
+    mode: _qMode,
+    pct_achieved: pct_c,
+    actual_val: actual,
+    notes, fy: _qFY, bs_month: _qMonth,
+    overwrite
+  };
+
+  const r    = await fetch('/api/perf/quick', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  const data = await r.json();
+
+  if (r.status === 409 && data.warning === 'duplicate') {
+    if (confirm(`⚠ ${data.message}\n\nOverwrite existing record?`)) {
+      return qeSave(true);
+    }
+    return;
+  }
+  if (!r.ok) { toast(data.error || 'Save failed', 'err'); return; }
+
+  toast(`✓ Saved — ${data.bs_month} ${data.fy} | ${data.pct_compliant}% compliant`, 'ok');
+  closeModal();
+  S.perf.push(data);
+  updateHeader();
 }
 
 function qeUpdateTarget() {

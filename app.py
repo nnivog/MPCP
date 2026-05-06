@@ -391,9 +391,22 @@ def _seed(db):
 # ── EMPLOYEES ──────────────────────────────────────────────────────────────
 def enrich_emp(e, db):
     r = dict(e)
-    r['role_ids'] = [x['role_id'] for x in db.execute("SELECT role_id FROM emp_roles WHERE emp_id=?", (r['id'],))]
-    r['mp_ids']   = [x['mp_id']   for x in db.execute("SELECT mp_id FROM emp_mps WHERE emp_id=?",   (r['id'],))]
-    r['cp_ids']   = [x['cp_id']   for x in db.execute("SELECT cp_id FROM emp_cps WHERE emp_id=?",   (r['id'],))]
+    r['role_ids']   = [x['role_id'] for x in db.execute("SELECT role_id FROM emp_roles WHERE emp_id=?", (r['id'],))]
+    r['mp_ids']     = [x['mp_id']   for x in db.execute("SELECT mp_id FROM emp_mps WHERE emp_id=?",   (r['id'],))]
+    r['cp_ids']     = [x['cp_id']   for x in db.execute("SELECT cp_id FROM emp_cps WHERE emp_id=?",   (r['id'],))]
+    # sector_ids — try emp_sectors junction table first, fallback to emp_roles/dept
+    try:
+        r['sector_ids'] = [x[0] for x in db.execute("SELECT sector_id FROM emp_sectors WHERE emp_id=? ORDER BY is_primary DESC", (r['id'],)).fetchall()]
+    except Exception:
+        r['sector_ids'] = []
+    # loc_ids — try emp_locations junction table first, fallback to loc_emps
+    try:
+        r['loc_ids'] = [x[0] for x in db.execute("SELECT loc_id FROM emp_locations WHERE emp_id=? ORDER BY is_primary DESC", (r['id'],)).fetchall()]
+    except Exception:
+        try:
+            r['loc_ids'] = [x[0] for x in db.execute("SELECT loc_id FROM loc_emps WHERE emp_id=?", (r['id'],)).fetchall()]
+        except Exception:
+            r['loc_ids'] = []
     return r
 
 @app.route('/api/employees', methods=['GET','POST'])
@@ -413,6 +426,18 @@ def employees_api():
         code = f"EMP-{num:03d}"
     db.execute("INSERT OR REPLACE INTO employees VALUES(?,?,?,?,?,?,?,?)",
                (eid,code,d['name'],d.get('role',''),d.get('level',3),d.get('dept','Ops'),d.get('manager_id') or None,d.get('email','')))
+    # Save sector assignments
+    try:
+        db.execute("DELETE FROM emp_sectors WHERE emp_id=?", (eid,))
+        for i, sid in enumerate(d.get('sector_ids', [])):
+            db.execute("INSERT OR IGNORE INTO emp_sectors(emp_id,sector_id,is_primary) VALUES(?,?,?)", (eid, sid, 1 if i==0 else 0))
+    except Exception: pass
+    # Save location assignments
+    try:
+        db.execute("DELETE FROM emp_locations WHERE emp_id=?", (eid,))
+        for i, lid2 in enumerate(d.get('loc_ids', [])):
+            db.execute("INSERT OR IGNORE INTO emp_locations(emp_id,loc_id,is_primary) VALUES(?,?,?)", (eid, lid2, 1 if i==0 else 0))
+    except Exception: pass
     db.commit()
     return jsonify({'id': eid, 'emp_code': code})
 
@@ -428,6 +453,18 @@ def employee_api(eid):
     d = request.json or {}
     db.execute("UPDATE employees SET emp_code=?,name=?,role=?,level=?,dept=?,manager_id=?,email=? WHERE id=?",
                (d.get('emp_code'),d['name'],d.get('role',''),d.get('level',3),d.get('dept','Ops'),d.get('manager_id') or None,d.get('email',''),eid))
+    # Update sector assignments
+    try:
+        db.execute("DELETE FROM emp_sectors WHERE emp_id=?", (eid,))
+        for i, sid in enumerate(d.get('sector_ids', [])):
+            db.execute("INSERT OR IGNORE INTO emp_sectors(emp_id,sector_id,is_primary) VALUES(?,?,?)", (eid, sid, 1 if i==0 else 0))
+    except Exception: pass
+    # Update location assignments
+    try:
+        db.execute("DELETE FROM emp_locations WHERE emp_id=?", (eid,))
+        for i, lid2 in enumerate(d.get('loc_ids', [])):
+            db.execute("INSERT OR IGNORE INTO emp_locations(emp_id,loc_id,is_primary) VALUES(?,?,?)", (eid, lid2, 1 if i==0 else 0))
+    except Exception: pass
     db.commit()
     return jsonify({'ok': True})
 
@@ -1571,7 +1608,7 @@ def sectors_api():
         return jsonify(R(rows))
     d   = request.json or {}
     sid = d.get('id') or uid()
-    db.execute("INSERT OR REPLACE INTO sectors VALUES(?,?,?,?,?,?)",
+    db.execute("INSERT OR REPLACE INTO sectors(id,code,name,description,color,sort_order) VALUES(?,?,?,?,?,?)",
                (sid, d.get('code',''), d.get('name',''), d.get('description',''),
                 d.get('color','#475569'), d.get('sort_order',0)))
     db.commit()
@@ -1602,13 +1639,25 @@ def locations_api():
     if request.method == 'GET':
         locs = R(db.execute("SELECT * FROM locations ORDER BY code").fetchall())
         for loc in locs:
-            loc['emp_ids'] = [r['emp_id'] for r in db.execute(
-                "SELECT emp_id FROM loc_emps WHERE loc_id=?", (loc['id'],))]
+            # Try emp_locations (new schema) first, fall back to loc_emps
+            try:
+                loc['emp_ids'] = [r[0] for r in db.execute(
+                    "SELECT emp_id FROM emp_locations WHERE loc_id=? ORDER BY is_primary DESC", (loc['id'],)).fetchall()]
+            except Exception:
+                loc['emp_ids'] = [r['emp_id'] for r in db.execute(
+                    "SELECT emp_id FROM loc_emps WHERE loc_id=?", (loc['id'],))]
         return jsonify(locs)
     d   = request.json or {}
     lid = d.get('id') or uid()
-    db.execute("INSERT OR REPLACE INTO locations VALUES(?,?,?,?,?)",
-               (lid, d.get('code',''), d.get('name',''), d.get('type','Office'), d.get('address','')))
+    db.execute("INSERT OR REPLACE INTO locations(id,code,name,type,address,sector_id,active) VALUES(?,?,?,?,?,?,?)",
+               (lid, d.get('code',''), d.get('name',''), d.get('type','Office'), d.get('address',''),
+                d.get('sector_id',''), d.get('active',1)))
+    # Write to emp_locations (new schema) and loc_emps (old) for compatibility
+    try:
+        db.execute("DELETE FROM emp_locations WHERE loc_id=?", (lid,))
+        for i, eid in enumerate(d.get('emp_ids',[])):
+            db.execute("INSERT OR IGNORE INTO emp_locations(emp_id,loc_id,is_primary) VALUES(?,?,?)", (eid, lid, 1 if i==0 else 0))
+    except Exception: pass
     db.execute("DELETE FROM loc_emps WHERE loc_id=?", (lid,))
     for eid in d.get('emp_ids',[]): db.execute("INSERT OR IGNORE INTO loc_emps VALUES(?,?)", (lid, eid))
     db.commit()
@@ -1619,11 +1668,19 @@ def location_api(lid):
     db = get_db()
     if request.method == 'DELETE':
         db.execute("DELETE FROM locations WHERE id=?", (lid,))
+        try: db.execute("DELETE FROM emp_locations WHERE loc_id=?", (lid,))
+        except Exception: pass
         db.execute("DELETE FROM loc_emps WHERE loc_id=?", (lid,))
         db.commit(); return jsonify({'ok': True})
     d = request.json or {}
     db.execute("UPDATE locations SET code=?,name=?,type=?,address=? WHERE id=?",
                (d.get('code',''), d.get('name',''), d.get('type','Office'), d.get('address',''), lid))
+    # Write to both junction tables
+    try:
+        db.execute("DELETE FROM emp_locations WHERE loc_id=?", (lid,))
+        for i, eid in enumerate(d.get('emp_ids',[])):
+            db.execute("INSERT OR IGNORE INTO emp_locations(emp_id,loc_id,is_primary) VALUES(?,?,?)", (eid, lid, 1 if i==0 else 0))
+    except Exception: pass
     db.execute("DELETE FROM loc_emps WHERE loc_id=?", (lid,))
     for eid in d.get('emp_ids',[]): db.execute("INSERT OR IGNORE INTO loc_emps VALUES(?,?)", (lid, eid))
     db.commit(); return jsonify({'ok': True})
@@ -1906,21 +1963,38 @@ def analytics_by_sector():
 @app.route('/api/dashboard_layouts', methods=['GET','POST'])
 def dashboard_layouts():
     db = get_db()
+    # Create table if missing — use layout_json to match existing DB schema
     db.execute('''CREATE TABLE IF NOT EXISTS dashboard_layouts(
-        id TEXT PRIMARY KEY, user TEXT DEFAULT 'default',
-        name TEXT NOT NULL, layout TEXT DEFAULT '[]', created_at TEXT)''')
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, user TEXT DEFAULT 'default',
+        layout_json TEXT DEFAULT '[]', created_at TEXT, updated_at TEXT)''')
+    # Detect which column name exists: layout_json or layout
+    cols = {r[1] for r in db.execute("PRAGMA table_info(dashboard_layouts)").fetchall()}
+    layout_col = 'layout_json' if 'layout_json' in cols else 'layout'
+    # Add layout_json column if only layout exists
+    if layout_col == 'layout' and 'layout_json' not in cols:
+        try: db.execute("ALTER TABLE dashboard_layouts ADD COLUMN layout_json TEXT DEFAULT '[]'")
+        except Exception: pass
+        layout_col = 'layout'
     if request.method == 'GET':
         user = request.args.get('user','default')
         rows = R(db.execute("SELECT * FROM dashboard_layouts WHERE user=? ORDER BY created_at", (user,)).fetchall())
-        for r in rows: r['layout'] = json.loads(r.get('layout','[]'))
+        for r in rows:
+            raw = r.get('layout_json') or r.get('layout') or '[]'
+            try: r['layout'] = json.loads(raw)
+            except: r['layout'] = []
         return jsonify(rows)
-    d    = request.json or {}
-    lid  = d.get('id') or uid()
-    now  = datetime.datetime.now().isoformat()
-    db.execute("INSERT OR REPLACE INTO dashboard_layouts VALUES(?,?,?,?,?)",
-               (lid, d.get('user','default'), d.get('name','Layout'),
-                json.dumps(d.get('layout',[])), now))
-    db.commit(); return jsonify({'id': lid})
+    d   = request.json or {}
+    lid = d.get('id') or uid()
+    now = datetime.datetime.now().isoformat()
+    layout_data = json.dumps(d.get('layout', []))
+    try:
+        db.execute(f"INSERT OR REPLACE INTO dashboard_layouts(id,name,user,{layout_col},created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                   (lid, d.get('name','Layout'), d.get('user','default'), layout_data, now, now))
+    except Exception:
+        db.execute("INSERT OR REPLACE INTO dashboard_layouts VALUES(?,?,?,?,?,?)",
+                   (lid, d.get('name','Layout'), d.get('user','default'), layout_data, now, now))
+    db.commit()
+    return jsonify({'id': lid})
 
 @app.route('/api/dashboard_layouts/<lid>', methods=['DELETE'])
 def delete_dashboard_layout(lid):

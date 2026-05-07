@@ -119,6 +119,8 @@ CREATE TABLE IF NOT EXISTS role_cps(role_id TEXT, cp_id TEXT, PRIMARY KEY(role_i
 CREATE TABLE IF NOT EXISTS emp_roles(emp_id TEXT, role_id TEXT, PRIMARY KEY(emp_id,role_id));
 CREATE TABLE IF NOT EXISTS emp_mps(emp_id TEXT, mp_id TEXT, PRIMARY KEY(emp_id,mp_id));
 CREATE TABLE IF NOT EXISTS emp_cps(emp_id TEXT, cp_id TEXT, PRIMARY KEY(emp_id,cp_id));
+CREATE TABLE IF NOT EXISTS emp_sectors(emp_id TEXT, sector_id TEXT, is_primary INTEGER DEFAULT 0, PRIMARY KEY(emp_id,sector_id));
+CREATE TABLE IF NOT EXISTS emp_locations(emp_id TEXT, loc_id TEXT, is_primary INTEGER DEFAULT 0, PRIMARY KEY(emp_id,loc_id));
 
 CREATE TABLE IF NOT EXISTS perf(
   id TEXT PRIMARY KEY, fy TEXT NOT NULL, bs_month TEXT NOT NULL,
@@ -130,6 +132,10 @@ CREATE TABLE IF NOT EXISTS perf(
   target_val REAL DEFAULT 0, actual_val REAL DEFAULT 0,
   unit TEXT DEFAULT '%', status TEXT DEFAULT 'C', notes TEXT DEFAULT '');
 
+CREATE TABLE IF NOT EXISTS locations(
+  id TEXT PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
+  address TEXT DEFAULT '', type TEXT DEFAULT 'Branch', active INTEGER DEFAULT 1);
+CREATE TABLE IF NOT EXISTS location_employees(loc_id TEXT, emp_id TEXT, PRIMARY KEY(loc_id, emp_id));
 CREATE TABLE IF NOT EXISTS perf_cache(
   fy TEXT PRIMARY KEY, label TEXT NOT NULL,
   record_count INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT, locked INTEGER DEFAULT 0);
@@ -182,6 +188,22 @@ def init_db():
             ("source", "ALTER TABLE cps ADD COLUMN source TEXT DEFAULT ''"),
             ("mp_id",  "ALTER TABLE cps ADD COLUMN mp_id TEXT DEFAULT ''"),
         ])
+        _migrate("locations", [
+            ("sector_id", "ALTER TABLE locations ADD COLUMN sector_id TEXT DEFAULT ''"),
+            ("active",    "ALTER TABLE locations ADD COLUMN active INTEGER DEFAULT 1"),
+        ])
+
+        # Ensure junction tables that may be missing from old DBs are always present
+        db.executescript("""
+            CREATE TABLE IF NOT EXISTS emp_sectors(
+              emp_id TEXT, sector_id TEXT, is_primary INTEGER DEFAULT 0,
+              PRIMARY KEY(emp_id,sector_id));
+            CREATE TABLE IF NOT EXISTS emp_locations(
+              emp_id TEXT, loc_id TEXT, is_primary INTEGER DEFAULT 0,
+              PRIMARY KEY(emp_id,loc_id));
+            CREATE TABLE IF NOT EXISTS loc_emps(
+              loc_id TEXT, emp_id TEXT, PRIMARY KEY(loc_id,emp_id));
+        """)
 
         # cascade_links: old DB may use parent_/child_ naming instead of superior_/subordinate_
         cl_cols = {row[1] for row in db.execute("PRAGMA table_info(cascade_links)").fetchall()}
@@ -1350,6 +1372,47 @@ def analytics_summary():
     return jsonify({'by_fy': by_fy, 'by_month': by_month,
                     'by_mp': by_mp, 'by_cp': by_cp, 'by_emp': by_emp})
 
+
+# ── LOCATIONS ──────────────────────────────────────────────────────────────
+
+@app.route('/api/locations', methods=['GET','POST'])
+def locations_api():
+    db = get_db()
+    if request.method == 'GET':
+        rows = db.execute("SELECT * FROM locations ORDER BY code").fetchall()
+        res = []
+        for r in rows:
+            loc = dict(r)
+            loc['emp_ids'] = [x['emp_id'] for x in db.execute("SELECT emp_id FROM location_employees WHERE loc_id=?", (r['id'],))]
+            res.append(loc)
+        return jsonify(res)
+    d = request.json
+    lid = d.get('id') or uid()
+    db.execute("INSERT OR REPLACE INTO locations VALUES(?,?,?,?,?,?)",
+               (lid, d['code'], d['name'], d.get('address',''), d.get('type','Branch'), 1 if d.get('active', True) else 0))
+    db.execute("DELETE FROM location_employees WHERE loc_id=?", (lid,))
+    for eid in d.get('emp_ids', []):
+        db.execute("INSERT OR IGNORE INTO location_employees VALUES(?,?)", (lid, eid))
+    db.commit()
+    return jsonify({'id': lid})
+
+@app.route('/api/locations/<lid>', methods=['PUT','DELETE'])
+def location_api(lid):
+    db = get_db()
+    if request.method == 'DELETE':
+        db.execute("DELETE FROM locations WHERE id=?", (lid,))
+        db.execute("DELETE FROM location_employees WHERE loc_id=?", (lid,))
+        db.commit()
+        return jsonify({'ok': True})
+    d = request.json
+    db.execute("UPDATE locations SET code=?,name=?,address=?,type=?,active=? WHERE id=?",
+               (d['code'], d['name'], d.get('address',''), d.get('type','Branch'), 1 if d.get('active', True) else 0, lid))
+    db.execute("DELETE FROM location_employees WHERE loc_id=?", (lid,))
+    for eid in d.get('emp_ids', []):
+        db.execute("INSERT OR IGNORE INTO location_employees VALUES(?,?)", (lid, eid))
+    db.commit()
+    return jsonify({'ok': True})
+
 @app.route('/api/calendar')
 def calendar_api():
     return jsonify({'bs_months': BS_MONTHS, 'quarter_map': BS_Q})
@@ -1633,9 +1696,13 @@ def locations_api():
     db = get_db()
     db.execute('''CREATE TABLE IF NOT EXISTS locations(
         id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL,
-        type TEXT DEFAULT 'Office', address TEXT DEFAULT '')''')
+        type TEXT DEFAULT 'Office', address TEXT DEFAULT '',
+        sector_id TEXT DEFAULT '', active INTEGER DEFAULT 1)''')
     db.execute('''CREATE TABLE IF NOT EXISTS loc_emps(
         loc_id TEXT, emp_id TEXT, PRIMARY KEY(loc_id,emp_id))''')
+    db.execute('''CREATE TABLE IF NOT EXISTS emp_locations(
+        emp_id TEXT, loc_id TEXT, is_primary INTEGER DEFAULT 0,
+        PRIMARY KEY(emp_id,loc_id))''')
     if request.method == 'GET':
         locs = R(db.execute("SELECT * FROM locations ORDER BY code").fetchall())
         for loc in locs:
@@ -1673,8 +1740,9 @@ def location_api(lid):
         db.execute("DELETE FROM loc_emps WHERE loc_id=?", (lid,))
         db.commit(); return jsonify({'ok': True})
     d = request.json or {}
-    db.execute("UPDATE locations SET code=?,name=?,type=?,address=? WHERE id=?",
-               (d.get('code',''), d.get('name',''), d.get('type','Office'), d.get('address',''), lid))
+    db.execute("UPDATE locations SET code=?,name=?,type=?,address=?,sector_id=?,active=? WHERE id=?",
+               (d.get('code',''), d.get('name',''), d.get('type','Office'), d.get('address',''),
+                d.get('sector_id',''), d.get('active',1), lid))
     # Write to both junction tables
     try:
         db.execute("DELETE FROM emp_locations WHERE loc_id=?", (lid,))
@@ -1953,11 +2021,64 @@ def analytics_widget():
 
 @app.route('/api/analytics/by_location')
 def analytics_by_location():
-    return jsonify({})
+    db  = get_db()
+    fy  = request.args.get('fy', '2081-82')
+    try:
+        locs = R(db.execute("SELECT * FROM locations ORDER BY code").fetchall())
+        result = []
+        for loc in locs:
+            # Get emp_ids for this location
+            try:
+                emp_ids = [r[0] for r in db.execute(
+                    "SELECT emp_id FROM emp_locations WHERE loc_id=?", (loc['id'],)).fetchall()]
+            except Exception:
+                emp_ids = [r['emp_id'] for r in db.execute(
+                    "SELECT emp_id FROM loc_emps WHERE loc_id=?", (loc['id'],)).fetchall()]
+            if not emp_ids:
+                result.append({**loc, 'total':0,'compliant':0,'nc':0,'pct':0})
+                continue
+            placeholders = ','.join('?'*len(emp_ids))
+            rows = R(db.execute(
+                f"SELECT * FROM perf WHERE fy=? AND emp_id IN ({placeholders})",
+                [fy]+emp_ids).fetchall())
+            tot  = sum(r.get('total',1) for r in rows)
+            comp = sum(r.get('compliant',0) for r in rows)
+            nc   = tot - comp
+            pct  = round(comp/tot*100,2) if tot else 0
+            result.append({**loc,'total':tot,'compliant':comp,'nc':nc,'pct':pct})
+        return jsonify(result)
+    except Exception as e:
+        return jsonify([])
 
 @app.route('/api/analytics/by_sector')
 def analytics_by_sector():
-    return jsonify({})
+    db  = get_db()
+    fy  = request.args.get('fy', '2081-82')
+    try:
+        db.execute('''CREATE TABLE IF NOT EXISTS sectors(
+            id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL,
+            description TEXT DEFAULT '', color TEXT DEFAULT '#475569',
+            sort_order INTEGER DEFAULT 0)''')
+        sects = R(db.execute("SELECT * FROM sectors ORDER BY sort_order,name").fetchall())
+        result = []
+        for sec in sects:
+            emps = R(db.execute("SELECT id FROM employees WHERE dept=?", (sec['code'],)).fetchall())
+            emp_ids = [e['id'] for e in emps]
+            if not emp_ids:
+                result.append({**sec,'total':0,'compliant':0,'nc':0,'pct':0})
+                continue
+            placeholders = ','.join('?'*len(emp_ids))
+            rows = R(db.execute(
+                f"SELECT * FROM perf WHERE fy=? AND emp_id IN ({placeholders})",
+                [fy]+emp_ids).fetchall())
+            tot  = sum(r.get('total',1) for r in rows)
+            comp = sum(r.get('compliant',0) for r in rows)
+            nc   = tot - comp
+            pct  = round(comp/tot*100,2) if tot else 0
+            result.append({**sec,'total':tot,'compliant':comp,'nc':nc,'pct':pct})
+        return jsonify(result)
+    except Exception as e:
+        return jsonify([])
 
 # ── DASHBOARD LAYOUTS ──────────────────────────────────────────────────────
 @app.route('/api/dashboard_layouts', methods=['GET','POST'])

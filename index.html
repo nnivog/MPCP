@@ -4,7 +4,104 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Sipradi SC-MPCP System</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
+// ── LOCATIONS ────────────────────────────────────────────────────────────────
+
+function renderLocations() {
+  const TYPES = ['HQ','Branch','Depot','Warehouse','Border Point','Other']
+  const COLORS = {HQ:'#0f2540',Branch:'#1d4ed8',Depot:'#047857',Warehouse:'#0891b2','Border Point':'#b45309',Other:'#475569'}
+  let html = `
+    <div class="section-head">
+      <div><h2>Locations</h2><p>${S.locations.length} locations configured</p></div>
+      <button class="btn btn-primary btn-sm" onclick="openLocForm()">+ Add Location</button>
+    </div>
+    <div class="grid-3" id="loc-grid">`
+
+  if (!S.locations.length) {
+    html += `<div style="grid-column:1/-1"><div class="card" style="padding:40px;text-align:center">
+      <p style="font-size:32px;margin-bottom:12px">📍</p>
+      <p class="font-black" style="font-size:16px">No locations yet</p>
+      <p class="text-sm text-muted mt-8">Add your branches, depots, and border points.</p>
+      <button class="btn btn-primary mt-16" onclick="openLocForm()">+ Add First Location</button>
+    </div></div>`
+  }
+
+  S.locations.forEach(loc => {
+    const empCount = (loc.emp_ids || []).length
+    const color = COLORS[loc.type] || '#475569'
+    const emps = (loc.emp_ids || []).map(id => S.employees.find(e => e.id === id)).filter(Boolean)
+    html += `
+    <div class="card" style="border-top:3px solid ${color};padding:16px;${!loc.active?'opacity:.55':''}">
+      <div class="flex items-start justify-between mb-12">
+        <div>
+          <span class="ref-badge" style="background:${color};color:#fff;font-size:11px">${esc(loc.code)}</span>
+          ${!loc.active ? '<span class="badge badge-gray" style="margin-left:6px">Inactive</span>' : ''}
+        </div>
+        <div class="flex gap-6">
+          <button class="btn-icon" onclick="openLocForm('${loc.id}')">✏</button>
+          <button class="btn-icon" style="color:var(--red)" onclick="delLoc('${loc.id}')">🗑</button>
+        </div>
+      </div>
+      <p class="font-black" style="font-size:15px">${esc(loc.name)}</p>
+      <p class="text-xs text-muted mt-4">${esc(loc.address || '—')}</p>
+      <div class="flex gap-8 mt-12" style="flex-wrap:wrap">
+        <span class="badge" style="background:${color}20;color:${color};border:1px solid ${color}40">${esc(loc.type)}</span>
+        <span class="badge badge-gray">${empCount} staff</span>
+      </div>
+      ${emps.length ? `<div class="mp-owners mt-10">${emps.map(e => `<span class="owner-chip" style="background:${dc(e.dept)}">${e.name.split(' ')[0]}</span>`).join('')}</div>` : '<p class="text-xs text-muted italic mt-8">No staff assigned</p>'}
+    </div>`
+  })
+
+  html += '</div>'
+  q('#tab-locations').innerHTML = html
+}
+
+function openLocForm(id) {
+  const loc = id ? S.locations.find(l => l.id === id) : null
+  const TYPES = ['HQ','Branch','Depot','Warehouse','Border Point','Other']
+
+  openModal(loc ? 'Edit Location' : 'Add Location', `
+    <div class="form-grid-2">
+      <div class="form-group"><label class="form-label">Location Code</label>
+        <input class="form-input" id="lf-code" value="${esc(loc?.code || '')}" placeholder="e.g. KTM-HQ"></div>
+      <div class="form-group"><label class="form-label">Type</label>
+        <select class="form-select" id="lf-type">${TYPES.map(t => `<option ${loc?.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Location Name</label>
+      <input class="form-input" id="lf-name" value="${esc(loc?.name || '')}" placeholder="e.g. Kathmandu Headquarters"></div>
+    <div class="form-group"><label class="form-label">Address</label>
+      <input class="form-input" id="lf-address" value="${esc(loc?.address || '')}" placeholder="Full address"></div>
+    <div class="form-group"><label class="form-label">Status</label>
+      <select class="form-select" id="lf-active">
+        <option value="1" ${!loc || loc.active ? 'selected' : ''}>Active</option>
+        <option value="0" ${loc && !loc.active ? 'selected' : ''}>Inactive</option>
+      </select></div>
+    <div class="form-group"><label class="form-label">Assigned Staff</label>
+      ${buildOwnerPicker('lf-emps', loc?.emp_ids || [])}</div>`,
+    [{label: loc ? 'Save Changes' : 'Add Location', cls: 'btn-primary', fn: async () => {
+      const d = {
+        code: q('#lf-code').value.trim(), name: q('#lf-name').value.trim(),
+        address: q('#lf-address').value.trim(), type: q('#lf-type').value,
+        active: q('#lf-active').value === '1',
+        emp_ids: getOwnerPicked('lf-emps')
+      }
+      if (!d.code || !d.name) { toast('Code and name required', 'error'); return }
+      if (loc) { d.id = loc.id; await api.put(`/api/locations/${loc.id}`, d) }
+      else await api.post('/api/locations', d)
+      toast(loc ? 'Location updated' : 'Location added', 'ok')
+      closeModal(); await loadAll()
+    }}], true)
+}
+
+async function delLoc(id) {
+  const loc = S.locations.find(l => l.id === id)
+  if (!confirm(`Delete "${loc?.name}"?`)) return
+  await api.del(`/api/locations/${id}`)
+  toast('Location deleted', 'ok')
+  await loadAll()
+}
+
+</script>
 <script>
 // ── FY AUTO-DETECT ───────────────────────────────────────────────────────
 async function fyFromDate(dateStr) {
@@ -15,6 +112,103 @@ async function fyFromDate(dateStr) {
   } catch(e) { return null; }
 }
 function todayISO() { return new Date().toISOString().split('T')[0]; }
+
+// ── LOCATIONS ────────────────────────────────────────────────────────────────
+
+function renderLocations() {
+  const TYPES = ['HQ','Branch','Depot','Warehouse','Border Point','Other']
+  const COLORS = {HQ:'#0f2540',Branch:'#1d4ed8',Depot:'#047857',Warehouse:'#0891b2','Border Point':'#b45309',Other:'#475569'}
+  let html = `
+    <div class="section-head">
+      <div><h2>Locations</h2><p>${S.locations.length} locations configured</p></div>
+      <button class="btn btn-primary btn-sm" onclick="openLocForm()">+ Add Location</button>
+    </div>
+    <div class="grid-3" id="loc-grid">`
+
+  if (!S.locations.length) {
+    html += `<div style="grid-column:1/-1"><div class="card" style="padding:40px;text-align:center">
+      <p style="font-size:32px;margin-bottom:12px">📍</p>
+      <p class="font-black" style="font-size:16px">No locations yet</p>
+      <p class="text-sm text-muted mt-8">Add your branches, depots, and border points.</p>
+      <button class="btn btn-primary mt-16" onclick="openLocForm()">+ Add First Location</button>
+    </div></div>`
+  }
+
+  S.locations.forEach(loc => {
+    const empCount = (loc.emp_ids || []).length
+    const color = COLORS[loc.type] || '#475569'
+    const emps = (loc.emp_ids || []).map(id => S.employees.find(e => e.id === id)).filter(Boolean)
+    html += `
+    <div class="card" style="border-top:3px solid ${color};padding:16px;${!loc.active?'opacity:.55':''}">
+      <div class="flex items-start justify-between mb-12">
+        <div>
+          <span class="ref-badge" style="background:${color};color:#fff;font-size:11px">${esc(loc.code)}</span>
+          ${!loc.active ? '<span class="badge badge-gray" style="margin-left:6px">Inactive</span>' : ''}
+        </div>
+        <div class="flex gap-6">
+          <button class="btn-icon" onclick="openLocForm('${loc.id}')">✏</button>
+          <button class="btn-icon" style="color:var(--red)" onclick="delLoc('${loc.id}')">🗑</button>
+        </div>
+      </div>
+      <p class="font-black" style="font-size:15px">${esc(loc.name)}</p>
+      <p class="text-xs text-muted mt-4">${esc(loc.address || '—')}</p>
+      <div class="flex gap-8 mt-12" style="flex-wrap:wrap">
+        <span class="badge" style="background:${color}20;color:${color};border:1px solid ${color}40">${esc(loc.type)}</span>
+        <span class="badge badge-gray">${empCount} staff</span>
+      </div>
+      ${emps.length ? `<div class="mp-owners mt-10">${emps.map(e => `<span class="owner-chip" style="background:${dc(e.dept)}">${e.name.split(' ')[0]}</span>`).join('')}</div>` : '<p class="text-xs text-muted italic mt-8">No staff assigned</p>'}
+    </div>`
+  })
+
+  html += '</div>'
+  q('#tab-locations').innerHTML = html
+}
+
+function openLocForm(id) {
+  const loc = id ? S.locations.find(l => l.id === id) : null
+  const TYPES = ['HQ','Branch','Depot','Warehouse','Border Point','Other']
+
+  openModal(loc ? 'Edit Location' : 'Add Location', `
+    <div class="form-grid-2">
+      <div class="form-group"><label class="form-label">Location Code</label>
+        <input class="form-input" id="lf-code" value="${esc(loc?.code || '')}" placeholder="e.g. KTM-HQ"></div>
+      <div class="form-group"><label class="form-label">Type</label>
+        <select class="form-select" id="lf-type">${TYPES.map(t => `<option ${loc?.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Location Name</label>
+      <input class="form-input" id="lf-name" value="${esc(loc?.name || '')}" placeholder="e.g. Kathmandu Headquarters"></div>
+    <div class="form-group"><label class="form-label">Address</label>
+      <input class="form-input" id="lf-address" value="${esc(loc?.address || '')}" placeholder="Full address"></div>
+    <div class="form-group"><label class="form-label">Status</label>
+      <select class="form-select" id="lf-active">
+        <option value="1" ${!loc || loc.active ? 'selected' : ''}>Active</option>
+        <option value="0" ${loc && !loc.active ? 'selected' : ''}>Inactive</option>
+      </select></div>
+    <div class="form-group"><label class="form-label">Assigned Staff</label>
+      ${buildOwnerPicker('lf-emps', loc?.emp_ids || [])}</div>`,
+    [{label: loc ? 'Save Changes' : 'Add Location', cls: 'btn-primary', fn: async () => {
+      const d = {
+        code: q('#lf-code').value.trim(), name: q('#lf-name').value.trim(),
+        address: q('#lf-address').value.trim(), type: q('#lf-type').value,
+        active: q('#lf-active').value === '1',
+        emp_ids: getOwnerPicked('lf-emps')
+      }
+      if (!d.code || !d.name) { toast('Code and name required', 'error'); return }
+      if (loc) { d.id = loc.id; await api.put(`/api/locations/${loc.id}`, d) }
+      else await api.post('/api/locations', d)
+      toast(loc ? 'Location updated' : 'Location added', 'ok')
+      closeModal(); await loadAll()
+    }}], true)
+}
+
+async function delLoc(id) {
+  const loc = S.locations.find(l => l.id === id)
+  if (!confirm(`Delete "${loc?.name}"?`)) return
+  await api.del(`/api/locations/${id}`)
+  toast('Location deleted', 'ok')
+  await loadAll()
+}
+
 </script>
 <style>
 :root{
@@ -297,6 +491,7 @@ tbody tr:hover .row-actions{opacity:1}
     <button class="nav-tab" onclick="switchTab('master')">🔧 Master Setup</button>
     <button class="nav-tab" onclick="switchTab('data')">📁 Data Manager</button>
     <button class="nav-tab" onclick="switchTab('reports')">📈 Reports</button>
+    <button class="nav-tab" onclick="switchTab('locations')">📍 Locations</button>
       <button class="nav-tab" onclick="switchTab('org')">&#127970; Org &amp; Cascade</button>
   </div>
 </div>
@@ -335,7 +530,9 @@ tbody tr:hover .row-actions{opacity:1}
     </div>
     <div id="data-content"><div class="spinner"></div></div>
   </div>
-  <div id="tab-reports" class="tab-panel">
+  <div id="tab-locations" class="tab-panel"><div class="spinner"></div></div>
+
+<div id="tab-reports" class="tab-panel">
     <div class="sub-tabs">
       <button class="sub-tab active" onclick="switchReport('overview')">📊 Overview</button>
       <button class="sub-tab" onclick="switchReport('yoy')">📅 Year-on-Year</button>
@@ -370,6 +567,7 @@ tbody tr:hover .row-actions{opacity:1}
 <script>
 // ── STATE ────────────────────────────────────────────────────────────────────
 const S = {
+  locations:[],
   employees:[], mps:[], cps:[], roles:[], perf:[], cache:[], cascade:[], bsToday:{}, dashLayouts:[], sectors:[],
   locations:[], currentTab:'dashboard', teamView:'cards', masterSub:'mps',
   dataSub:'perf', reportSub:'overview', currentFY:'2081-82'
@@ -512,6 +710,7 @@ function renderCurrent() {
   else if(S.currentTab==='master') renderMaster()
   else if(S.currentTab==='data') renderData()
   else if(S.currentTab==='reports') renderReport()
+  else if(S.currentTab==='locations') renderLocations()
   else if(S.currentTab==='org') renderOrgTab()
 }
 function switchMaster(s) { S.masterSub=s; qq('#master-tabs .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderMaster() }
@@ -2826,32 +3025,41 @@ async function delLoc(id) {
 // ── LOCATION REPORT ───────────────────────────────────────────────────────────
 async function renderLocationReport() {
     setSpinner('report-content')
-    const [locData, secData] = await Promise.all([
-        api.get('/api/analytics/by_location?fy='+encodeURIComponent(S.currentFY)),
-        api.get('/api/analytics/by_sector?fy='+encodeURIComponent(S.currentFY))
-    ])
-    const locEntries = Object.entries(locData)
-    const secEntries = Object.entries(secData)
+    let locData = [], secData = []
+    try {
+        const [ld, sd] = await Promise.all([
+            api.get('/api/analytics/by_location?fy='+encodeURIComponent(S.currentFY)),
+            api.get('/api/analytics/by_sector?fy='+encodeURIComponent(S.currentFY))
+        ])
+        // API returns arrays; handle both array and legacy object responses
+        locData = Array.isArray(ld) ? ld : Object.values(ld)
+        secData = Array.isArray(sd) ? sd : Object.values(sd)
+    } catch(e) {
+        // Fallback: build from client-side S.locations and S.sectors data
+        locData = S.locations || []
+        secData = S.sectors || []
+    }
 
     let html = `<div class="section-head mb-16"><div>
         <h2>Performance by Location &amp; Sector &mdash; FY ${esc(S.currentFY)}</h2>
         <p>Employees can belong to multiple sectors and locations. Each bucket counts all assigned staff.</p>
     </div></div>`
 
-    // ── SECTOR COMPLIANCE (from real API, junction-table based) ──
+    // ── SECTOR COMPLIANCE ──
     html += `<div class="card mb-20">
         <div class="card-head"><p>By Sector / Department</p>
-          <span class="text-xs text-muted">${secEntries.length} sectors</span>
+          <span class="text-xs text-muted">${secData.length} sectors</span>
         </div>
         <div class="card-body"><div class="grid-4">`
-    secEntries.forEach(function(kv) {
-        const code=kv[0]; const s=kv[1]
-        const col = s.color || SECTOR_COLORS[code] || '#475569'
+    if (!secData.length) {
+        html += '<p class="text-sm text-muted italic">No sectors configured.</p>'
+    }
+    secData.forEach(function(s) {
+        const col = s.color || SECTOR_COLORS[s.code||s.name] || '#475569'
         const pct = s.total ? (s.compliant/s.total*100).toFixed(1) : null
         html += `<div class="compliance-card" style="border-left:4px solid ${col}">
             <div class="cc-title">
-                <span class="dept-badge" style="background:${col}">${esc(s.name||code)}</span>
-                <span class="flex-1 text-xs text-muted">${s.emp_count} staff</span>
+                <span class="dept-badge" style="background:${col}">${esc(s.name||s.code||'—')}</span>
                 <span class="cc-pct" style="color:${pct?(+pct>=95?'var(--green)':+pct>=80?'var(--amber)':'var(--red)'):'#94a3b8'}">${pct!==null?pct+'%':'—'}</span>
             </div>
             ${pct!==null?`<div class="cc-bar"><span class="cc-bar-c" style="width:${Math.min(+pct,100)}%;background:${+pct>=95?'var(--green)':+pct>=80?'var(--amber)':'var(--red)'}"></span></div>
@@ -2868,17 +3076,20 @@ async function renderLocationReport() {
     html += `<div class="card mb-20">
         <div class="card-head"><p>By Workstation Location</p></div>
         <div class="card-body"><div class="grid-3">`
-    if (entries.length === 0) {
+    if (!locData.length) {
         html += '<p class="text-sm text-muted italic">No locations configured. Add locations in Master Setup → Locations.</p>'
     } else {
-        entries.forEach(function(kv) {
-            const code=kv[0]; const loc=kv[1]
+        locData.forEach(function(loc) {
+            const col = LOC_COLORS[loc.type]||'#475569'
+            const pct_c  = loc.total ? +(loc.compliant/loc.total*100).toFixed(1) : 0
+            const pct_nc = loc.total ? +(loc.nc/loc.total*100).toFixed(1) : 0
             html += compCard({
-                ref:   code,
-                title: loc.name + ' · ' + loc.type,
-                tot:   loc.total, comp: loc.compliant, nc: loc.nc,
-                pct_c: loc.pct_c, pct_nc: loc.pct_nc,
-                color: LOC_COLORS[loc.type]||'#475569'
+                ref:   loc.code||loc.id,
+                title: (loc.name||'') + (loc.type?' · '+loc.type:''),
+                tot:   loc.total||0, comp: loc.compliant||0, nc: loc.nc||0,
+                pct_c: loc.pct!==undefined ? loc.pct : pct_c,
+                pct_nc: pct_nc,
+                color: col
             })
         })
     }
@@ -2892,20 +3103,19 @@ async function renderLocationReport() {
             <th>Location</th><th>Type</th><th>Address</th>
             <th>Sectors Present</th><th>Staff</th><th>Compliance</th>
         </tr></thead><tbody>`
-    if (entries.length === 0) {
+    if (!locData.length) {
         html += '<tr><td colspan="6" class="text-muted text-xs" style="text-align:center;padding:20px">No locations configured</td></tr>'
     } else {
-        entries.forEach(function(kv) {
-            const code=kv[0]; const loc=kv[1]
+        locData.forEach(function(loc) {
             const col  = LOC_COLORS[loc.type]||'#475569'
             const emps = (loc.emp_ids||[]).map(getEmp).filter(Boolean)
             const sects = [...new Set(emps.map(e=>e.dept))]
-            const pct  = loc.pct_c
+            const pct  = loc.total ? +(loc.compliant/loc.total*100).toFixed(1) : 0
             html += `<tr>
-                <td><span class="ref-badge" style="font-weight:900;background:#0f2540;color:#fff">${esc(code)}</span><br><span class="font-bold text-sm">${esc(loc.name)}</span></td>
-                <td><span class="badge" style="background:${col}20;color:${col}">${esc(loc.type)}</span></td>
+                <td><span class="ref-badge" style="font-weight:900;background:#0f2540;color:#fff">${esc(loc.code||loc.id)}</span><br><span class="font-bold text-sm">${esc(loc.name||'')}</span></td>
+                <td><span class="badge" style="background:${col}20;color:${col}">${esc(loc.type||'—')}</span></td>
                 <td class="text-xs text-muted">${esc(loc.address||'—')}</td>
-                <td>${sects.map(s=>`<span class="dept-badge" style="background:${SECTOR_COLORS[s]||'#475569'};font-size:9px;margin:2px">${s}</span>`).join('')}</td>
+                <td>${sects.map(s=>`<span class="dept-badge" style="background:${SECTOR_COLORS[s]||'#475569'};font-size:9px;margin:2px">${s}</span>`).join('')||'<span class="text-xs text-muted">—</span>'}</td>
                 <td>${emps.map(e=>`<span class="owner-chip" style="background:${dc(e.dept)}" onclick="openProfile('${e.id}',event)">${e.name.split(' ')[0]}</span>`).join('')||'<span class="text-xs text-muted">—</span>'}</td>
                 <td>${loc.total>0
                     ?`<span style="font-weight:900;color:${pct>=95?'var(--green)':pct>=80?'var(--amber)':'var(--red)'}">${pct}%</span> <span class="text-xs text-muted">(${loc.compliant}/${loc.total})</span>`
@@ -2927,15 +3137,16 @@ async function renderLocationReport() {
     destroyChart('loc-chart'); destroyChart('sec-chart')
 
     // Location bar chart
-    if (entries.length) {
+    const locWithData = locData.filter(function(l){return (l.total||0)>0})
+    if (locWithData.length) {
         charts['loc-chart'] = new Chart(q('#loc-chart'), {
             type:'bar',
             data:{
-                labels: entries.map(function(kv){return kv[1].name}),
+                labels: locWithData.map(function(l){return l.code||l.name}),
                 datasets:[{
                     label:'Compliance %',
-                    data:  entries.map(function(kv){return kv[1].pct_c}),
-                    backgroundColor: entries.map(function(kv){return LOC_COLORS[kv[1].type]||'#475569'}),
+                    data:  locWithData.map(function(l){return l.total?+(l.compliant/l.total*100).toFixed(1):0}),
+                    backgroundColor: locWithData.map(function(l){return LOC_COLORS[l.type]||'#475569'}),
                     borderRadius:8
                 }]
             },
@@ -2945,16 +3156,16 @@ async function renderLocationReport() {
     }
 
     // Sector bar chart
-    const sectEntries = Object.entries(sectors).filter(function(kv){return kv[1].tot>0})
-    if (sectEntries.length) {
+    const secWithData = secData.filter(function(s){return (s.total||0)>0})
+    if (secWithData.length) {
         charts['sec-chart'] = new Chart(q('#sec-chart'), {
             type:'bar',
             data:{
-                labels: sectEntries.map(function(kv){return kv[0]}),
+                labels: secWithData.map(function(s){return s.name||s.code}),
                 datasets:[{
                     label:'Compliance %',
-                    data:  sectEntries.map(function(kv){const s=kv[1];return s.tot?(s.comp/s.tot*100).toFixed(1):0}),
-                    backgroundColor: sectEntries.map(function(kv){return SECTOR_COLORS[kv[0]]||'#475569'}),
+                    data:  secWithData.map(function(s){return s.total?+(s.compliant/s.total*100).toFixed(1):0}),
+                    backgroundColor: secWithData.map(function(s){return s.color||SECTOR_COLORS[s.code||s.name]||'#475569'}),
                     borderRadius:8
                 }]
             },
@@ -4212,6 +4423,103 @@ async function deleteBuilderLayout() {
 
 // ── INIT ─────────────────────────────────────────────────────────────────────
 loadAll()
+
+// ── LOCATIONS ────────────────────────────────────────────────────────────────
+
+function renderLocations() {
+  const TYPES = ['HQ','Branch','Depot','Warehouse','Border Point','Other']
+  const COLORS = {HQ:'#0f2540',Branch:'#1d4ed8',Depot:'#047857',Warehouse:'#0891b2','Border Point':'#b45309',Other:'#475569'}
+  let html = `
+    <div class="section-head">
+      <div><h2>Locations</h2><p>${S.locations.length} locations configured</p></div>
+      <button class="btn btn-primary btn-sm" onclick="openLocForm()">+ Add Location</button>
+    </div>
+    <div class="grid-3" id="loc-grid">`
+
+  if (!S.locations.length) {
+    html += `<div style="grid-column:1/-1"><div class="card" style="padding:40px;text-align:center">
+      <p style="font-size:32px;margin-bottom:12px">📍</p>
+      <p class="font-black" style="font-size:16px">No locations yet</p>
+      <p class="text-sm text-muted mt-8">Add your branches, depots, and border points.</p>
+      <button class="btn btn-primary mt-16" onclick="openLocForm()">+ Add First Location</button>
+    </div></div>`
+  }
+
+  S.locations.forEach(loc => {
+    const empCount = (loc.emp_ids || []).length
+    const color = COLORS[loc.type] || '#475569'
+    const emps = (loc.emp_ids || []).map(id => S.employees.find(e => e.id === id)).filter(Boolean)
+    html += `
+    <div class="card" style="border-top:3px solid ${color};padding:16px;${!loc.active?'opacity:.55':''}">
+      <div class="flex items-start justify-between mb-12">
+        <div>
+          <span class="ref-badge" style="background:${color};color:#fff;font-size:11px">${esc(loc.code)}</span>
+          ${!loc.active ? '<span class="badge badge-gray" style="margin-left:6px">Inactive</span>' : ''}
+        </div>
+        <div class="flex gap-6">
+          <button class="btn-icon" onclick="openLocForm('${loc.id}')">✏</button>
+          <button class="btn-icon" style="color:var(--red)" onclick="delLoc('${loc.id}')">🗑</button>
+        </div>
+      </div>
+      <p class="font-black" style="font-size:15px">${esc(loc.name)}</p>
+      <p class="text-xs text-muted mt-4">${esc(loc.address || '—')}</p>
+      <div class="flex gap-8 mt-12" style="flex-wrap:wrap">
+        <span class="badge" style="background:${color}20;color:${color};border:1px solid ${color}40">${esc(loc.type)}</span>
+        <span class="badge badge-gray">${empCount} staff</span>
+      </div>
+      ${emps.length ? `<div class="mp-owners mt-10">${emps.map(e => `<span class="owner-chip" style="background:${dc(e.dept)}">${e.name.split(' ')[0]}</span>`).join('')}</div>` : '<p class="text-xs text-muted italic mt-8">No staff assigned</p>'}
+    </div>`
+  })
+
+  html += '</div>'
+  q('#tab-locations').innerHTML = html
+}
+
+function openLocForm(id) {
+  const loc = id ? S.locations.find(l => l.id === id) : null
+  const TYPES = ['HQ','Branch','Depot','Warehouse','Border Point','Other']
+
+  openModal(loc ? 'Edit Location' : 'Add Location', `
+    <div class="form-grid-2">
+      <div class="form-group"><label class="form-label">Location Code</label>
+        <input class="form-input" id="lf-code" value="${esc(loc?.code || '')}" placeholder="e.g. KTM-HQ"></div>
+      <div class="form-group"><label class="form-label">Type</label>
+        <select class="form-select" id="lf-type">${TYPES.map(t => `<option ${loc?.type === t ? 'selected' : ''}>${t}</option>`).join('')}</select></div>
+    </div>
+    <div class="form-group"><label class="form-label">Location Name</label>
+      <input class="form-input" id="lf-name" value="${esc(loc?.name || '')}" placeholder="e.g. Kathmandu Headquarters"></div>
+    <div class="form-group"><label class="form-label">Address</label>
+      <input class="form-input" id="lf-address" value="${esc(loc?.address || '')}" placeholder="Full address"></div>
+    <div class="form-group"><label class="form-label">Status</label>
+      <select class="form-select" id="lf-active">
+        <option value="1" ${!loc || loc.active ? 'selected' : ''}>Active</option>
+        <option value="0" ${loc && !loc.active ? 'selected' : ''}>Inactive</option>
+      </select></div>
+    <div class="form-group"><label class="form-label">Assigned Staff</label>
+      ${buildOwnerPicker('lf-emps', loc?.emp_ids || [])}</div>`,
+    [{label: loc ? 'Save Changes' : 'Add Location', cls: 'btn-primary', fn: async () => {
+      const d = {
+        code: q('#lf-code').value.trim(), name: q('#lf-name').value.trim(),
+        address: q('#lf-address').value.trim(), type: q('#lf-type').value,
+        active: q('#lf-active').value === '1',
+        emp_ids: getOwnerPicked('lf-emps')
+      }
+      if (!d.code || !d.name) { toast('Code and name required', 'error'); return }
+      if (loc) { d.id = loc.id; await api.put(`/api/locations/${loc.id}`, d) }
+      else await api.post('/api/locations', d)
+      toast(loc ? 'Location updated' : 'Location added', 'ok')
+      closeModal(); await loadAll()
+    }}], true)
+}
+
+async function delLoc(id) {
+  const loc = S.locations.find(l => l.id === id)
+  if (!confirm(`Delete "${loc?.name}"?`)) return
+  await api.del(`/api/locations/${id}`)
+  toast('Location deleted', 'ok')
+  await loadAll()
+}
+
 </script>
 
 </body>

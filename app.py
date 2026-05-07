@@ -1628,62 +1628,76 @@ def sector_api(sid):
     return jsonify({'ok': True})
 
 # ── LOCATIONS ─────────────────────────────────────────────────────────────
+
 @app.route('/api/locations', methods=['GET','POST'])
 def locations_api():
     db = get_db()
-    db.execute('''CREATE TABLE IF NOT EXISTS locations(
-        id TEXT PRIMARY KEY, code TEXT NOT NULL, name TEXT NOT NULL,
-        type TEXT DEFAULT 'Office', address TEXT DEFAULT '')''')
-    db.execute('''CREATE TABLE IF NOT EXISTS loc_emps(
-        loc_id TEXT, emp_id TEXT, PRIMARY KEY(loc_id,emp_id))''')
+    # Ensure table exists with correct schema
+    db.execute("""CREATE TABLE IF NOT EXISTS locations(
+        id TEXT PRIMARY KEY,
+        code TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        address TEXT DEFAULT '',
+        type TEXT DEFAULT 'Branch',
+        dept TEXT DEFAULT 'Ops',
+        active INTEGER DEFAULT 1
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS location_employees(
+        loc_id TEXT, emp_id TEXT, PRIMARY KEY(loc_id, emp_id)
+    )""")
+    # Add missing columns if upgrading from old schema
+    existing = [r[1] for r in db.execute("PRAGMA table_info(locations)").fetchall()]
+    if 'dept'   not in existing: db.execute("ALTER TABLE locations ADD COLUMN dept TEXT DEFAULT 'Ops'")
+    if 'active' not in existing: db.execute("ALTER TABLE locations ADD COLUMN active INTEGER DEFAULT 1")
+    db.commit()
+
     if request.method == 'GET':
         locs = R(db.execute("SELECT * FROM locations ORDER BY code").fetchall())
         for loc in locs:
-            # Try emp_locations (new schema) first, fall back to loc_emps
-            try:
-                loc['emp_ids'] = [r[0] for r in db.execute(
-                    "SELECT emp_id FROM emp_locations WHERE loc_id=? ORDER BY is_primary DESC", (loc['id'],)).fetchall()]
-            except Exception:
-                loc['emp_ids'] = [r['emp_id'] for r in db.execute(
-                    "SELECT emp_id FROM loc_emps WHERE loc_id=?", (loc['id'],))]
+            loc['emp_ids'] = [r['emp_id'] for r in db.execute(
+                "SELECT emp_id FROM location_employees WHERE loc_id=?", (loc['id'],))]
         return jsonify(locs)
-    d   = request.json or {}
-    lid = d.get('id') or uid()
-    db.execute("INSERT OR REPLACE INTO locations(id,code,name,type,address,sector_id,active) VALUES(?,?,?,?,?,?,?)",
-               (lid, d.get('code',''), d.get('name',''), d.get('type','Office'), d.get('address',''),
-                d.get('sector_id',''), d.get('active',1)))
-    # Write to emp_locations (new schema) and loc_emps (old) for compatibility
-    try:
-        db.execute("DELETE FROM emp_locations WHERE loc_id=?", (lid,))
-        for i, eid in enumerate(d.get('emp_ids',[])):
-            db.execute("INSERT OR IGNORE INTO emp_locations(emp_id,loc_id,is_primary) VALUES(?,?,?)", (eid, lid, 1 if i==0 else 0))
-    except Exception: pass
-    db.execute("DELETE FROM loc_emps WHERE loc_id=?", (lid,))
-    for eid in d.get('emp_ids',[]): db.execute("INSERT OR IGNORE INTO loc_emps VALUES(?,?)", (lid, eid))
+
+    d      = request.json or {}
+    lid    = d.get('id') or uid()
+    code   = d.get('code','').strip()
+    name   = d.get('name','').strip()
+    if not code or not name:
+        return jsonify({'error':'code and name required'}), 400
+    db.execute(
+        "INSERT OR REPLACE INTO locations(id,code,name,address,type,dept,active) VALUES(?,?,?,?,?,?,?)",
+        (lid, code, name, d.get('address',''), d.get('type','Branch'), d.get('dept','Ops'), 1 if d.get('active',True) else 0)
+    )
+    db.execute("DELETE FROM location_employees WHERE loc_id=?", (lid,))
+    for eid in d.get('emp_ids',[]):
+        db.execute("INSERT OR IGNORE INTO location_employees(loc_id,emp_id) VALUES(?,?)", (lid, eid))
     db.commit()
     return jsonify({'id': lid})
+
 
 @app.route('/api/locations/<lid>', methods=['PUT','DELETE'])
 def location_api(lid):
     db = get_db()
     if request.method == 'DELETE':
         db.execute("DELETE FROM locations WHERE id=?", (lid,))
-        try: db.execute("DELETE FROM emp_locations WHERE loc_id=?", (lid,))
-        except Exception: pass
-        db.execute("DELETE FROM loc_emps WHERE loc_id=?", (lid,))
-        db.commit(); return jsonify({'ok': True})
-    d = request.json or {}
-    db.execute("UPDATE locations SET code=?,name=?,type=?,address=? WHERE id=?",
-               (d.get('code',''), d.get('name',''), d.get('type','Office'), d.get('address',''), lid))
-    # Write to both junction tables
-    try:
-        db.execute("DELETE FROM emp_locations WHERE loc_id=?", (lid,))
-        for i, eid in enumerate(d.get('emp_ids',[])):
-            db.execute("INSERT OR IGNORE INTO emp_locations(emp_id,loc_id,is_primary) VALUES(?,?,?)", (eid, lid, 1 if i==0 else 0))
-    except Exception: pass
-    db.execute("DELETE FROM loc_emps WHERE loc_id=?", (lid,))
-    for eid in d.get('emp_ids',[]): db.execute("INSERT OR IGNORE INTO loc_emps VALUES(?,?)", (lid, eid))
-    db.commit(); return jsonify({'ok': True})
+        db.execute("DELETE FROM location_employees WHERE loc_id=?", (lid,))
+        db.commit()
+        return jsonify({'ok': True})
+    d      = request.json or {}
+    code   = d.get('code','').strip()
+    name   = d.get('name','').strip()
+    if not code or not name:
+        return jsonify({'error':'code and name required'}), 400
+    db.execute(
+        "UPDATE locations SET code=?,name=?,address=?,type=?,dept=?,active=? WHERE id=?",
+        (code, name, d.get('address',''), d.get('type','Branch'), d.get('dept','Ops'), 1 if d.get('active',True) else 0, lid)
+    )
+    db.execute("DELETE FROM location_employees WHERE loc_id=?", (lid,))
+    for eid in d.get('emp_ids',[]):
+        db.execute("INSERT OR IGNORE INTO location_employees(loc_id,emp_id) VALUES(?,?)", (lid, eid))
+    db.commit()
+    return jsonify({'ok': True})
+
 
 # ── BULK DELETES ───────────────────────────────────────────────────────────
 @app.route('/api/perf/bulk_delete', methods=['POST'])

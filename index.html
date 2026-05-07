@@ -516,6 +516,7 @@ function renderCurrent() {
   else if(S.currentTab==='data') renderData()
   else if(S.currentTab==='reports') renderReport()
   else if(S.currentTab==='org') renderOrgTab()
+  else if(S.currentTab==='locations') renderLocations()
 }
 function switchMaster(s) { S.masterSub=s; qq('#master-tabs .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderMaster() }
 function switchData(s) { S.dataSub=s; qq('#tab-data .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderData() }

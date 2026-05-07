@@ -297,7 +297,7 @@ tbody tr:hover .row-actions{opacity:1}
     <button class="nav-tab" onclick="switchTab('master')">🔧 Master Setup</button>
     <button class="nav-tab" onclick="switchTab('data')">📁 Data Manager</button>
     <button class="nav-tab" onclick="switchTab('reports')">📈 Reports</button>
-    <button class="nav-tab" onclick="switchTab('locations')">📍 Locations</button>
+    
       <button class="nav-tab" onclick="switchTab('org')">&#127970; Org &amp; Cascade</button>
   </div>
 </div>
@@ -324,6 +324,7 @@ tbody tr:hover .row-actions{opacity:1}
       <button class="sub-tab" onclick="switchMaster('roles')">Role Templates</button>
       <button class="sub-tab" onclick="switchMaster('links')">Role Assignments</button>
 			<button class="sub-tab" onclick="switchMaster('locations')">&#128205; Locations</button>
+      <button class="sub-tab" onclick="switchMaster('levels')">⭐ Emp Levels</button>
       <button class="sub-tab" onclick="switchMaster('dashboard_builder')">&#128196; Dashboard Builder</button>
     </div>
     <div id="master-content"><div class="spinner"></div></div>
@@ -865,6 +866,7 @@ function renderMaster() {
   else if(S.masterSub==='cps') renderCPs()
   else if(S.masterSub==='roles') renderRoles()
   else if(S.masterSub==='locations') renderLocations()
+  else if(S.masterSub==='levels') renderLevels()
   else if(S.masterSub==='sectors') renderSectors()
   else if(S.masterSub==='dashboard_builder') renderDashboardBuilder()
   else renderLinks()
@@ -932,7 +934,7 @@ function renderMPs() {
   html += '</div>'
   q('#master-content').innerHTML = html
 }
-function filterMPs(){const s=(q('#mp-search')?.value||'').toLowerCase();qq('[data-s]').forEach(el=>el.style.display=el.dataset.s.toLowerCase().includes(s)?'':'none')}
+function filterMPs(){const s=(q('#mp-search')?.value||'').toLowerCase();qq('[data-s]').forEach(el=>el.style.display=(el.dataset.s+' '+(el.dataset.r||'')).toLowerCase().includes(s)?'':'none')}
 function openMPForm(id){
   const mp=id?getMP(id):null
   const FREQS=['Daily','Weekly','Fortnightly','Monthly','Quarterly']
@@ -1027,7 +1029,7 @@ function renderCPs() {
   html += '</tbody></table></div>'
   q('#master-content').innerHTML = html
 }
-function filterCPs(){const s=(q('#cp-search')?.value||'').toLowerCase(),mp=q('#cp-mp-filter')?.value||'';qq('#cp-tbody tr').forEach(tr=>tr.style.display=(tr.dataset.cs?.toLowerCase().includes(s)&&(!mp||tr.dataset.cm===mp))?'':'none')}
+function filterCPs(){const s=(q('#cp-search')?.value||'').toLowerCase(),mp=q('#cp-mp-filter')?.value||'';qq('#cp-tbody tr').forEach(tr=>tr.style.display=((tr.dataset.cs+' '+(tr.dataset.cr||'')).toLowerCase().includes(s)&&(!mp||tr.dataset.cm===mp))?'':'none')}
 function openCPForm(id){
   const cp=id?getCP(id):null
   const FREQS=['Daily','Weekly','Fortnightly','Monthly','Quarterly']
@@ -2652,6 +2654,30 @@ async function delSector(id,name){
 
 
 // ── RENDER LOCATIONS TAB ──────────────────────────────────────────────────────
+
+function renderLevels(){
+  const defs=[{l:1,label:'Head of Department',col:'#0f2540'},{l:2,label:'Team Lead / Manager',col:'#1d4ed8'},{l:3,label:'Operations Staff',col:'#047857'}]
+  let html='<div class="card"><div class="card-head"><p>Employee Levels</p></div><div class="card-body">'
+  html+='<p style="font-size:12px;color:var(--muted);margin-bottom:16px">Levels control hierarchy, rollup scores and org tree depth. Assign via Employee edit form.</p>'
+  html+='<div class="grid-3">'
+  defs.forEach(function(d){
+    const emps=S.employees.filter(function(e){return e.level===d.l})
+    html+='<div class="stat-box" style="border-top:4px solid '+d.col+';text-align:left">'
+    html+='<div class="val" style="color:'+d.col+'">'+emps.length+'</div>'
+    html+='<div class="lbl">Level '+d.l+'</div><div class="sub" style="margin-bottom:12px">'+d.label+'</div>'
+    if(emps.length){
+      emps.forEach(function(e){
+        html+='<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--border)">'
+        html+='<div class="avatar avatar-sm" style="background:'+d.col+';flex-shrink:0">'+av(e.name)+'</div>'
+        html+='<div><div style="font-size:12px;font-weight:600">'+esc(e.name)+'</div>'
+        html+='<div style="font-size:10px;color:var(--muted)">'+esc(e.emp_code||'')+' &middot; '+esc(e.dept||'')+'</div></div></div>'
+      })
+    } else { html+='<p style="font-size:11px;color:var(--muted);font-style:italic">None assigned</p>' }
+    html+='</div>'
+  })
+  html+='</div></div></div>'
+  q('#master-content').innerHTML=html
+}
 function renderLocations() {
     const TYPES = ['Office','Border','Warehouse','Depot','Branch']
 
@@ -2722,11 +2748,21 @@ function renderLocations() {
         <div><h2>Workstation Locations</h2><p>Physical sites where staff operate</p></div>
     </div>`
 
-    if (S.locations.length === 0) {
+    const _lt=window._locTypeFilter||''
+    const _ltypes=[...new Set((S.locations||[]).map(l=>l.type).filter(Boolean))]
+    if(_ltypes.length>1){
+      html+='<div style="margin-bottom:12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">'
+      html+='<span style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Type:</span>'
+      html+='<button class="btn btn-sm '+(_lt===''?'btn-primary':'btn-ghost')+'" onclick="window._locTypeFilter=\'\';renderLocations()">All</button>'
+      _ltypes.forEach(function(t){html+='<button class="btn btn-sm '+(_lt===t?'btn-primary':'btn-ghost')+'" onclick="window._locTypeFilter=\''+t+'\';renderLocations()">'+esc(t)+'</button>'})
+      html+='</div>'
+    }
+    const _filtLocs=_lt?S.locations.filter(l=>l.type===_lt):S.locations
+    if (_filtLocs.length === 0) {
         html += `<div class="info-box"><p>No locations configured yet. Click <strong>+ New Location</strong> above to add your first workstation.</p></div>`
     } else {
         html += '<div class="grid-3">'
-        S.locations.forEach(function(loc) {
+        _filtLocs.forEach(function(loc) {
             const emps = (loc.emp_ids||[]).map(getEmp).filter(Boolean)
             const col  = LOC_COLORS[loc.type] || '#475569'
             // sector breakdown for this location
@@ -3347,7 +3383,9 @@ async function renderOrgTree(){
   html+='<select class="form-select" id="ot-loc" style="width:150px"><option value="">All Locations</option>'+locOpts+'</select></div>'
   html+='<div><label class="form-label" style="margin-bottom:3px">Sector</label>'
   html+='<select class="form-select" id="ot-sect" style="width:130px"><option value="">All Sectors</option>'+sectOpts+'</select></div>'
-  html+='<button class="btn btn-primary btn-sm" onclick="loadOrgTree()">Load Tree</button>'
+  html+='<select class="form-select" id="ot-fy" style="width:110px"><option value="">All FY</option>'+(S.fyCache||[]).map(f=>'<option value="'+esc(f.fy)+'">'+esc(f.fy)+'</option>').join('')+'</select>'
+  html+='<select class="form-select" id="ot-fy2" style="width:130px"><option value="">Compare FY…</option>'+(S.fyCache||[]).map(f=>'<option value="'+esc(f.fy)+'">'+esc(f.fy)+'</option>').join('')+'</select>'
+  html+='<button class="btn btn-primary btn-sm" onclick="loadOrgTree()">&#127795; Load Tree</button>'
   html+='<button class="btn btn-ghost btn-sm" onclick="openAddEmpToOrg()">+ Add Person</button>'
   html+='</div></div></div>'
   html+='<div id="org-tree-wrap"><div class="info-box"><p>Click <strong>Load Tree</strong> to view the live organisation with rollup compliance scores at every level.</p></div></div>'
@@ -3355,16 +3393,25 @@ async function renderOrgTree(){
 }
 
 async function loadOrgTree(){
-  const fy=q('#ot-fy')?.value||S.currentFY
+  const fy=q('#ot-fy')?.value||''
+  const fy2=q('#ot-fy2')?.value||''
   const loc=q('#ot-loc')?.value||'', sect=q('#ot-sect')?.value||''
   q('#org-tree-wrap').innerHTML='<div class="spinner"></div>'
   const url='/api/org/tree?fy='+encodeURIComponent(fy)+'&loc='+encodeURIComponent(loc)+'&sect='+encodeURIComponent(sect)
   orgTreeData=await api.get(url)
   if(!orgTreeData||!orgTreeData.length){
-    q('#org-tree-wrap').innerHTML='<p class="text-sm text-muted italic" style="padding:20px">No employees found.</p>'
+    q('#org-tree-wrap').innerHTML='<p class="text-sm text-muted italic" style="padding:20px">No employees found. Select a FY or clear filters and try again.</p>'
     return
   }
-  q('#org-tree-wrap').innerHTML='<div style="overflow-x:auto;padding:16px">'+drawOrgLevel(orgTreeData,0)+'</div>'
+  if(fy2){
+    const data2=await api.get('/api/org/tree?fy='+encodeURIComponent(fy2)+'&loc='+encodeURIComponent(loc)+'&sect='+encodeURIComponent(sect))
+    q('#org-tree-wrap').innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px;overflow-x:auto">'
+      +'<div><div style="background:#0f2540;color:#fff;padding:6px 14px;border-radius:8px;font-size:11px;font-weight:700;font-family:Syne,sans-serif;margin-bottom:12px;display:inline-block">FY '+esc(fy||'All')+'</div><div style="overflow-x:auto">'+drawOrgLevel(orgTreeData,0)+'</div></div>'
+      +'<div><div style="background:#6d28d9;color:#fff;padding:6px 14px;border-radius:8px;font-size:11px;font-weight:700;font-family:Syne,sans-serif;margin-bottom:12px;display:inline-block">FY '+esc(fy2)+'</div><div style="overflow-x:auto">'+drawOrgLevel(data2||[],0)+'</div></div>'
+      +'</div>'
+  } else {
+    q('#org-tree-wrap').innerHTML='<div style="overflow-x:auto;padding:16px">'+drawOrgLevel(orgTreeData,0)+'</div>'
+  }
 }
 
 function pctCol(p){return p===null||p===undefined?'#94a3b8':p>=95?'#16a34a':p>=80?'#d97706':'#dc2626'}

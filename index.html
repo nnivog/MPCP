@@ -62,20 +62,27 @@ async function delLoc(id) {
 
 
 
+
 // ── LOCATIONS ────────────────────────────────────────────────────────────────
 
 function renderLocations() {
-  var TCOLOR = {HQ:'#0f2540',Branch:'#1d4ed8',Depot:'#047857',Warehouse:'#0891b2','Border Point':'#b45309',Other:'#475569'};
-  var html = '<div class="section-head"><div><h2>Locations</h2><p>' + S.locations.length + ' location(s) configured</p></div>' +
-    '<button class="btn btn-primary btn-sm" onclick="openLocForm()">+ Add Location</button></div>';
+  var TCOLOR = {
+    'HQ':'#0f2540','Branch':'#1d4ed8','Depot':'#047857',
+    'Warehouse':'#0891b2','Border Point':'#b45309','Other':'#475569'
+  };
+  var html = '<div class="section-head">' +
+    '<div><h2>Locations</h2><p>' + S.locations.length + ' location(s) configured</p></div>' +
+    '<button class="btn btn-primary btn-sm" onclick="openLocForm()">+ Add Location</button>' +
+    '</div>';
 
   if (!S.locations.length) {
     html += '<div class="card" style="padding:48px;text-align:center">' +
       '<p style="font-size:36px;margin-bottom:12px">&#128205;</p>' +
       '<p class="font-black" style="font-size:16px">No locations yet</p>' +
       '<p class="text-sm text-muted mt-8">Add your branches, depots, and border points.</p>' +
-      '<button class="btn btn-primary mt-16" onclick="openLocForm()">+ Add First Location</button></div>';
-    q('tab-locations').innerHTML = html;
+      '<button class="btn btn-primary mt-16" onclick="openLocForm()">+ Add First Location</button>' +
+      '</div>';
+    document.getElementById('tab-locations').innerHTML = html;
     return;
   }
 
@@ -83,39 +90,50 @@ function renderLocations() {
   S.locations.forEach(function(loc) {
     var color   = TCOLOR[loc.type] || '#475569';
     var opacity = loc.active ? '1' : '0.55';
-    var emps    = (loc.emp_ids || []).map(function(id){ return S.employees.find(function(e){ return e.id===id; }); }).filter(Boolean);
-    var chips   = emps.map(function(e){ return '<span class="owner-chip" style="background:' + dc(e.dept) + '">' + e.name.split(' ')[0] + '</span>'; }).join('');
-    html +=
-      '<div class="card" style="border-top:3px solid ' + color + ';padding:16px;opacity:' + opacity + '">' +
-        '<div class="flex items-start justify-between mb-12">' +
-          '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
-            '<span class="ref-badge" style="background:' + color + ';color:#fff;font-size:11px">' + esc(loc.code) + '</span>' +
-            '<span class="badge" style="background:' + color + '22;color:' + color + '">' + esc(loc.type) + '</span>' +
-            (loc.dept ? '<span class="dept-badge" style="background:' + dc(loc.dept) + '">' + esc(loc.dept) + '</span>' : '') +
-            (!loc.active ? '<span class="badge badge-gray">Inactive</span>' : '') +
-          '</div>' +
-          '<div class="flex gap-6">' +
-            '<button class="btn-icon" onclick="openLocForm(\'' + loc.id + '\')">&#9998;</button>' +
-            '<button class="btn-icon" style="color:var(--red)" onclick="delLoc(\'' + loc.id + '\')">&#128465;</button>' +
-          '</div>' +
+    var emps    = (loc.emp_ids || []).map(function(id) {
+      return S.employees.find(function(e) { return e.id === id; });
+    }).filter(Boolean);
+    var chips = emps.map(function(e) {
+      return '<span class="owner-chip" style="background:' + dc(e.dept) + '">' + e.name.split(' ')[0] + '</span>';
+    }).join('');
+
+    html += '<div class="card" style="border-top:3px solid ' + color + ';padding:16px;opacity:' + opacity + '">' +
+      '<div class="flex items-start justify-between mb-12">' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+          '<span class="ref-badge" style="background:' + color + ';color:#fff;font-size:11px">' + esc(loc.code) + '</span>' +
+          '<span class="badge" style="background:' + color + '22;color:' + color + '">' + esc(loc.type) + '</span>' +
+          (loc.dept ? '<span class="dept-badge" style="background:' + dc(loc.dept) + '">' + esc(loc.dept) + '</span>' : '') +
+          (!loc.active ? '<span class="badge badge-gray">Inactive</span>' : '') +
         '</div>' +
-        '<p class="font-black" style="font-size:15px">' + esc(loc.name) + '</p>' +
-        '<p class="text-xs text-muted mt-4">' + esc(loc.address || '—') + '</p>' +
-        '<p class="text-xxs text-muted mt-8">' + emps.length + ' staff assigned</p>' +
-        (chips ? '<div class="mp-owners mt-8">' + chips + '</div>' : '') +
-      '</div>';
+        '<div class="flex gap-6">' +
+          '<button class="btn-icon" onclick="openLocForm('' + loc.id + '')">&#9998;</button>' +
+          '<button class="btn-icon" style="color:var(--red)" onclick="delLoc('' + loc.id + '')">&#128465;</button>' +
+        '</div>' +
+      '</div>' +
+      '<p class="font-black" style="font-size:15px">' + esc(loc.name) + '</p>' +
+      '<p class="text-xs text-muted mt-4">' + esc(loc.address || '-') + '</p>' +
+      '<p class="text-xxs text-muted mt-8">' + emps.length + ' staff assigned</p>' +
+      (chips ? '<div class="mp-owners mt-8">' + chips + '</div>' : '') +
+    '</div>';
   });
   html += '</div>';
-  q('tab-locations').innerHTML = html;
+  document.getElementById('tab-locations').innerHTML = html;
 }
 
 function openLocForm(id) {
-  var loc   = id ? S.locations.find(function(l){ return l.id===id; }) : null;
+  var loc   = id ? S.locations.find(function(l) { return l.id === id; }) : null;
   var TYPES = ['HQ','Branch','Depot','Warehouse','Border Point','Other'];
   var DEPTS = ['HOD','Vehicle','Registration','Warehouse','Stock','Ops','Finance','HR'];
 
-  var typeOpts = TYPES.map(function(t){ return '<option value="' + t + '"' + (loc && loc.type===t ? ' selected' : '') + '>' + t + '</option>'; }).join('');
-  var deptOpts = DEPTS.map(function(d){ return '<option value="' + d + '"' + (loc && loc.dept===d ? ' selected' : '') + '>' + d + '</option>'; }).join('');
+  var typeOpts = TYPES.map(function(t) {
+    return '<option value="' + t + '"' + (loc && loc.type === t ? ' selected' : '') + '>' + t + '</option>';
+  }).join('');
+
+  var deptOpts = DEPTS.map(function(d) {
+    return '<option value="' + d + '"' + (loc && loc.dept === d ? ' selected' : '') + '>' + d + '</option>';
+  }).join('');
+
+  var selEmps = loc ? (loc.emp_ids || []) : [];
 
   var body =
     '<div class="form-grid-2">' +
@@ -127,7 +145,7 @@ function openLocForm(id) {
     '<div class="form-group"><label class="form-label">Location Name</label>' +
       '<input class="form-input" id="lf-name" value="' + esc(loc ? loc.name : '') + '" placeholder="e.g. Kathmandu Headquarters"></div>' +
     '<div class="form-group"><label class="form-label">Address</label>' +
-      '<input class="form-input" id="lf-address" value="' + esc(loc ? (loc.address||'') : '') + '" placeholder="Full address"></div>' +
+      '<input class="form-input" id="lf-address" value="' + esc(loc ? (loc.address || '') : '') + '" placeholder="Full address"></div>' +
     '<div class="form-grid-2">' +
       '<div class="form-group"><label class="form-label">Department / Sector</label>' +
         '<select class="form-select" id="lf-dept">' + deptOpts + '</select></div>' +
@@ -138,46 +156,47 @@ function openLocForm(id) {
         '</select></div>' +
     '</div>' +
     '<div class="form-group"><label class="form-label">Assigned Staff</label>' +
-      buildOwnerPicker('lf-emps', loc ? (loc.emp_ids||[]) : []) +
+      buildOwnerPicker('lf-emps', selEmps) +
     '</div>';
 
   openModal(loc ? 'Edit Location' : 'Add Location', body, [{
     label: loc ? 'Save Changes' : 'Add Location',
     cls: 'btn-primary',
     fn: function() {
-      var code = q('lf-code').value.trim();
-      var name = q('lf-name').value.trim();
+      var code = document.getElementById('lf-code').value.trim();
+      var name = document.getElementById('lf-name').value.trim();
       if (!code || !name) { toast('Code and name are required', 'error'); return; }
       var d = {
         code:    code,
         name:    name,
-        address: q('lf-address').value.trim(),
-        type:    q('lf-type').value,
-        dept:    q('lf-dept').value,
-        active:  q('lf-active').value === '1',
+        address: document.getElementById('lf-address').value.trim(),
+        type:    document.getElementById('lf-type').value,
+        dept:    document.getElementById('lf-dept').value,
+        active:  document.getElementById('lf-active').value === '1',
         emp_ids: getOwnerPicked('lf-emps')
       };
-      var req = loc
+      var promise = loc
         ? api.put('/api/locations/' + loc.id, Object.assign({id: loc.id}, d))
         : api.post('/api/locations', d);
-      req.then(function(res) {
+      promise.then(function(res) {
         if (res.error) { toast('Error: ' + res.error, 'error'); return; }
         toast(loc ? 'Location updated' : 'Location added', 'ok');
         closeModal();
         loadAll();
-      }).catch(function(e) {
-        toast('Server error: ' + e.message, 'error');
+      }).catch(function(err) {
+        toast('Server error: ' + err.message, 'error');
       });
     }
   }], true);
 }
 
-async function delLoc(id) {
-  var loc = S.locations.find(function(l){ return l.id===id; });
+function delLoc(id) {
+  var loc = S.locations.find(function(l) { return l.id === id; });
   if (!confirm('Delete "' + (loc ? loc.name : id) + '"?')) return;
-  await api.del('/api/locations/' + id);
-  toast('Location deleted', 'ok');
-  loadAll();
+  api.del('/api/locations/' + id).then(function() {
+    toast('Location deleted', 'ok');
+    loadAll();
+  });
 }
 
 </script>
@@ -249,20 +268,27 @@ async function delLoc(id) {
 
 
 
+
 // ── LOCATIONS ────────────────────────────────────────────────────────────────
 
 function renderLocations() {
-  var TCOLOR = {HQ:'#0f2540',Branch:'#1d4ed8',Depot:'#047857',Warehouse:'#0891b2','Border Point':'#b45309',Other:'#475569'};
-  var html = '<div class="section-head"><div><h2>Locations</h2><p>' + S.locations.length + ' location(s) configured</p></div>' +
-    '<button class="btn btn-primary btn-sm" onclick="openLocForm()">+ Add Location</button></div>';
+  var TCOLOR = {
+    'HQ':'#0f2540','Branch':'#1d4ed8','Depot':'#047857',
+    'Warehouse':'#0891b2','Border Point':'#b45309','Other':'#475569'
+  };
+  var html = '<div class="section-head">' +
+    '<div><h2>Locations</h2><p>' + S.locations.length + ' location(s) configured</p></div>' +
+    '<button class="btn btn-primary btn-sm" onclick="openLocForm()">+ Add Location</button>' +
+    '</div>';
 
   if (!S.locations.length) {
     html += '<div class="card" style="padding:48px;text-align:center">' +
       '<p style="font-size:36px;margin-bottom:12px">&#128205;</p>' +
       '<p class="font-black" style="font-size:16px">No locations yet</p>' +
       '<p class="text-sm text-muted mt-8">Add your branches, depots, and border points.</p>' +
-      '<button class="btn btn-primary mt-16" onclick="openLocForm()">+ Add First Location</button></div>';
-    q('tab-locations').innerHTML = html;
+      '<button class="btn btn-primary mt-16" onclick="openLocForm()">+ Add First Location</button>' +
+      '</div>';
+    document.getElementById('tab-locations').innerHTML = html;
     return;
   }
 
@@ -270,39 +296,50 @@ function renderLocations() {
   S.locations.forEach(function(loc) {
     var color   = TCOLOR[loc.type] || '#475569';
     var opacity = loc.active ? '1' : '0.55';
-    var emps    = (loc.emp_ids || []).map(function(id){ return S.employees.find(function(e){ return e.id===id; }); }).filter(Boolean);
-    var chips   = emps.map(function(e){ return '<span class="owner-chip" style="background:' + dc(e.dept) + '">' + e.name.split(' ')[0] + '</span>'; }).join('');
-    html +=
-      '<div class="card" style="border-top:3px solid ' + color + ';padding:16px;opacity:' + opacity + '">' +
-        '<div class="flex items-start justify-between mb-12">' +
-          '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
-            '<span class="ref-badge" style="background:' + color + ';color:#fff;font-size:11px">' + esc(loc.code) + '</span>' +
-            '<span class="badge" style="background:' + color + '22;color:' + color + '">' + esc(loc.type) + '</span>' +
-            (loc.dept ? '<span class="dept-badge" style="background:' + dc(loc.dept) + '">' + esc(loc.dept) + '</span>' : '') +
-            (!loc.active ? '<span class="badge badge-gray">Inactive</span>' : '') +
-          '</div>' +
-          '<div class="flex gap-6">' +
-            '<button class="btn-icon" onclick="openLocForm(\'' + loc.id + '\')">&#9998;</button>' +
-            '<button class="btn-icon" style="color:var(--red)" onclick="delLoc(\'' + loc.id + '\')">&#128465;</button>' +
-          '</div>' +
+    var emps    = (loc.emp_ids || []).map(function(id) {
+      return S.employees.find(function(e) { return e.id === id; });
+    }).filter(Boolean);
+    var chips = emps.map(function(e) {
+      return '<span class="owner-chip" style="background:' + dc(e.dept) + '">' + e.name.split(' ')[0] + '</span>';
+    }).join('');
+
+    html += '<div class="card" style="border-top:3px solid ' + color + ';padding:16px;opacity:' + opacity + '">' +
+      '<div class="flex items-start justify-between mb-12">' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+          '<span class="ref-badge" style="background:' + color + ';color:#fff;font-size:11px">' + esc(loc.code) + '</span>' +
+          '<span class="badge" style="background:' + color + '22;color:' + color + '">' + esc(loc.type) + '</span>' +
+          (loc.dept ? '<span class="dept-badge" style="background:' + dc(loc.dept) + '">' + esc(loc.dept) + '</span>' : '') +
+          (!loc.active ? '<span class="badge badge-gray">Inactive</span>' : '') +
         '</div>' +
-        '<p class="font-black" style="font-size:15px">' + esc(loc.name) + '</p>' +
-        '<p class="text-xs text-muted mt-4">' + esc(loc.address || '—') + '</p>' +
-        '<p class="text-xxs text-muted mt-8">' + emps.length + ' staff assigned</p>' +
-        (chips ? '<div class="mp-owners mt-8">' + chips + '</div>' : '') +
-      '</div>';
+        '<div class="flex gap-6">' +
+          '<button class="btn-icon" onclick="openLocForm('' + loc.id + '')">&#9998;</button>' +
+          '<button class="btn-icon" style="color:var(--red)" onclick="delLoc('' + loc.id + '')">&#128465;</button>' +
+        '</div>' +
+      '</div>' +
+      '<p class="font-black" style="font-size:15px">' + esc(loc.name) + '</p>' +
+      '<p class="text-xs text-muted mt-4">' + esc(loc.address || '-') + '</p>' +
+      '<p class="text-xxs text-muted mt-8">' + emps.length + ' staff assigned</p>' +
+      (chips ? '<div class="mp-owners mt-8">' + chips + '</div>' : '') +
+    '</div>';
   });
   html += '</div>';
-  q('tab-locations').innerHTML = html;
+  document.getElementById('tab-locations').innerHTML = html;
 }
 
 function openLocForm(id) {
-  var loc   = id ? S.locations.find(function(l){ return l.id===id; }) : null;
+  var loc   = id ? S.locations.find(function(l) { return l.id === id; }) : null;
   var TYPES = ['HQ','Branch','Depot','Warehouse','Border Point','Other'];
   var DEPTS = ['HOD','Vehicle','Registration','Warehouse','Stock','Ops','Finance','HR'];
 
-  var typeOpts = TYPES.map(function(t){ return '<option value="' + t + '"' + (loc && loc.type===t ? ' selected' : '') + '>' + t + '</option>'; }).join('');
-  var deptOpts = DEPTS.map(function(d){ return '<option value="' + d + '"' + (loc && loc.dept===d ? ' selected' : '') + '>' + d + '</option>'; }).join('');
+  var typeOpts = TYPES.map(function(t) {
+    return '<option value="' + t + '"' + (loc && loc.type === t ? ' selected' : '') + '>' + t + '</option>';
+  }).join('');
+
+  var deptOpts = DEPTS.map(function(d) {
+    return '<option value="' + d + '"' + (loc && loc.dept === d ? ' selected' : '') + '>' + d + '</option>';
+  }).join('');
+
+  var selEmps = loc ? (loc.emp_ids || []) : [];
 
   var body =
     '<div class="form-grid-2">' +
@@ -314,7 +351,7 @@ function openLocForm(id) {
     '<div class="form-group"><label class="form-label">Location Name</label>' +
       '<input class="form-input" id="lf-name" value="' + esc(loc ? loc.name : '') + '" placeholder="e.g. Kathmandu Headquarters"></div>' +
     '<div class="form-group"><label class="form-label">Address</label>' +
-      '<input class="form-input" id="lf-address" value="' + esc(loc ? (loc.address||'') : '') + '" placeholder="Full address"></div>' +
+      '<input class="form-input" id="lf-address" value="' + esc(loc ? (loc.address || '') : '') + '" placeholder="Full address"></div>' +
     '<div class="form-grid-2">' +
       '<div class="form-group"><label class="form-label">Department / Sector</label>' +
         '<select class="form-select" id="lf-dept">' + deptOpts + '</select></div>' +
@@ -325,46 +362,47 @@ function openLocForm(id) {
         '</select></div>' +
     '</div>' +
     '<div class="form-group"><label class="form-label">Assigned Staff</label>' +
-      buildOwnerPicker('lf-emps', loc ? (loc.emp_ids||[]) : []) +
+      buildOwnerPicker('lf-emps', selEmps) +
     '</div>';
 
   openModal(loc ? 'Edit Location' : 'Add Location', body, [{
     label: loc ? 'Save Changes' : 'Add Location',
     cls: 'btn-primary',
     fn: function() {
-      var code = q('lf-code').value.trim();
-      var name = q('lf-name').value.trim();
+      var code = document.getElementById('lf-code').value.trim();
+      var name = document.getElementById('lf-name').value.trim();
       if (!code || !name) { toast('Code and name are required', 'error'); return; }
       var d = {
         code:    code,
         name:    name,
-        address: q('lf-address').value.trim(),
-        type:    q('lf-type').value,
-        dept:    q('lf-dept').value,
-        active:  q('lf-active').value === '1',
+        address: document.getElementById('lf-address').value.trim(),
+        type:    document.getElementById('lf-type').value,
+        dept:    document.getElementById('lf-dept').value,
+        active:  document.getElementById('lf-active').value === '1',
         emp_ids: getOwnerPicked('lf-emps')
       };
-      var req = loc
+      var promise = loc
         ? api.put('/api/locations/' + loc.id, Object.assign({id: loc.id}, d))
         : api.post('/api/locations', d);
-      req.then(function(res) {
+      promise.then(function(res) {
         if (res.error) { toast('Error: ' + res.error, 'error'); return; }
         toast(loc ? 'Location updated' : 'Location added', 'ok');
         closeModal();
         loadAll();
-      }).catch(function(e) {
-        toast('Server error: ' + e.message, 'error');
+      }).catch(function(err) {
+        toast('Server error: ' + err.message, 'error');
       });
     }
   }], true);
 }
 
-async function delLoc(id) {
-  var loc = S.locations.find(function(l){ return l.id===id; });
+function delLoc(id) {
+  var loc = S.locations.find(function(l) { return l.id === id; });
   if (!confirm('Delete "' + (loc ? loc.name : id) + '"?')) return;
-  await api.del('/api/locations/' + id);
-  toast('Location deleted', 'ok');
-  loadAll();
+  api.del('/api/locations/' + id).then(function() {
+    toast('Location deleted', 'ok');
+    loadAll();
+  });
 }
 
 </script>
@@ -4639,20 +4677,27 @@ async function delLoc(id) {
 
 
 
+
 // ── LOCATIONS ────────────────────────────────────────────────────────────────
 
 function renderLocations() {
-  var TCOLOR = {HQ:'#0f2540',Branch:'#1d4ed8',Depot:'#047857',Warehouse:'#0891b2','Border Point':'#b45309',Other:'#475569'};
-  var html = '<div class="section-head"><div><h2>Locations</h2><p>' + S.locations.length + ' location(s) configured</p></div>' +
-    '<button class="btn btn-primary btn-sm" onclick="openLocForm()">+ Add Location</button></div>';
+  var TCOLOR = {
+    'HQ':'#0f2540','Branch':'#1d4ed8','Depot':'#047857',
+    'Warehouse':'#0891b2','Border Point':'#b45309','Other':'#475569'
+  };
+  var html = '<div class="section-head">' +
+    '<div><h2>Locations</h2><p>' + S.locations.length + ' location(s) configured</p></div>' +
+    '<button class="btn btn-primary btn-sm" onclick="openLocForm()">+ Add Location</button>' +
+    '</div>';
 
   if (!S.locations.length) {
     html += '<div class="card" style="padding:48px;text-align:center">' +
       '<p style="font-size:36px;margin-bottom:12px">&#128205;</p>' +
       '<p class="font-black" style="font-size:16px">No locations yet</p>' +
       '<p class="text-sm text-muted mt-8">Add your branches, depots, and border points.</p>' +
-      '<button class="btn btn-primary mt-16" onclick="openLocForm()">+ Add First Location</button></div>';
-    q('tab-locations').innerHTML = html;
+      '<button class="btn btn-primary mt-16" onclick="openLocForm()">+ Add First Location</button>' +
+      '</div>';
+    document.getElementById('tab-locations').innerHTML = html;
     return;
   }
 
@@ -4660,39 +4705,50 @@ function renderLocations() {
   S.locations.forEach(function(loc) {
     var color   = TCOLOR[loc.type] || '#475569';
     var opacity = loc.active ? '1' : '0.55';
-    var emps    = (loc.emp_ids || []).map(function(id){ return S.employees.find(function(e){ return e.id===id; }); }).filter(Boolean);
-    var chips   = emps.map(function(e){ return '<span class="owner-chip" style="background:' + dc(e.dept) + '">' + e.name.split(' ')[0] + '</span>'; }).join('');
-    html +=
-      '<div class="card" style="border-top:3px solid ' + color + ';padding:16px;opacity:' + opacity + '">' +
-        '<div class="flex items-start justify-between mb-12">' +
-          '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
-            '<span class="ref-badge" style="background:' + color + ';color:#fff;font-size:11px">' + esc(loc.code) + '</span>' +
-            '<span class="badge" style="background:' + color + '22;color:' + color + '">' + esc(loc.type) + '</span>' +
-            (loc.dept ? '<span class="dept-badge" style="background:' + dc(loc.dept) + '">' + esc(loc.dept) + '</span>' : '') +
-            (!loc.active ? '<span class="badge badge-gray">Inactive</span>' : '') +
-          '</div>' +
-          '<div class="flex gap-6">' +
-            '<button class="btn-icon" onclick="openLocForm(\'' + loc.id + '\')">&#9998;</button>' +
-            '<button class="btn-icon" style="color:var(--red)" onclick="delLoc(\'' + loc.id + '\')">&#128465;</button>' +
-          '</div>' +
+    var emps    = (loc.emp_ids || []).map(function(id) {
+      return S.employees.find(function(e) { return e.id === id; });
+    }).filter(Boolean);
+    var chips = emps.map(function(e) {
+      return '<span class="owner-chip" style="background:' + dc(e.dept) + '">' + e.name.split(' ')[0] + '</span>';
+    }).join('');
+
+    html += '<div class="card" style="border-top:3px solid ' + color + ';padding:16px;opacity:' + opacity + '">' +
+      '<div class="flex items-start justify-between mb-12">' +
+        '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">' +
+          '<span class="ref-badge" style="background:' + color + ';color:#fff;font-size:11px">' + esc(loc.code) + '</span>' +
+          '<span class="badge" style="background:' + color + '22;color:' + color + '">' + esc(loc.type) + '</span>' +
+          (loc.dept ? '<span class="dept-badge" style="background:' + dc(loc.dept) + '">' + esc(loc.dept) + '</span>' : '') +
+          (!loc.active ? '<span class="badge badge-gray">Inactive</span>' : '') +
         '</div>' +
-        '<p class="font-black" style="font-size:15px">' + esc(loc.name) + '</p>' +
-        '<p class="text-xs text-muted mt-4">' + esc(loc.address || '—') + '</p>' +
-        '<p class="text-xxs text-muted mt-8">' + emps.length + ' staff assigned</p>' +
-        (chips ? '<div class="mp-owners mt-8">' + chips + '</div>' : '') +
-      '</div>';
+        '<div class="flex gap-6">' +
+          '<button class="btn-icon" onclick="openLocForm('' + loc.id + '')">&#9998;</button>' +
+          '<button class="btn-icon" style="color:var(--red)" onclick="delLoc('' + loc.id + '')">&#128465;</button>' +
+        '</div>' +
+      '</div>' +
+      '<p class="font-black" style="font-size:15px">' + esc(loc.name) + '</p>' +
+      '<p class="text-xs text-muted mt-4">' + esc(loc.address || '-') + '</p>' +
+      '<p class="text-xxs text-muted mt-8">' + emps.length + ' staff assigned</p>' +
+      (chips ? '<div class="mp-owners mt-8">' + chips + '</div>' : '') +
+    '</div>';
   });
   html += '</div>';
-  q('tab-locations').innerHTML = html;
+  document.getElementById('tab-locations').innerHTML = html;
 }
 
 function openLocForm(id) {
-  var loc   = id ? S.locations.find(function(l){ return l.id===id; }) : null;
+  var loc   = id ? S.locations.find(function(l) { return l.id === id; }) : null;
   var TYPES = ['HQ','Branch','Depot','Warehouse','Border Point','Other'];
   var DEPTS = ['HOD','Vehicle','Registration','Warehouse','Stock','Ops','Finance','HR'];
 
-  var typeOpts = TYPES.map(function(t){ return '<option value="' + t + '"' + (loc && loc.type===t ? ' selected' : '') + '>' + t + '</option>'; }).join('');
-  var deptOpts = DEPTS.map(function(d){ return '<option value="' + d + '"' + (loc && loc.dept===d ? ' selected' : '') + '>' + d + '</option>'; }).join('');
+  var typeOpts = TYPES.map(function(t) {
+    return '<option value="' + t + '"' + (loc && loc.type === t ? ' selected' : '') + '>' + t + '</option>';
+  }).join('');
+
+  var deptOpts = DEPTS.map(function(d) {
+    return '<option value="' + d + '"' + (loc && loc.dept === d ? ' selected' : '') + '>' + d + '</option>';
+  }).join('');
+
+  var selEmps = loc ? (loc.emp_ids || []) : [];
 
   var body =
     '<div class="form-grid-2">' +
@@ -4704,7 +4760,7 @@ function openLocForm(id) {
     '<div class="form-group"><label class="form-label">Location Name</label>' +
       '<input class="form-input" id="lf-name" value="' + esc(loc ? loc.name : '') + '" placeholder="e.g. Kathmandu Headquarters"></div>' +
     '<div class="form-group"><label class="form-label">Address</label>' +
-      '<input class="form-input" id="lf-address" value="' + esc(loc ? (loc.address||'') : '') + '" placeholder="Full address"></div>' +
+      '<input class="form-input" id="lf-address" value="' + esc(loc ? (loc.address || '') : '') + '" placeholder="Full address"></div>' +
     '<div class="form-grid-2">' +
       '<div class="form-group"><label class="form-label">Department / Sector</label>' +
         '<select class="form-select" id="lf-dept">' + deptOpts + '</select></div>' +
@@ -4715,46 +4771,47 @@ function openLocForm(id) {
         '</select></div>' +
     '</div>' +
     '<div class="form-group"><label class="form-label">Assigned Staff</label>' +
-      buildOwnerPicker('lf-emps', loc ? (loc.emp_ids||[]) : []) +
+      buildOwnerPicker('lf-emps', selEmps) +
     '</div>';
 
   openModal(loc ? 'Edit Location' : 'Add Location', body, [{
     label: loc ? 'Save Changes' : 'Add Location',
     cls: 'btn-primary',
     fn: function() {
-      var code = q('lf-code').value.trim();
-      var name = q('lf-name').value.trim();
+      var code = document.getElementById('lf-code').value.trim();
+      var name = document.getElementById('lf-name').value.trim();
       if (!code || !name) { toast('Code and name are required', 'error'); return; }
       var d = {
         code:    code,
         name:    name,
-        address: q('lf-address').value.trim(),
-        type:    q('lf-type').value,
-        dept:    q('lf-dept').value,
-        active:  q('lf-active').value === '1',
+        address: document.getElementById('lf-address').value.trim(),
+        type:    document.getElementById('lf-type').value,
+        dept:    document.getElementById('lf-dept').value,
+        active:  document.getElementById('lf-active').value === '1',
         emp_ids: getOwnerPicked('lf-emps')
       };
-      var req = loc
+      var promise = loc
         ? api.put('/api/locations/' + loc.id, Object.assign({id: loc.id}, d))
         : api.post('/api/locations', d);
-      req.then(function(res) {
+      promise.then(function(res) {
         if (res.error) { toast('Error: ' + res.error, 'error'); return; }
         toast(loc ? 'Location updated' : 'Location added', 'ok');
         closeModal();
         loadAll();
-      }).catch(function(e) {
-        toast('Server error: ' + e.message, 'error');
+      }).catch(function(err) {
+        toast('Server error: ' + err.message, 'error');
       });
     }
   }], true);
 }
 
-async function delLoc(id) {
-  var loc = S.locations.find(function(l){ return l.id===id; });
+function delLoc(id) {
+  var loc = S.locations.find(function(l) { return l.id === id; });
   if (!confirm('Delete "' + (loc ? loc.name : id) + '"?')) return;
-  await api.del('/api/locations/' + id);
-  toast('Location deleted', 'ok');
-  loadAll();
+  api.del('/api/locations/' + id).then(function() {
+    toast('Location deleted', 'ok');
+    loadAll();
+  });
 }
 
 </script>

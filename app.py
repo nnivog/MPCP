@@ -2047,6 +2047,219 @@ def analytics_summary_yoy():
                       'by_month':by_month,'by_mp':by_mp}
     return jsonify(result)
 
+
+# ══════════════════════════════════════════════════════════
+# EXPORT ROUTES
+# ══════════════════════════════════════════════════════════
+
+def _xl_sheet(cols, rows_data):
+    """Build xlsx bytes with zero dependencies."""
+    import io as _io, zipfile as _zf
+    def ex(s):
+        return str(s or '').replace('&','&amp;').replace('<','&lt;').replace('>','&gt;').replace('"','&quot;')
+    ws = '<row r="1">'+''.join(f'<c r="{chr(65+i)}1" t="inlineStr"><is><t>{ex(col)}</t></is></c>' for i,col in enumerate(cols))+'</row>'
+    for ri,row in enumerate(rows_data, 2):
+        ws += f'<row r="{ri}">'+''.join(f'<c r="{chr(65+i)}{ri}" t="inlineStr"><is><t>{ex(v)}</t></is></c>' for i,v in enumerate(row))+'</row>'
+    ws_xml = f'<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{ws}</sheetData></worksheet>'
+    wb_xml = '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>'
+    rels   = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'
+    ct     = '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'
+    buf = _io.BytesIO()
+    with _zf.ZipFile(buf,'w',_zf.ZIP_DEFLATED) as z:
+        z.writestr('[Content_Types].xml', ct); z.writestr('xl/_rels/workbook.xml.rels', rels)
+        z.writestr('xl/workbook.xml', wb_xml); z.writestr('xl/worksheets/sheet1.xml', ws_xml)
+    buf.seek(0); return buf.read()
+
+def _xl_response(data, filename):
+    return data, 200, {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': f'attachment; filename="{filename}"'}
+
+def _html_page(title, body, subtitle=''):
+    return f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+body{{font-family:Arial,sans-serif;margin:0;padding:24px;color:#0f1a2e;font-size:12px}}
+h1{{font-size:16px;font-weight:700;color:#0a1628;margin:0 0 2px}}
+.sub{{font-size:11px;color:#6b7a99;margin-bottom:16px}}
+table{{width:100%;border-collapse:collapse;margin-bottom:24px}}
+thead th{{background:#0a1628;color:#fff;padding:7px 10px;text-align:left;font-size:11px;font-weight:700}}
+tbody tr:nth-child(even){{background:#f7f8fb}}
+td{{padding:6px 10px;border-bottom:1px solid #e8eaf0;font-size:11px;vertical-align:top}}
+.ref{{font-family:monospace;color:#1d4ed8;font-weight:700}}
+.badge{{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700}}
+.l1{{background:#e0e7ff;color:#3730a3}}.l2{{background:#dcfce7;color:#166534}}.l3{{background:#fef9c3;color:#854d0e}}
+.role-row{{background:#eef2ff!important;font-weight:700}}
+.mp-row{{background:#f0fdf4!important}}
+.no-print{{margin-bottom:12px}}
+@media print{{.no-print{{display:none}}@page{{margin:12mm}}.page-break{{page-break-before:always}}}}
+</style></head><body>
+<div class="no-print"><button onclick="window.print()" style="padding:6px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;cursor:pointer;margin-right:8px">🖨 Print / Save PDF</button><button onclick="window.close()" style="padding:6px 16px;background:#f1f5f9;color:#0f1a2e;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">Close</button></div>
+<h1>{title}</h1><div class="sub">{subtitle}</div>
+{body}</body></html>"""
+
+# ── ORG TREE HTML/PDF ──────────────────────────────────────────────────────
+@app.route('/api/export/org_tree_html')
+def export_org_tree_html():
+    from datetime import datetime as _dt
+    fy  = request.args.get('fy','')
+    loc = request.args.get('loc','')
+    db  = get_db()
+
+    emps = {e['id']: dict(e) for e in db.execute("SELECT * FROM employees ORDER BY level,name")}
+    mps_map = {}
+    for row in db.execute("SELECT mp_id,emp_id FROM mp_owners"):
+        mps_map.setdefault(row['emp_id'],[]).append(row['mp_id'])
+    cps_map = {}
+    for row in db.execute("SELECT cp_id,emp_id FROM cp_owners"):
+        cps_map.setdefault(row['emp_id'],[]).append(row['cp_id'])
+
+    # Compliance by employee
+    perf_q = "SELECT emp_code,COUNT(*) tot,SUM(CASE WHEN status='C' THEN 1 ELSE 0 END) comp FROM perf WHERE 1=1"
+    p_params = []
+    if fy: perf_q += " AND fy=?"; p_params.append(fy)
+    perf_q += " GROUP BY emp_code"
+    perf_by_code = {r['emp_code']: r for r in db.execute(perf_q, p_params)}
+
+    rows = []
+    for lvl in [1,2,3]:
+        for e in [v for v in emps.values() if v.get('level')==lvl]:
+            pr = perf_by_code.get(e.get('emp_code',''), {})
+            tot = pr.get('tot',0); comp = pr.get('comp',0)
+            pct = f"{round(comp/tot*100,1)}%" if tot else "—"
+            mgr = emps.get(e.get('manager_id',''),{}).get('name','—')
+            rows.append([
+                f"L{lvl}", e.get('emp_code',''), e.get('name',''), e.get('role','') or e.get('dept',''),
+                mgr, len(mps_map.get(e['id'],[])), len(cps_map.get(e['id'],[])),
+                f"{comp}/{tot}" if tot else "—", pct
+            ])
+
+    cols = ['Level','Emp Code','Name','Role/Dept','Manager','MPs','CPs','Comp/Total','Score%']
+    thead = ''.join(f'<th>{h}</th>' for h in cols)
+    tbody = ''
+    cur_lvl = None
+    for row in rows:
+        if row[0] != cur_lvl:
+            cur_lvl = row[0]
+            lbl = {'L1':'Head of Department','L2':'Team Lead / Manager','L3':'Operations Staff'}.get(cur_lvl,'')
+            tbody += f'<tr class="role-row"><td colspan="9" style="padding:10px;font-size:12px;color:#1e40af">▸ {cur_lvl} — {lbl}</td></tr>'
+        score = row[8]
+        color = '#16a34a' if score not in ('—','') and float(score.replace('%','') or 0)>=95 else ('#d97706' if score not in ('—','') and float(score.replace('%','') or 0)>=80 else '#dc2626') if score not in ('—','') else '#6b7a99'
+        tbody += f'<tr><td>{row[0]}</td><td class="ref">{row[1]}</td><td><b>{row[2]}</b></td><td style="color:#475569">{row[3]}</td><td style="color:#6b7a99">{row[4]}</td><td style="text-align:center">{row[5]}</td><td style="text-align:center">{row[6]}</td><td style="text-align:center">{row[7]}</td><td style="font-weight:700;color:{color}">{score}</td></tr>'
+
+    body = f'<table><thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>'
+    fy_label = f"FY {fy}" if fy else "All FY"
+    subtitle = f"{fy_label} · {loc or 'All Locations'} · Generated {_dt.now().strftime('%Y-%m-%d %H:%M')}"
+    return _html_page("Organisation Tree — Compliance Summary", body, subtitle), 200, {'Content-Type':'text/html;charset=utf-8'}
+
+
+# ── SINGLE EMPLOYEE MPCP EXCEL ─────────────────────────────────────────────
+@app.route('/api/export/employee_mpcp_excel/<eid>')
+def export_employee_mpcp_excel(eid):
+    from datetime import datetime as _dt
+    db  = get_db()
+    emp = db.execute("SELECT * FROM employees WHERE id=?", (eid,)).fetchone()
+    if not emp: return jsonify({'error':'Not found'}), 404
+    emp = dict(emp)
+    mps = db.execute("SELECT m.* FROM mps m JOIN mp_owners o ON o.mp_id=m.id WHERE o.emp_id=? ORDER BY m.ref", (eid,)).fetchall()
+    cols = ['Role/Objective','S.N.','Managing Point','UoM','MP-Ref','Target','Freq','CP S.N.','Checking Point','CP-Ref','CP Target','CP Freq']
+    rows = []
+    for mp in mps:
+        mp = dict(mp)
+        cps = db.execute("SELECT * FROM cps WHERE mp_id=? ORDER BY ref", (mp['id'],)).fetchall()
+        if not cps:
+            rows.append([emp.get('role',''), mp['ref'], mp['title'], '', mp['ref'], mp.get('target',''), mp.get('freq',''), '', '', '', '', ''])
+        for j,cp in enumerate(cps):
+            cp = dict(cp)
+            rows.append([
+                emp.get('role','') if j==0 else '',
+                mp['ref'] if j==0 else '',
+                mp['title'] if j==0 else '',
+                '', mp['ref'] if j==0 else '',
+                mp.get('target','') if j==0 else '',
+                mp.get('freq','') if j==0 else '',
+                cp['ref'], cp['title'], cp['ref'],
+                cp.get('target',''), cp.get('freq','')
+            ])
+    data = _xl_sheet(cols, rows)
+    fname = f"MPCP_{emp.get('emp_code','EMP')}_{emp['name'].replace(' ','_')}_{_dt.now().strftime('%Y%m%d')}.xlsx"
+    return _xl_response(data, fname)
+
+
+# ── FULL TEAM MPCP BOOK (Excel — one row per CP, hierarchical) ─────────────
+@app.route('/api/export/team_mpcp_excel')
+def export_team_mpcp_excel():
+    from datetime import datetime as _dt
+    fy  = request.args.get('fy','')
+    db  = get_db()
+    emps = db.execute("SELECT * FROM employees ORDER BY level,name").fetchall()
+    cols = ['Level','Emp Code','Employee','Dept','Role/Obj','MP Ref','Managing Point','MP Target','MP Freq','CP Ref','Checking Point','CP Target','CP Freq','FY','Compliance%']
+    rows = []
+    for emp in emps:
+        emp = dict(emp)
+        mps = db.execute("SELECT m.* FROM mps m JOIN mp_owners o ON o.mp_id=m.id WHERE o.emp_id=? ORDER BY m.ref",(emp['id'],)).fetchall()
+        if not mps:
+            rows.append([f"L{emp.get('level',3)}", emp.get('emp_code',''), emp['name'], emp.get('dept',''), emp.get('role',''), '','','','','','','','','',''])
+            continue
+        for mp in mps:
+            mp = dict(mp)
+            cps = db.execute("SELECT * FROM cps WHERE mp_id=? ORDER BY ref",(mp['id'],)).fetchall()
+            perf_q = "SELECT COUNT(*) tot,SUM(CASE WHEN status='C' THEN 1 ELSE 0 END) comp FROM perf WHERE mp_ref=? AND emp_code=?"
+            p_params = [mp['ref'], emp.get('emp_code','')]
+            if fy: perf_q += " AND fy=?"; p_params.append(fy)
+            pr = dict(db.execute(perf_q, p_params).fetchone() or {})
+            tot = pr.get('tot',0) or 0; comp = pr.get('comp',0) or 0
+            pct = f"{round(comp/tot*100,1)}%" if tot else ""
+            if not cps:
+                rows.append([f"L{emp.get('level',3)}", emp.get('emp_code',''), emp['name'], emp.get('dept',''), emp.get('role',''), mp['ref'], mp['title'], mp.get('target',''), mp.get('freq',''), '','','','', fy, pct])
+                continue
+            for j,cp in enumerate(cps):
+                cp = dict(cp)
+                rows.append([
+                    f"L{emp.get('level',3)}" if j==0 else '',
+                    emp.get('emp_code','') if j==0 else '',
+                    emp['name'] if j==0 else '',
+                    emp.get('dept','') if j==0 else '',
+                    emp.get('role','') if j==0 else '',
+                    mp['ref'] if j==0 else '',
+                    mp['title'] if j==0 else '',
+                    mp.get('target','') if j==0 else '',
+                    mp.get('freq','') if j==0 else '',
+                    cp['ref'], cp['title'], cp.get('target',''), cp.get('freq',''),
+                    fy if j==0 else '', pct if j==0 else ''
+                ])
+    data = _xl_sheet(cols, rows)
+    fname = f"Team_MPCP_Book_{fy or 'All'}_{_dt.now().strftime('%Y%m%d')}.xlsx"
+    return _xl_response(data, fname)
+
+
+# ── SECTOR SUMMARY EXCEL ───────────────────────────────────────────────────
+@app.route('/api/export/sector_summary_excel')
+def export_sector_summary_excel():
+    from datetime import datetime as _dt
+    fy  = request.args.get('fy','')
+    db  = get_db()
+    sectors = db.execute("SELECT * FROM sectors ORDER BY name").fetchall()
+    cols = ['Sector','Employee','Level','Emp Code','MPs','CPs','Compliance%']
+    rows = []
+    for sec in sectors:
+        sec = dict(sec)
+        emps = db.execute("""SELECT e.* FROM employees e
+            JOIN emp_sectors es ON es.emp_id=e.id WHERE es.sector_id=? ORDER BY e.level,e.name""", (sec['id'],)).fetchall()
+        if not emps:
+            rows.append([sec['name'],'—','','','','','']); continue
+        for j,emp in enumerate(emps):
+            emp = dict(emp)
+            mp_cnt = db.execute("SELECT COUNT(*) c FROM mp_owners WHERE emp_id=?",(emp['id'],)).fetchone()['c']
+            cp_cnt = db.execute("SELECT COUNT(*) c FROM cp_owners WHERE emp_id=?",(emp['id'],)).fetchone()['c']
+            pq = "SELECT COUNT(*) tot,SUM(CASE WHEN status='C' THEN 1 ELSE 0 END) comp FROM perf WHERE emp_code=?"
+            pp = [emp.get('emp_code','')]
+            if fy: pq += " AND fy=?"; pp.append(fy)
+            pr = dict(db.execute(pq,pp).fetchone() or {})
+            tot = pr.get('tot',0) or 0; comp = pr.get('comp',0) or 0
+            rows.append([sec['name'] if j==0 else '', emp['name'], f"L{emp.get('level',3)}", emp.get('emp_code',''), mp_cnt, cp_cnt, f"{round(comp/tot*100,1)}%" if tot else "—"])
+    data = _xl_sheet(cols, rows)
+    fname = f"Sector_Summary_{fy or 'All'}_{_dt.now().strftime('%Y%m%d')}.xlsx"
+    return _xl_response(data, fname)
+
 if __name__ == '__main__':
     init_db()
     print("\n" + "="*55)

@@ -521,7 +521,19 @@ function renderCurrent() {
 }
 function switchMaster(s) { S.masterSub=s; qq('#master-tabs .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderMaster() }
 function switchData(s) { S.dataSub=s; qq('#tab-data .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderData() }
-function switchReport(s) { S.reportSub=s; qq('#tab-reports .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderReport() }
+function addReportExportBar(fy){
+  const bar=document.getElementById('report-export-bar')
+  if(!bar)return
+  bar.innerHTML=`
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:10px 0 4px">
+    <span style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Export:</span>
+    <button class="btn btn-ghost btn-sm" onclick="exportXL('/api/export/compliance_excel?fy=${fy}')">&#128196; Compliance Excel</button>
+    <button class="btn btn-ghost btn-sm" onclick="exportXL('/api/export/team_mpcp_excel?fy=${fy}')">&#128196; Team MPCP Book</button>
+    <button class="btn btn-ghost btn-sm" onclick="exportXL('/api/export/sector_summary_excel?fy=${fy}')">&#128196; Sector Summary</button>
+    <button class="btn btn-ghost btn-sm" onclick="exportOpen('/api/export/org_tree_html?fy=${fy}')">&#128438; Org Tree PDF</button>
+  </div>`
+}
+function switchReport(s) { S.reportSub=s; qq('#tab-reports .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderReport(); addReportExportBar(S.currentFY||'') }
 function setTeamView(v) { S.teamView=v; renderTeam() }
 
 function switchFY() {
@@ -934,6 +946,10 @@ function renderMPs() {
   html += '</div>'
   q('#master-content').innerHTML = html
 }
+
+function exportOpen(url){ window.open(url,'_blank') }
+function exportXL(url){ const a=document.createElement('a');a.href=url;a.download='';document.body.appendChild(a);a.click();a.remove() }
+
 function filterMPs(){const s=(q('#mp-search')?.value||'').toLowerCase();qq('[data-s]').forEach(el=>el.style.display=(el.dataset.s+' '+(el.dataset.r||'')).toLowerCase().includes(s)?'':'none')}
 function openMPForm(id){
   const mp=id?getMP(id):null
@@ -3386,6 +3402,8 @@ async function renderOrgTree(){
   html+='<select class="form-select" id="ot-fy" style="width:110px"><option value="">All FY</option>'+(S.fyCache||[]).map(f=>'<option value="'+esc(f.fy)+'">'+esc(f.fy)+'</option>').join('')+'</select>'
   html+='<select class="form-select" id="ot-fy2" style="width:130px"><option value="">Compare FY…</option>'+(S.fyCache||[]).map(f=>'<option value="'+esc(f.fy)+'">'+esc(f.fy)+'</option>').join('')+'</select>'
   html+='<button class="btn btn-primary btn-sm" onclick="loadOrgTree()">&#127795; Load Tree</button>'
+  html+='<button class="btn btn-ghost btn-sm" onclick="exportOpen(\'/api/export/org_tree_html?fy=\'+(q(\'#ot-fy\')?.value||\'\')+\'&loc=\'+(q(\'#ot-loc\')?.value||\'\'))">&#128438; PDF Print</button>'
+  html+='<button class="btn btn-ghost btn-sm" onclick="exportXL(\'/api/export/team_mpcp_excel?fy=\'+(q(\'#ot-fy\')?.value||\'\'))">&#128196; Team Excel</button>'
   html+='<button class="btn btn-ghost btn-sm" onclick="openAddEmpToOrg()">+ Add Person</button>'
   html+='</div></div></div>'
   html+='<div id="org-tree-wrap"><div class="info-box"><p>Click <strong>Load Tree</strong> to view the live organisation with rollup compliance scores at every level.</p></div></div>'

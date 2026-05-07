@@ -1568,25 +1568,7 @@ def cascade_assign():
     db.commit()
     return jsonify({'ok': True, 'id': lid, 'auto_created': bool(auto_created)})
 
-if __name__ == '__main__':
-    init_db()
-    print("\n" + "="*55)
-    print(" Sipradi SC-MPCP System v3.0")
-    print(" http://localhost:5050")
-    print("="*55 + "\n")
-    app.run(debug=False, port=5050, host='0.0.0.0')
 
-
-# ══════════════════════════════════════════════════════════════════════════
-# PATCH: Missing routes that fix all 5 reported issues
-# 1. Data save: bulk_delete, bs_today, locations, sectors stubs
-# 2. Auto-calc: handled in perf_quick (already correct) + frontend
-# 3. Modal backdrop: fixed in index.html (JS patch)
-# 4. FY detection: fy_from_date already exists; bs_today added here
-# 5. Cascade new entry: cascade_assign field-name mapping fixed
-# ══════════════════════════════════════════════════════════════════════════
-
-# ── BS TODAY ──────────────────────────────────────────────────────────────
 @app.route('/api/bs_today')
 def bs_today():
     dt  = datetime.datetime.now()
@@ -1626,6 +1608,8 @@ def sector_api(sid):
                 d.get('color','#475569'), d.get('sort_order',0), sid))
     db.commit()
     return jsonify({'ok': True})
+
+# ── LOCATIONS ─────────────────────────────────────────────────────────────
 
 # ── LOCATIONS ─────────────────────────────────────────────────────────────
 
@@ -2054,3 +2038,23 @@ def analytics_summary_yoy():
         result[fy] = {'total':tot,'compliant':comp,'nc':nc,'pct_c':pct_c,'pct_nc':pct_nc,
                       'by_month':by_month,'by_mp':by_mp}
     return jsonify(result)
+
+if __name__ == '__main__':
+    init_db()
+    print("\n" + "="*55)
+    print(" Sipradi SC-MPCP System v3.0")
+    print(" http://localhost:5050")
+    print("="*55 + "\n")
+    app.run(debug=False, port=5050, host='0.0.0.0')
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# PATCH: Missing routes that fix all 5 reported issues
+# 1. Data save: bulk_delete, bs_today, locations, sectors stubs
+# 2. Auto-calc: handled in perf_quick (already correct) + frontend
+# 3. Modal backdrop: fixed in index.html (JS patch)
+# 4. FY detection: fy_from_date already exists; bs_today added here
+# 5. Cascade new entry: cascade_assign field-name mapping fixed
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── BS TODAY ──────────────────────────────────────────────────────────────

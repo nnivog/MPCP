@@ -130,6 +130,18 @@ CREATE TABLE IF NOT EXISTS perf(
   target_val REAL DEFAULT 0, actual_val REAL DEFAULT 0,
   unit TEXT DEFAULT '%', status TEXT DEFAULT 'C', notes TEXT DEFAULT '');
 
+
+CREATE TABLE IF NOT EXISTS emp_sectors(
+  emp_id TEXT NOT NULL,
+  sector_id TEXT NOT NULL,
+  is_primary INTEGER DEFAULT 0,
+  PRIMARY KEY(emp_id,sector_id));
+
+CREATE TABLE IF NOT EXISTS emp_locations(
+  emp_id TEXT NOT NULL,
+  loc_id TEXT NOT NULL,
+  is_primary INTEGER DEFAULT 0,
+  PRIMARY KEY(emp_id,loc_id));
 CREATE TABLE IF NOT EXISTS perf_cache(
   fy TEXT PRIMARY KEY, label TEXT NOT NULL,
   record_count INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT, locked INTEGER DEFAULT 0);
@@ -454,17 +466,13 @@ def employee_api(eid):
     db.execute("UPDATE employees SET emp_code=?,name=?,role=?,level=?,dept=?,manager_id=?,email=? WHERE id=?",
                (d.get('emp_code'),d['name'],d.get('role',''),d.get('level',3),d.get('dept','Ops'),d.get('manager_id') or None,d.get('email',''),eid))
     # Update sector assignments
-    try:
-        db.execute("DELETE FROM emp_sectors WHERE emp_id=?", (eid,))
-        for i, sid in enumerate(d.get('sector_ids', [])):
-            db.execute("INSERT OR IGNORE INTO emp_sectors(emp_id,sector_id,is_primary) VALUES(?,?,?)", (eid, sid, 1 if i==0 else 0))
-    except Exception: pass
+    db.execute("DELETE FROM emp_sectors WHERE emp_id=?", (eid,))
+    for i, sid in enumerate(d.get('sector_ids', [])):
+        db.execute("INSERT OR IGNORE INTO emp_sectors(emp_id,sector_id,is_primary) VALUES(?,?,?)", (eid, sid, 1 if i==0 else 0))
     # Update location assignments
-    try:
-        db.execute("DELETE FROM emp_locations WHERE emp_id=?", (eid,))
-        for i, lid2 in enumerate(d.get('loc_ids', [])):
-            db.execute("INSERT OR IGNORE INTO emp_locations(emp_id,loc_id,is_primary) VALUES(?,?,?)", (eid, lid2, 1 if i==0 else 0))
-    except Exception: pass
+    db.execute("DELETE FROM emp_locations WHERE emp_id=?", (eid,))
+    for i, lid2 in enumerate(d.get('loc_ids', [])):
+        db.execute("INSERT OR IGNORE INTO emp_locations(emp_id,loc_id,is_primary) VALUES(?,?,?)", (eid, lid2, 1 if i==0 else 0))
     db.commit()
     return jsonify({'ok': True})
 

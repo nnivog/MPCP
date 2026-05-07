@@ -134,7 +134,8 @@ CREATE TABLE IF NOT EXISTS perf(
 
 CREATE TABLE IF NOT EXISTS locations(
   id TEXT PRIMARY KEY, code TEXT UNIQUE NOT NULL, name TEXT NOT NULL,
-  address TEXT DEFAULT '', type TEXT DEFAULT 'Branch', active INTEGER DEFAULT 1);
+  address TEXT DEFAULT '', type TEXT DEFAULT 'Branch',
+  dept TEXT DEFAULT 'Ops', active INTEGER DEFAULT 1);
 CREATE TABLE IF NOT EXISTS location_employees(loc_id TEXT, emp_id TEXT, PRIMARY KEY(loc_id, emp_id));
 CREATE TABLE IF NOT EXISTS perf_cache(
   fy TEXT PRIMARY KEY, label TEXT NOT NULL,
@@ -1388,8 +1389,8 @@ def locations_api():
         return jsonify(res)
     d = request.json
     lid = d.get('id') or uid()
-    db.execute("INSERT OR REPLACE INTO locations VALUES(?,?,?,?,?,?)",
-               (lid, d['code'], d['name'], d.get('address',''), d.get('type','Branch'), 1 if d.get('active', True) else 0))
+    db.execute("INSERT OR REPLACE INTO locations VALUES(?,?,?,?,?,?,?)",
+               (lid, d['code'], d['name'], d.get('address',''), d.get('type','Branch'), d.get('dept','Ops'), 1 if d.get('active', True) else 0))
     db.execute("DELETE FROM location_employees WHERE loc_id=?", (lid,))
     for eid in d.get('emp_ids', []):
         db.execute("INSERT OR IGNORE INTO location_employees VALUES(?,?)", (lid, eid))
@@ -1405,8 +1406,8 @@ def location_api(lid):
         db.commit()
         return jsonify({'ok': True})
     d = request.json
-    db.execute("UPDATE locations SET code=?,name=?,address=?,type=?,active=? WHERE id=?",
-               (d['code'], d['name'], d.get('address',''), d.get('type','Branch'), 1 if d.get('active', True) else 0, lid))
+    db.execute("UPDATE locations SET code=?,name=?,address=?,type=?,dept=?,active=? WHERE id=?",
+               (d['code'], d['name'], d.get('address',''), d.get('type','Branch'), d.get('dept','Ops'), 1 if d.get('active', True) else 0, lid))
     db.execute("DELETE FROM location_employees WHERE loc_id=?", (lid,))
     for eid in d.get('emp_ids', []):
         db.execute("INSERT OR IGNORE INTO location_employees VALUES(?,?)", (lid, eid))

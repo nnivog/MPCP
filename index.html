@@ -46,6 +46,7 @@ function renderLocations() {
       <p class="text-xs text-muted mt-4">${esc(loc.address || '—')}</p>
       <div class="flex gap-8 mt-12" style="flex-wrap:wrap">
         <span class="badge" style="background:${color}20;color:${color};border:1px solid ${color}40">${esc(loc.type)}</span>
+        ${loc.dept ? `<span class="dept-badge" style="background:${dc(loc.dept)}">${esc(loc.dept)}</span>` : ''}
         <span class="badge badge-gray">${empCount} staff</span>
       </div>
       ${emps.length ? `<div class="mp-owners mt-10">${emps.map(e => `<span class="owner-chip" style="background:${dc(e.dept)}">${e.name.split(' ')[0]}</span>`).join('')}</div>` : '<p class="text-xs text-muted italic mt-8">No staff assigned</p>'}
@@ -71,17 +72,24 @@ function openLocForm(id) {
       <input class="form-input" id="lf-name" value="${esc(loc?.name || '')}" placeholder="e.g. Kathmandu Headquarters"></div>
     <div class="form-group"><label class="form-label">Address</label>
       <input class="form-input" id="lf-address" value="${esc(loc?.address || '')}" placeholder="Full address"></div>
+    <div class="form-grid-2">
+    <div class="form-group"><label class="form-label">Department / Sector</label>
+      <select class="form-select" id="lf-dept">
+        ${['HOD','Vehicle','Registration','Warehouse','Stock','Ops','Finance','HR'].map(d => `<option value="${d}" ${(loc?.dept||'Ops')===d?'selected':''}>${d}</option>`).join('')}
+      </select></div>
     <div class="form-group"><label class="form-label">Status</label>
       <select class="form-select" id="lf-active">
         <option value="1" ${!loc || loc.active ? 'selected' : ''}>Active</option>
         <option value="0" ${loc && !loc.active ? 'selected' : ''}>Inactive</option>
       </select></div>
+    </div>
     <div class="form-group"><label class="form-label">Assigned Staff</label>
       ${buildOwnerPicker('lf-emps', loc?.emp_ids || [])}</div>`,
     [{label: loc ? 'Save Changes' : 'Add Location', cls: 'btn-primary', fn: async () => {
       const d = {
         code: q('#lf-code').value.trim(), name: q('#lf-name').value.trim(),
         address: q('#lf-address').value.trim(), type: q('#lf-type').value,
+        dept: q('#lf-dept').value,
         active: q('#lf-active').value === '1',
         emp_ids: getOwnerPicked('lf-emps')
       }
@@ -154,6 +162,7 @@ function renderLocations() {
       <p class="text-xs text-muted mt-4">${esc(loc.address || '—')}</p>
       <div class="flex gap-8 mt-12" style="flex-wrap:wrap">
         <span class="badge" style="background:${color}20;color:${color};border:1px solid ${color}40">${esc(loc.type)}</span>
+        ${loc.dept ? `<span class="dept-badge" style="background:${dc(loc.dept)}">${esc(loc.dept)}</span>` : ''}
         <span class="badge badge-gray">${empCount} staff</span>
       </div>
       ${emps.length ? `<div class="mp-owners mt-10">${emps.map(e => `<span class="owner-chip" style="background:${dc(e.dept)}">${e.name.split(' ')[0]}</span>`).join('')}</div>` : '<p class="text-xs text-muted italic mt-8">No staff assigned</p>'}
@@ -179,17 +188,24 @@ function openLocForm(id) {
       <input class="form-input" id="lf-name" value="${esc(loc?.name || '')}" placeholder="e.g. Kathmandu Headquarters"></div>
     <div class="form-group"><label class="form-label">Address</label>
       <input class="form-input" id="lf-address" value="${esc(loc?.address || '')}" placeholder="Full address"></div>
+    <div class="form-grid-2">
+    <div class="form-group"><label class="form-label">Department / Sector</label>
+      <select class="form-select" id="lf-dept">
+        ${['HOD','Vehicle','Registration','Warehouse','Stock','Ops','Finance','HR'].map(d => `<option value="${d}" ${(loc?.dept||'Ops')===d?'selected':''}>${d}</option>`).join('')}
+      </select></div>
     <div class="form-group"><label class="form-label">Status</label>
       <select class="form-select" id="lf-active">
         <option value="1" ${!loc || loc.active ? 'selected' : ''}>Active</option>
         <option value="0" ${loc && !loc.active ? 'selected' : ''}>Inactive</option>
       </select></div>
+    </div>
     <div class="form-group"><label class="form-label">Assigned Staff</label>
       ${buildOwnerPicker('lf-emps', loc?.emp_ids || [])}</div>`,
     [{label: loc ? 'Save Changes' : 'Add Location', cls: 'btn-primary', fn: async () => {
       const d = {
         code: q('#lf-code').value.trim(), name: q('#lf-name').value.trim(),
         address: q('#lf-address').value.trim(), type: q('#lf-type').value,
+        dept: q('#lf-dept').value,
         active: q('#lf-active').value === '1',
         emp_ids: getOwnerPicked('lf-emps')
       }
@@ -4465,6 +4481,7 @@ function renderLocations() {
       <p class="text-xs text-muted mt-4">${esc(loc.address || '—')}</p>
       <div class="flex gap-8 mt-12" style="flex-wrap:wrap">
         <span class="badge" style="background:${color}20;color:${color};border:1px solid ${color}40">${esc(loc.type)}</span>
+        ${loc.dept ? `<span class="dept-badge" style="background:${dc(loc.dept)}">${esc(loc.dept)}</span>` : ''}
         <span class="badge badge-gray">${empCount} staff</span>
       </div>
       ${emps.length ? `<div class="mp-owners mt-10">${emps.map(e => `<span class="owner-chip" style="background:${dc(e.dept)}">${e.name.split(' ')[0]}</span>`).join('')}</div>` : '<p class="text-xs text-muted italic mt-8">No staff assigned</p>'}
@@ -4490,17 +4507,24 @@ function openLocForm(id) {
       <input class="form-input" id="lf-name" value="${esc(loc?.name || '')}" placeholder="e.g. Kathmandu Headquarters"></div>
     <div class="form-group"><label class="form-label">Address</label>
       <input class="form-input" id="lf-address" value="${esc(loc?.address || '')}" placeholder="Full address"></div>
+    <div class="form-grid-2">
+    <div class="form-group"><label class="form-label">Department / Sector</label>
+      <select class="form-select" id="lf-dept">
+        ${['HOD','Vehicle','Registration','Warehouse','Stock','Ops','Finance','HR'].map(d => `<option value="${d}" ${(loc?.dept||'Ops')===d?'selected':''}>${d}</option>`).join('')}
+      </select></div>
     <div class="form-group"><label class="form-label">Status</label>
       <select class="form-select" id="lf-active">
         <option value="1" ${!loc || loc.active ? 'selected' : ''}>Active</option>
         <option value="0" ${loc && !loc.active ? 'selected' : ''}>Inactive</option>
       </select></div>
+    </div>
     <div class="form-group"><label class="form-label">Assigned Staff</label>
       ${buildOwnerPicker('lf-emps', loc?.emp_ids || [])}</div>`,
     [{label: loc ? 'Save Changes' : 'Add Location', cls: 'btn-primary', fn: async () => {
       const d = {
         code: q('#lf-code').value.trim(), name: q('#lf-name').value.trim(),
         address: q('#lf-address').value.trim(), type: q('#lf-type').value,
+        dept: q('#lf-dept').value,
         active: q('#lf-active').value === '1',
         emp_ids: getOwnerPicked('lf-emps')
       }

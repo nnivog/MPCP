@@ -1964,24 +1964,25 @@ function qeAutoCalc() {
 }
 
 async function qeSave(overwrite = false) {
-  const date    = $('qe-date')?.value;
-  const empCode = $('qe-emp')?.value;
-  const cpRef   = $('qe-cp')?.value;
-  const actual  = parseFloat($('qe-actual')?.value || 0);
-  const notes   = $('qe-notes')?.value || '';
-
+  const date            = q('#qe-date')?.value;
+  const empCode         = q('#qe-emp')?.value;
+  const cpRef           = q('#qe-cp')?.value;
+  const mp_ref          = q('#qe-mp')?.value          || '';
+  const metric          = q('#qe-metric')?.value       || '';
+  const status_override = q('#qe-status-override')?.value || '';
+  const actual_val      = parseFloat(q('#qe-actual')?.value || 0);
+  const target_val      = parseFloat(q('#qe-tgt')?.value    || 0);
+  const unit            = q('#qe-unit')?.value         || '%';
+  const notes           = q('#qe-notes')?.value        || '';
   if (!date || !empCode || !cpRef) { toast('Fill Date, Employee and CP', 'err'); return; }
   if (!window._qPayload)           { toast('Enter total and compliant/% values', 'err'); return; }
   if (!_qFY)                       { toast('FY not detected — check date', 'err'); return; }
-
   const { total, compliant, pct_c } = window._qPayload;
   const body = {
-    date, emp_code: empCode, cp_ref: cpRef,
-    total, compliant,
-    mode: _qMode,
-    pct_achieved: pct_c,
-    actual_val: actual,
-    notes, fy: _qFY, bs_month: _qMonth, target_val, unit,
+    date, emp_code: empCode, cp_ref: cpRef, mp_ref,
+    total, compliant, mode: _qMode, pct_achieved: pct_c,
+    actual_val, target_val, unit, metric, status_override,
+    notes, fy: _qFY, bs_month: _qMonth,
     overwrite
   };
 

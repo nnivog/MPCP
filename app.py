@@ -2271,22 +2271,82 @@ def export_sector_summary_excel():
     fname = f"Sector_Summary_{fy or 'All'}_{_dt.now().strftime('%Y%m%d')}.xlsx"
     return _xl_response(data, fname)
 
+
+@app.route('/api/export/employee_mpcp_html/<eid>')
+def export_employee_mpcp_html(eid):
+    import datetime as _dt
+    db  = get_db()
+    emp = db.execute("SELECT * FROM employees WHERE id=?", (eid,)).fetchone()
+    if not emp: return jsonify({'error':'Not found'}), 404
+    emp = dict(emp)
+    mps = db.execute("SELECT m.* FROM mps m JOIN mp_owners o ON o.mp_id=m.id WHERE o.emp_id=? ORDER BY m.ref", (eid,)).fetchall()
+
+    rows_html = ''
+    for mp in mps:
+        mp = dict(mp)
+        cps = db.execute("SELECT * FROM cps WHERE mp_id=? ORDER BY ref", (mp['id'],)).fetchall()
+        cp_rows = ''.join(
+            f'<tr><td style="padding:3px 6px;border:1px solid #e5e7eb;font-size:9px;color:#1d4ed8;font-family:monospace;white-space:nowrap">{dict(cp)["ref"]}</td>'
+            f'<td style="padding:3px 6px;border:1px solid #e5e7eb;font-size:9px;color:#374151">{dict(cp)["title"]}</td>'
+            f'<td style="padding:3px 6px;border:1px solid #e5e7eb;font-size:9px;text-align:center;white-space:nowrap">{dict(cp).get("target","—")}</td>'
+            f'<td style="padding:3px 6px;border:1px solid #e5e7eb;font-size:9px;text-align:center">{dict(cp).get("freq","Monthly")}</td></tr>'
+            for cp in cps)
+        rows_html += (
+            f'<tr style="background:#eef2ff;page-break-inside:avoid">'
+            f'<td colspan="2" style="padding:4px 6px;border:1px solid #c7d2fe;font-weight:700;font-size:9.5px">'
+            f'<span style="background:#0a1628;color:#fff;padding:1px 6px;border-radius:4px;font-size:8px;margin-right:6px;font-family:monospace">{mp["ref"]}</span>{mp["title"]}</td>'
+            f'<td style="padding:4px 6px;border:1px solid #c7d2fe;font-size:9px;text-align:center;white-space:nowrap">{mp.get("target","—")}</td>'
+            f'<td style="padding:4px 6px;border:1px solid #c7d2fe;font-size:9px;text-align:center">{mp.get("freq","Monthly")}</td></tr>{cp_rows}')
+
+    html = f"""<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+body{{font-family:Arial,sans-serif;color:#0f1a2e;font-size:10px;padding:14px;width:190mm}}
+.header{{display:flex;align-items:center;gap:10px;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid #0a1628}}
+.avatar{{width:36px;height:36px;border-radius:50%;background:#0a1628;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0}}
+h1{{font-size:14px;font-weight:700;color:#0a1628;margin-bottom:2px}}
+.meta{{font-size:9px;color:#6b7a99}}
+.badge{{display:inline-block;padding:1px 6px;border-radius:4px;font-size:8px;font-weight:700;margin-right:3px}}
+.b-gray{{background:#f1f5f9;color:#475569}}
+.b-blue{{background:#eff6ff;color:#1d4ed8}}
+table{{width:100%;border-collapse:collapse;margin-top:8px;font-size:9px}}
+thead th{{background:#0a1628;color:#fff;padding:5px 6px;text-align:left;font-size:9px;font-weight:700}}
+thead th:nth-child(3),thead th:nth-child(4){{width:90px;text-align:center}}
+.footer{{margin-top:8px;font-size:8px;color:#9ca3af;text-align:right;border-top:1px solid #e5e7eb;padding-top:4px}}
+.no-print{{margin-bottom:8px}}
+@page{{size:A4 portrait;margin:10mm}}
+@media print{{
+  .no-print{{display:none!important}}
+  body{{padding:0;width:190mm}}
+  *{{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+  tr{{page-break-inside:avoid}}
+}}
+</style></head><body>
+<div class="no-print">
+  <button onclick="window.print()" style="padding:5px 14px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px">&#128438; Print / Save PDF (A4)</button>
+</div>
+<div class="header">
+  <div class="avatar">{"".join(w[0] for w in emp["name"].split()[:2]).upper()}</div>
+  <div style="flex:1">
+    <h1>{emp["name"]}</h1>
+    <div class="meta" style="margin-bottom:4px">{emp.get("role","") or emp.get("dept","")}</div>
+    <div>
+      <span class="badge b-gray">{emp.get("emp_code","—")}</span>
+      <span class="badge b-gray">Level {emp.get("level","")}</span>
+      <span class="badge b-blue">{len(mps)} MPs &middot; {sum(1 for mp in mps for _ in db.execute("SELECT id FROM cps WHERE mp_id=?", (dict(mp)["id"],)).fetchall())} CPs</span>
+    </div>
+  </div>
+  <div style="text-align:right;font-size:8px;color:#9ca3af">MPCP Framework<br>Sipradi Trading Pvt. Ltd.<br>{_dt.datetime.now().strftime("%d %b %Y")}</div>
+</div>
+<table>
+  <thead><tr><th>Ref</th><th>Managing Point / Checking Point</th><th style="text-align:center">Target / SLA</th><th style="text-align:center">Frequency</th></tr></thead>
+  <tbody>{rows_html or '<tr><td colspan="4" style="padding:16px;text-align:center;color:#9ca3af;font-style:italic">No MPs assigned</td></tr>'}</tbody>
+</table>
+<div class="footer">Confidential · MPCP System · Sipradi Trading Pvt. Ltd. · Generated {_dt.datetime.now().strftime("%d %b %Y %H:%M")}</div>
+</body></html>"""
+    return html, 200, {'Content-Type': 'text/html; charset=utf-8'}
+
+
+
+
 if __name__ == '__main__':
-    init_db()
-    print("\n" + "="*55)
-    print(" Sipradi SC-MPCP System v3.0")
-    print(" http://localhost:5050")
-    print("="*55 + "\n")
     app.run(debug=False, port=5050, host='0.0.0.0')
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# PATCH: Missing routes that fix all 5 reported issues
-# 1. Data save: bulk_delete, bs_today, locations, sectors stubs
-# 2. Auto-calc: handled in perf_quick (already correct) + frontend
-# 3. Modal backdrop: fixed in index.html (JS patch)
-# 4. FY detection: fy_from_date already exists; bs_today added here
-# 5. Cascade new entry: cascade_assign field-name mapping fixed
-# ══════════════════════════════════════════════════════════════════════════
-
-# ── BS TODAY ──────────────────────────────────────────────────────────────

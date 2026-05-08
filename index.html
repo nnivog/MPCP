@@ -3417,6 +3417,7 @@ async function renderOrgTree(){
   html+='<select class="form-select" id="ot-fy" style="width:110px"><option value="">All FY</option>'+(S.fyCache||[]).map(f=>'<option value="'+esc(f.fy)+'">'+esc(f.fy)+'</option>').join('')+'</select>'
   html+='<select class="form-select" id="ot-fy2" style="width:130px"><option value="">Compare FY…</option>'+(S.fyCache||[]).map(f=>'<option value="'+esc(f.fy)+'">'+esc(f.fy)+'</option>').join('')+'</select>'
   html+='<button class="btn btn-primary btn-sm" onclick="loadOrgTree()">&#127795; Load Tree</button>'
+  html+='<button class="btn btn-ghost btn-sm" onclick="printOrgTree()" title="Print org tree as PDF">&#128438; Print Tree</button>'
   html+='<button class="btn btn-ghost btn-sm" onclick="exportOpen(\'/api/export/org_tree_html?fy=\'+(q(\'#ot-fy\')?.value||\'\')+\'&loc=\'+(q(\'#ot-loc\')?.value||\'\'))">&#128438; PDF Print</button>'
   html+='<button class="btn btn-ghost btn-sm" onclick="exportXL(\'/api/export/team_mpcp_excel?fy=\'+(q(\'#ot-fy\')?.value||\'\'))">&#128196; Team Excel</button>'
   html+='<button class="btn btn-ghost btn-sm" onclick="openAddEmpToOrg()">+ Add Person</button>'
@@ -3445,6 +3446,140 @@ async function loadOrgTree(){
   } else {
     q('#org-tree-wrap').innerHTML='<div style="overflow-x:auto;padding:16px">'+drawOrgLevel(orgTreeData,0)+'</div>'
   }
+}
+
+
+function printOrgTree() {
+  const wrap = q('#org-tree-wrap');
+  if (!wrap || wrap.querySelector('.spinner') ||
+      wrap.innerHTML.includes('Click <strong>Load')) {
+    toast('Load the tree first', 'err'); return;
+  }
+  if (!orgTreeData || !orgTreeData.length) {
+    toast('No tree data', 'err'); return;
+  }
+  const fy  = q('#ot-fy')?.value  || S.currentFY || '';
+  const loc = q('#ot-loc')?.value || 'All Locations';
+
+  function col(pct) {
+    return pct===null||pct===undefined?'#94a3b8':pct>=95?'#16a34a':pct>=80?'#d97706':'#dc2626';
+  }
+  function av(name) {
+    return (name||'').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+  }
+  function lvlColor(l) {
+    return l==1?'#0a1628':l==2?'#1d4ed8':'#047857';
+  }
+  function drawNode(n) {
+    const ownPct  = n.own    && n.own.pct    !== null ? n.own.pct    : null;
+    const rPct    = n.rollup && n.rollup.pct !== null ? n.rollup.pct : null;
+    const showPct = rPct !== null ? rPct : ownPct;
+    const pctStr  = showPct !== null ? showPct + '%' : '—';
+    const barCol  = col(showPct);
+    const lc      = lvlColor(n.level||3);
+    const mpCnt   = (n.mps||[]).length;
+    const cpCnt   = (n.mps||[]).reduce((s,m)=>s+(m.cps||[]).length,0);
+    const hasKids = n.children && n.children.length > 0;
+    return `<div class="node-wrap${hasKids?' has-kids':''}">
+      <div class="node" style="border-top:3px solid ${lc}">
+        <div style="display:flex;gap:5px;align-items:center;margin-bottom:3px">
+          <div style="width:22px;height:22px;border-radius:50%;background:${lc};color:#fff;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:700;flex-shrink:0">${av(n.name)}</div>
+          <div style="min-width:0;flex:1;overflow:hidden">
+            <div style="font-weight:700;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${n.name}</div>
+            <div style="font-size:7.5px;color:#6b7a99;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${n.emp_code||''} · L${n.level||''}</div>
+          </div>
+        </div>
+        <div style="font-size:7.5px;color:#475569;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${n.role||n.dept||''}</div>
+        <div style="display:flex;gap:6px;font-size:7.5px;color:#6b7a99;margin-bottom:4px">
+          <span>${mpCnt} MP</span><span>${cpCnt} CP</span>
+          ${n.children&&n.children.length?`<span>${n.children.length} rep</span>`:''}
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:7.5px;margin-bottom:1px">
+          <span style="color:#6b7a99">${rPct!==null?'Rollup':'Own'}</span>
+          <span style="font-weight:700;color:${barCol}">${pctStr}</span>
+        </div>
+        <div style="height:3px;background:#f1f5f9;border-radius:2px;overflow:hidden">
+          <div style="height:3px;width:${Math.min(showPct||0,100)}%;background:${barCol};border-radius:2px"></div>
+        </div>
+      </div>
+      ${hasKids ? `<div class="connector-down"></div><div class="children">${n.children.map(drawNode).join('')}</div>` : ''}
+    </div>`;
+  }
+
+  const treeHtml = orgTreeData.map(drawNode).join('');
+  const totalNodes = (function count(arr){return arr.reduce((s,n)=>s+1+count(n.children||[]),0)})(orgTreeData);
+  // Count max leaf nodes at widest level for width estimate
+  const maxDepth = (function depth(arr,d){return arr.reduce((mx,n)=>Math.max(mx,depth(n.children||[],d+1)),d)})(orgTreeData,1);
+  const leafCount = (function leaves(arr){return arr.reduce((s,n)=>s+(n.children&&n.children.length?leaves(n.children):1),0)})(orgTreeData);
+  // A4 landscape usable px at 96dpi: ~1010w x 718h
+  const A4W = 1010; const A4H = 680;
+  const nodeW = 148; const nodeH = 88; const gapX = 8; const gapY = 20;
+  const treeW = leafCount * (nodeW + gapX);
+  const treeH = maxDepth * (nodeH + gapY);
+  const scaleX = (A4W / treeW);
+  const scaleY = (A4H / treeH);
+  const scale = Math.min(scaleX, scaleY, 0.99).toFixed(3);
+
+  const w = window.open('','_blank','width=1600,height=1000');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:#fff;color:#0f1a2e;padding:6px;width:100%;overflow:visible}
+.no-print{margin-bottom:8px}
+.print-hdr{display:flex;justify-content:space-between;align-items:center;padding-bottom:6px;border-bottom:2px solid #0a1628;margin-bottom:10px}
+h1{font-size:13px;font-weight:700;color:#0a1628}
+.meta{font-size:9px;color:#6b7a99;margin-top:1px}
+.legend{display:flex;gap:10px;font-size:8px;color:#6b7a99}
+.leg{display:flex;align-items:center;gap:3px}
+.leg span{width:8px;height:8px;border-radius:2px;display:inline-block}
+
+/* Scale wrapper */
+.scale-wrap{transform-origin:top center;transform:scale(${scale});width:${Math.round(100/scale)}%}
+.scale-outer{width:100%;overflow:hidden;display:flex;justify-content:center}
+
+/* Tree */
+.node-wrap{display:flex;flex-direction:column;align-items:center;position:relative;padding-top:0}
+.node{background:#fff;border:1px solid #d1d5db;border-radius:6px;padding:5px 6px;min-width:120px;max-width:148px;position:relative}
+.children{display:flex;justify-content:center;gap:8px;position:relative;padding-top:16px;margin-top:0}
+
+/* vertical line: parent node down to horizontal bar */
+.connector-down{width:1px;height:16px;background:#94a3b8;margin:0 auto}
+
+/* horizontal bar above children */
+.children::before{content:'';position:absolute;top:0;height:1px;background:#94a3b8;
+  left:calc(50% - (100% - 148px)/2);right:calc(50% - (100% - 148px)/2);
+  left:10%;right:10%}
+
+/* vertical drop from bar to each child node */
+.node-wrap::before{content:'';position:absolute;top:0;left:50%;width:1px;height:16px;background:#94a3b8}
+.children > .node-wrap:first-child::before,
+.children > .node-wrap:last-child::before{display:block}
+
+@page{size:A4 landscape;margin:6mm}
+@media print{
+  .no-print{display:none!important}
+  body{padding:0;overflow:visible}
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+}
+</style></head><body>
+<div class="no-print">
+  <button onclick="window.print()" style="padding:5px 14px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px;margin-right:6px">&#128438; Print / Save PDF</button>
+  <button onclick="window.close()" style="padding:5px 12px;background:#f8fafc;color:#374151;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;font-size:11px">Close</button>
+</div>
+<div class="print-hdr">
+  <div><h1>Organisation Hierarchy — Compliance View</h1>
+  <div class="meta">FY: ${fy||'All'} &nbsp;·&nbsp; ${loc} &nbsp;·&nbsp; ${new Date().toLocaleDateString('en-GB')} &nbsp;·&nbsp; ${totalNodes} employees</div></div>
+  <div class="legend">
+    <div class="leg"><span style="background:#0a1628"></span>L1 HOD</div>
+    <div class="leg"><span style="background:#1d4ed8"></span>L2 Lead</div>
+    <div class="leg"><span style="background:#047857"></span>L3 Ops</div>
+    <div class="leg"><span style="background:#16a34a"></span>≥95%</div>
+    <div class="leg"><span style="background:#d97706"></span>80–94%</div>
+    <div class="leg"><span style="background:#dc2626"></span>&lt;80%</div>
+  </div>
+</div>
+<div class="scale-outer"><div class="scale-wrap"><div style="display:flex;justify-content:center;gap:8px">${treeHtml}</div></div></div>
+</body></html>`);
+  w.document.close();
 }
 
 function pctCol(p){return p===null||p===undefined?'#94a3b8':p>=95?'#16a34a':p>=80?'#d97706':'#dc2626'}

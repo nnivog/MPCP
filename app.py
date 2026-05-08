@@ -976,21 +976,32 @@ def perf_quick():
     if lock and lock['locked']:
         return json_error(f'FY {fy} is locked. Unlock first.', 403)
 
+    target_val = float(d.get('target_val', 0) or 0)
+    unit       = str(d.get('unit','%') or '%')[:20]
     total = int(d.get('total', 0) or 0)
-    if total <= 0: return json_error('Total must be > 0')
+    if total <= 0 and not d.get('status_override'): return json_error('Total must be > 0 (or set Status Override)')
 
-    mode = d.get('mode','count')
-    if mode == 'percent':
-        pct_c     = float(d.get('pct_achieved', 0) or 0)
-        if not (0 <= pct_c <= 100): return json_error('Percentage must be 0–100')
-        compliant = round(total * pct_c / 100)
+    status_override = d.get('status_override','').strip().upper()
+
+    if status_override == 'NA':
+        compliant = 0; nc = 0; pct_c = 0; pct_nc = 0
+    elif status_override in ('C','NC'):
+        compliant = total if status_override == 'C' else 0
+        nc = 0 if status_override == 'C' else total
+        pct_c = 100.0 if status_override == 'C' else 0.0
+        pct_nc = 0.0 if status_override == 'C' else 100.0
     else:
-        compliant = int(d.get('compliant', 0) or 0)
-        if compliant > total: return json_error('Compliant count cannot exceed total')
-        pct_c     = round(compliant / total * 100, 2)
-
-    nc     = total - compliant
-    pct_nc = round(nc / total * 100, 2)
+        mode = d.get('mode','count')
+        if mode == 'percent':
+            pct_c     = float(d.get('pct_achieved', 0) or 0)
+            if not (0 <= pct_c <= 100): return json_error('Percentage must be 0–100')
+            compliant = round(total * pct_c / 100)
+        else:
+            compliant = int(d.get('compliant', 0) or 0)
+            if compliant > total: return json_error('Compliant count cannot exceed total')
+            pct_c     = round(compliant / total * 100, 2)
+        nc     = total - compliant
+        pct_nc = round(nc / total * 100, 2)
 
     # Parse target from CP
     raw_tgt = (cp['target'] or '').strip()

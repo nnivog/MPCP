@@ -3050,87 +3050,6 @@ function renderCascadeTab() {
 }
 
 // ── BUILDER VIEW ──────────────────────────────────────────────────────────────
-function renderCascadeBuilder() {
-    const levels = [1,2,3]
-    let html = `
-    <div class="info-box mb-16">
-      <p><strong>How the cascade works:</strong> Your <strong>CP</strong> becomes your subordinate's <strong>MP</strong>.
-      Select a parent employee, pick one of their CPs, then select which subordinate's MP it maps to.
-      The system will draw the full chain automatically.</p>
-    </div>
-    <div class="section-head">
-      <div><h2>Cascade Builder</h2>
-      <p>Link a superior's CP to a subordinate's MP to build the performance cascade chain</p></div>
-      <button class="btn btn-primary btn-sm" onclick="openCascadeForm()">+ New Cascade Link</button>
-    </div>`
-
-    // Show existing links grouped by parent
-    const byParent = {}
-    S.cascade.forEach(function(lnk) {
-        if (!byParent[lnk.parent_emp_id]) byParent[lnk.parent_emp_id] = []
-        byParent[lnk.parent_emp_id].push(lnk)
-    })
-
-    if (S.cascade.length === 0) {
-        html += `<div class="card"><div class="card-body">
-            <p class="text-sm text-muted italic" style="text-align:center;padding:20px">
-            No cascade links yet. Click <strong>+ New Cascade Link</strong> to start mapping the hierarchy.</p>
-        </div></div>`
-    } else {
-        html += '<div style="display:flex;flex-direction:column;gap:12px">'
-        Object.entries(byParent).forEach(function(kv) {
-            const parentId = kv[0]; const links = kv[1]
-            const parent = getEmp(parentId)
-            if (!parent) return
-            const col = dc(parent.dept)
-            html += `<div class="card">
-              <div class="card-head" style="background:${col}10;border-bottom-color:${col}40">
-                <div style="display:flex;align-items:center;gap:10px">
-                  <div class="avatar avatar-sm" style="background:${col}">${av(parent.name)}</div>
-                  <div>
-                    <p style="font-weight:900;font-family:'Syne',sans-serif">${esc(parent.name)}</p>
-                    <p class="text-xs text-muted">${esc(parent.role)} &middot; ${esc(parent.emp_code||'')}</p>
-                  </div>
-                  <span class="level-badge level-${parent.level}">Level ${parent.level}</span>
-                </div>
-              </div>
-              <div class="card-body">`
-
-            links.forEach(function(lnk) {
-                const childEmp = getEmp(lnk.child_emp_id)
-                const childCol = childEmp ? dc(childEmp.dept) : '#475569'
-                html += `<div style="display:flex;align-items:flex-start;gap:0;margin-bottom:10px">
-                  <div style="flex:1">
-                    <div class="cascade-cp-row linked" style="cursor:default">
-                      <span class="ref-badge ref-badge-blue">${esc(lnk.cp_ref||'CP')}</span>
-                      <span class="text-sm font-bold flex-1">${esc(lnk.cp_title||'')}</span>
-                      <span class="badge badge-c text-xxs">CP</span>
-                    </div>
-                    <div class="cascade-arrow">&#8595; becomes MP for &#8595;</div>
-                    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:8px">
-                      ${childEmp?`<div class="avatar avatar-sm" style="background:${childCol}">${av(childEmp.name)}</div>
-                      <div>
-                        <p class="text-xs font-bold">${esc(childEmp.name)}</p>
-                        <p class="text-xxs text-muted">${esc(childEmp.emp_code||'')} &middot; ${esc(childEmp.role||'')}</p>
-                      </div>`:'<span class="text-xs text-muted">Unknown employee</span>'}
-                      <div style="flex:1">
-                        <span class="ref-badge">${esc(lnk.mp_ref||'MP')}</span>
-                        <span class="text-xs font-bold ml-4">${esc(lnk.mp_title||'')}</span>
-                      </div>
-                      <span class="badge" style="background:#dcfce7;color:#15803d">MP</span>
-                    </div>
-                  </div>
-                  <button class="btn-icon ml-8" style="color:var(--red);margin-left:8px;margin-top:4px" onclick="delCascadeLink('${lnk.id}')" title="Remove link">&#128465;</button>
-                </div>`
-            })
-
-            html += '</div></div>'
-        })
-        html += '</div>'
-    }
-    q('#cascade-content').innerHTML = html
-}
-
 function openCascadeForm() {
     // Step 1: pick parent employee
     const empOpts = S.employees.map(function(e) {
@@ -3252,7 +3171,7 @@ function updateCascadePreview() {
 
 async function delCascadeLink(id) {
     if (!confirm('Remove this cascade link?')) return
-    await api.del('/api/cascade/'+id)
+    await api.del('/api/cascade_links/'+id)
     toast('Link removed','ok'); await loadAll()
 }
 
@@ -3720,7 +3639,7 @@ function openAddEmpToOrg(){
 // â”€â”€ CASCADE BUILDER â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function renderCascadeBuilder(){
   const byParent={}
-  S.cascade.forEach(function(lnk){if(!byParent[lnk.parent_emp_id])byParent[lnk.parent_emp_id]=[];byParent[lnk.parent_emp_id].push(lnk)})
+  S.cascade.forEach(function(lnk){if(!byParent[lnk.superior_emp_id])byParent[lnk.superior_emp_id]=[];byParent[lnk.superior_emp_id].push(lnk)})
   let html='<div class="info-box mb-16"><p><strong>Cascade rule:</strong> Superior\'s <strong>CP</strong> becomes subordinate\'s <strong>MP</strong>. Click <strong>+ New Link</strong> to map the chain.</p></div>'
   html+='<div class="section-head"><div><h2>Cascade Links</h2><p>'+S.cascade.length+' links configured</p></div>'
   html+='<button class="btn btn-primary btn-sm" onclick="openCascadeForm()">+ New Link</button></div>'
@@ -3732,7 +3651,7 @@ function renderCascadeBuilder(){
   } else {
     html+='<div style="display:flex;flex-direction:column;gap:12px">'
     Object.entries(byParent).forEach(function(kv){
-      const pid=kv[0],links=kv[1],parent=getEmp(pid); if(!parent)return
+      const pid=kv[0],links=kv[1],parent=getEmp(pid)||getEmp(kv[0]); if(!parent)return
       const col=dc(parent.dept)
       html+='<div class="card"><div class="card-head" style="background:'+col+'10">'
       html+='<div style="display:flex;align-items:center;gap:10px">'
@@ -3741,7 +3660,7 @@ function renderCascadeBuilder(){
       html+='<p class="text-xxs text-muted">'+esc(parent.emp_code||'')+' &middot; L'+parent.level+' &middot; '+esc(parent.dept)+'</p></div>'
       html+='</div></div><div class="card-body">'
       links.forEach(function(lnk){
-        const child=getEmp(lnk.child_emp_id)
+        const child=getEmp(lnk.subordinate_emp_id)
         html+='<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">'
         html+='<div style="flex:1">'
         html+='<div style="display:flex;gap:6px;align-items:center;padding:8px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;margin-bottom:4px">'
@@ -3756,7 +3675,8 @@ function renderCascadeBuilder(){
         html+='<span class="ref-badge" style="margin-left:4px">'+esc(lnk.mp_ref||'MP')+'</span>'
         html+='<span class="text-xs flex-1">'+esc(lnk.mp_title||'')+'</span>'
         html+='<span class="badge badge-c" style="font-size:9px">MP</span></div></div>'
-        html+='<button class="btn-icon" style="color:var(--red);flex-shrink:0" onclick="delCascadeLink(\''+lnk.id+'\')">&#128465;</button></div>'
+        html+='<button class="btn-icon" style="color:var(--blue);flex-shrink:0;margin-right:4px" onclick="openEditCascadeLink(\''+lnk.id+'\',\''+lnk.superior_emp_id+'\',\''+lnk.superior_cp_id+'\'\',\''+lnk.subordinate_emp_id+'\'\',\''+lnk.subordinate_mp_id+'\')" title="Edit">&#9998;</button>'
+        html+='<button class="btn-icon" style="color:var(--red);flex-shrink:0" onclick="delCascadeLink(\''+lnk.id+'\')">' + '&#128465;</button></div>'
       })
       html+='</div></div>'
     })
@@ -3849,9 +3769,79 @@ function refreshCascadePreview(){
   } else prev.style.display='none'
 }
 
+
+function openEditCascadeLink(lid, supEmpId, supCpId, subEmpId, subMpId){
+  const supEmp = getEmp(supEmpId)
+  const subEmp = getEmp(subEmpId)
+  const supCPs = S.cps.filter(c=>(c.owner_ids||[]).includes(supEmpId))
+  const subMPs = S.mps.filter(m=>(m.owner_ids||[]).includes(subEmpId))
+
+  function empOpts(selId) {
+    return S.employees.map(e=>'<option value="'+e.id+'"'+(e.id===selId?' selected':'')+'>'+esc(e.name)+' ('+esc(e.emp_code||'')+' L'+e.level+')</option>').join('')
+  }
+  const cpOpts = supCPs.map(c=>'<option value="'+c.id+'"'+(c.id===supCpId?' selected':'')+'>['
+    +esc(c.ref)+'] '+esc(c.title.slice(0,50))+'</option>').join('')
+  const mpOpts = '<option value="">Auto from CP</option>'+subMPs.map(m=>'<option value="'+m.id+'"'
+    +(m.id===subMpId?' selected':'')+'>['
+    +esc(m.ref)+'] '+esc(m.title.slice(0,50))+'</option>').join('')
+
+  openModal('Edit Cascade Link',
+    '<div class="info-box mb-12"><p>Update the CP to MP cascade mapping.</p></div>'
+    +'<div class="form-group"><label class="form-label">Superior Employee</label>'
+    +'<select class="form-select" id="ecl-sup" onchange="refreshEditCascadeCP()"><option value="">Select...</option>'
+    +empOpts(supEmpId)+'</select></div>'
+    +'<div class="form-group"><label class="form-label">Their CP (cascades down)</label>'
+    +'<select class="form-select" id="ecl-cp"><option value="">Select CP...</option>'+cpOpts+'</select></div>'
+    +'<div class="form-group"><label class="form-label">Subordinate Employee</label>'
+    +'<select class="form-select" id="ecl-sub" onchange="refreshEditCascadeMP()"><option value="">Select...</option>'
+    +empOpts(subEmpId)+'</select></div>'
+    +'<div class="form-group"><label class="form-label">Their MP</label>'
+    +'<select class="form-select" id="ecl-mp"><option value="">Auto from CP</option>'+mpOpts+'</select></div>',
+    [{label:'Save Changes', cls:'btn-primary', fn: async function(){
+      const payload = {
+        superior_emp_id:    q('#ecl-sup').value,
+        superior_cp_id:     q('#ecl-cp').value,
+        subordinate_emp_id: q('#ecl-sub').value,
+        subordinate_mp_id:  q('#ecl-mp').value||''
+      }
+      if(!payload.superior_emp_id||!payload.superior_cp_id||!payload.subordinate_emp_id){
+        toast('Fill all required fields','err'); return
+      }
+      const res = await api.put('/api/cascade_links/'+lid, payload)
+      if(res&&res.ok){ toast('Link updated','ok'); closeModal(); await loadAll(); if(orgSub==='builder') renderCascadeBuilder() }
+      else toast('Error: '+(res&&res.error||'Unknown'),'err')
+    }},
+    {label:'Cancel',cls:'btn-ghost',fn:()=>closeModal()}
+  ], true)
+}
+
+function refreshEditCascadeCP(){
+  const pid=q('#ecl-sup')?.value, sel=q('#ecl-cp'); if(!sel)return
+  const cps=S.cps.filter(c=>(c.owner_ids||[]).includes(pid))
+  sel.innerHTML='<option value="">Select CP...</option>'+cps.map(c=>'<option value="'+c.id+'">['+esc(c.ref)+'] '+esc(c.title.slice(0,50))+'</option>').join('')
+}
+
+function refreshEditCascadeMP(){
+  const eid=q('#ecl-sub')?.value, sel=q('#ecl-mp'); if(!sel)return
+  const mps=S.mps.filter(m=>(m.owner_ids||[]).includes(eid))
+  sel.innerHTML='<option value="">Auto from CP</option>'+mps.map(m=>'<option value="'+m.id+'">['+esc(m.ref)+'] '+esc(m.title.slice(0,50))+'</option>').join('')
+}
+
+
+function refreshEditCascadeCP(lid){
+  const pid=q('#ecl-sup')?.value, sel=q('#ecl-cp'); if(!sel)return
+  const cps=S.cps.filter(c=>(c.owner_ids||[]).includes(pid))
+  sel.innerHTML=cps.map(c=>'<option value="'+c.id+'">['+esc(c.ref)+'] '+esc(c.title.slice(0,50))+'</option>').join('')
+}
+function refreshEditCascadeMP(lid){
+  const eid=q('#ecl-sub')?.value, sel=q('#ecl-mp'); if(!sel)return
+  const mps=S.mps.filter(m=>(m.owner_ids||[]).includes(eid))
+  sel.innerHTML='<option value="">Auto from CP</option>'+mps.map(m=>'<option value="'+m.id+'">['+esc(m.ref)+'] '+esc(m.title.slice(0,50))+'</option>').join('')
+}
+
 async function delCascadeLink(id){
   if(!confirm('Remove this cascade link?'))return
-  await api.del('/api/cascade/'+id)
+  await api.del('/api/cascade_links/'+id)
   toast('Link removed','ok'); await loadAll()
   if(orgSub==='builder')renderCascadeBuilder()
 }

@@ -2454,53 +2454,77 @@ thead th:nth-child(3),thead th:nth-child(4){{width:90px;text-align:center}}
 # AUTH ROUTES
 # ══════════════════════════════════════════════════════════════════════════
 
-LOGIN_HTML = """<!DOCTYPE html><html><head><meta charset="UTF-8">
+LOGIN_HTML = """
+<!DOCTYPE html><html><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MPCP Login — Sipradi</title>
+<title>MPCP Login</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;background:#0a1628;min-height:100vh;display:flex;align-items:center;justify-content:center}
-.card{background:#fff;border-radius:16px;padding:40px;width:360px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+body{font-family:Arial,sans-serif;background:linear-gradient(135deg,#0a1628,#1a2d4a);min-height:100vh;display:flex;align-items:center;justify-content:center}
+.card{background:#fff;border-radius:16px;padding:36px;width:380px;box-shadow:0 24px 80px rgba(0,0,0,.5)}
 .logo{text-align:center;margin-bottom:24px}
-.logo h1{font-size:22px;font-weight:900;color:#0a1628;letter-spacing:-0.5px}
-.logo p{font-size:11px;color:#6b7a99;margin-top:4px}
-.form-group{margin-bottom:16px}
-label{display:block;font-size:11px;font-weight:700;color:#374151;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
-input{width:100%;padding:10px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:14px;outline:none;transition:.2s}
-input:focus{border-color:#1d4ed8;box-shadow:0 0 0 3px #1d4ed820}
-.btn{width:100%;padding:12px;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;margin-top:8px;transition:.2s}
-.btn:hover{background:#1e40af}
-.err{background:#fef2f2;border:1px solid #fecaca;color:#dc2626;padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:16px}
-.dept{text-align:center;margin-top:16px;font-size:11px;color:#6b7a99}
+.logo h1{font-size:20px;font-weight:900;color:#0a1628}
+.logo p{font-size:11px;color:#6b7a99;margin-top:3px}
+.fg{margin-bottom:14px}
+label{display:block;font-size:10px;font-weight:700;color:#374151;margin-bottom:5px;text-transform:uppercase;letter-spacing:.6px}
+input,select{width:100%;padding:10px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;transition:.2s;color:#0f1a2e}
+input:focus,select:focus{border-color:#1d4ed8;box-shadow:0 0 0 3px #1d4ed820}
+.btn{width:100%;padding:12px;background:#0a1628;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;margin-top:6px}
+.btn:hover{background:#1d4ed8}
+.err{background:#fef2f2;border:1px solid #fecaca;color:#dc2626;padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:14px}
+.divider{text-align:center;font-size:10px;color:#9ca3af;margin:14px 0;position:relative}
+.divider::before{content:"";position:absolute;top:50%;left:0;right:0;height:1px;background:#e5e7eb}
+.divider span{background:#fff;padding:0 10px;position:relative}
+.alt-link{display:block;text-align:center;font-size:12px;color:#6b7a99;text-decoration:none;padding:9px;border:1.5px solid #e5e7eb;border-radius:8px;font-weight:600}
+.alt-link:hover{border-color:#0a1628;color:#0a1628}
+.foot{text-align:center;margin-top:18px;font-size:10px;color:#9ca3af}
 </style></head><body>
 <div class="card">
-  <div class="logo">
-    <h1>SC-MPCP System</h1>
-    <p>Sipradi Trading Pvt. Ltd.</p>
-  </div>
-  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <div class="logo"><h1>&#128200; SC-MPCP System</h1><p>Sipradi Trading Pvt. Ltd.</p></div>
+  {% if error %}<div class="err">&#9888; {{ error }}</div>{% endif %}
   <form method="POST" action="/login">
-    <div class="form-group"><label>Username</label>
-      <input type="text" name="username" placeholder="Enter username" autofocus required></div>
-    <div class="form-group"><label>Password</label>
+    {% if not admin_mode %}
+    <div class="fg"><label>Department</label>
+      <select name="dept_hint" id="dept-sel">
+        <option value="">&#8212; Select your department &#8212;</option>
+        {% for d in departments %}
+        <option value="{{ d.code }}"{% if d.code == selected_dept %} selected{% endif %}>{{ d.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    <div class="fg"><label>Username</label>
+      <input type="text" name="username" placeholder="Enter username" autofocus required value="{{ prefill_username }}"></div>
+    <div class="fg"><label>Password</label>
       <input type="password" name="password" placeholder="Enter password" required></div>
-    <button class="btn" type="submit">Sign In</button>
+    {% if admin_mode %}<input type="hidden" name="admin_mode" value="1">{% endif %}
+    <button class="btn">{% if admin_mode %}&#128274; Sign In as Admin{% else %}Sign In{% endif %}</button>
   </form>
-  <div class="dept" id="dept-label"></div>
-</div>
-</body></html>"""
-
+  <div class="divider"><span>or</span></div>
+  {% if not admin_mode %}
+  <a href="/login?admin=1" class="alt-link">&#128274; Master Admin Login</a>
+  {% else %}
+  <a href="/login" class="alt-link">&#8592; Back to Department Login</a>
+  {% endif %}
+  <div class="foot">SC-MPCP &copy; {{ year }} Sipradi Trading Pvt. Ltd.</div>
+</div></body></html>
+"""
 @app.route('/login', methods=['GET','POST'])
 def login():
     error = None
+    admin_mode = request.args.get('admin')=='1' or request.form.get('admin_mode')=='1'
+    db = get_master_conn()
+    departments = R(db.execute('SELECT code,name FROM departments WHERE active=1 ORDER BY name').fetchall())
+    db.close()
+    selected_dept = request.form.get('dept_hint','') or request.args.get('dept','')
     if request.method == 'POST':
         username = request.form.get('username','').strip().lower()
         password = request.form.get('password','')
         db = get_master_conn()
         user = db.execute(
-            "SELECT u.*,d.name dept_name FROM users u "
-            "LEFT JOIN departments d ON d.code=u.dept_code "
-            "WHERE u.username=? AND u.active=1", (username,)
+            'SELECT u.*,d.name dept_name FROM users u '
+            'LEFT JOIN departments d ON d.code=u.dept_code '
+            'WHERE u.username=? AND u.active=1', (username,)
         ).fetchone()
         db.close()
         if user and verify_password(password, user['password_hash']):
@@ -2511,14 +2535,18 @@ def login():
                 'full_name': user['full_name'],
                 'role':      user['role'],
                 'dept_code': user['dept_code'],
-                'dept_name': user['dept_name'] or 'All Departments',
+                'dept_name': dict(user).get('dept_name') or 'All Departments',
                 'emp_code':  user['emp_code'] or '',
                 'active_dept': user['dept_code']
             }
             return redirect('/')
         error = 'Invalid username or password'
-    return render_template_string(LOGIN_HTML, error=error)
-
+    import datetime as _dt
+    return render_template_string(LOGIN_HTML,
+        error=error, admin_mode=admin_mode,
+        departments=departments, selected_dept=selected_dept,
+        prefill_username='admin' if admin_mode else '',
+        year=_dt.datetime.now().year)
 @app.route('/logout')
 def logout():
     session.clear()
@@ -2644,7 +2672,7 @@ def users_api():
     # dept_admin can only create users in own dept
     dept_code = d.get('dept_code') or u.get('dept_code')
     if u['role']=='dept_admin': dept_code = u['dept_code']
-    if d['role'] not in ('master_admin','dept_admin','user'):
+    if d['role'] not in ('master_admin','dept_admin','moderator','user'):
         return json_error('Invalid role')
     new_id = uid()
     try:
@@ -2712,6 +2740,206 @@ def master_summary():
         d.close()
         summary.append({**dept,'employees':emps,'mps':mps,'cps':cps,'compliance':pct})
     return jsonify(summary)
+
+
+# ── ADMIN PANEL ────────────────────────────────────────────────────────────
+ADMIN_HTML = """<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MPCP Admin Panel</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:#f8fafc;color:#0f1a2e;font-size:13px}
+.topbar{background:#0a1628;color:#fff;padding:12px 24px;display:flex;justify-content:space-between;align-items:center}
+.topbar h1{font-size:15px;font-weight:800}
+.topbar a{color:#60a5fa;font-size:12px;text-decoration:none}
+.container{max-width:1100px;margin:24px auto;padding:0 16px}
+.card{background:#fff;border-radius:12px;border:1px solid #e5e7eb;margin-bottom:20px;overflow:hidden}
+.card-head{padding:14px 20px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;background:#f8fafc}
+.card-head h2{font-size:13px;font-weight:700;color:#0a1628}
+table{width:100%;border-collapse:collapse}
+thead th{padding:9px 14px;text-align:left;font-size:10px;font-weight:700;color:#6b7a99;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #e5e7eb;background:#f8fafc}
+tbody td{padding:9px 14px;border-bottom:1px solid #f1f5f9;font-size:12px}
+tbody tr:hover{background:#f8fafc}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700}
+.b-master{background:#ede9fe;color:#7c3aed}
+.b-dept{background:#dbeafe;color:#1d4ed8}
+.b-mod{background:#fef3c7;color:#92400e}
+.b-user{background:#dcfce7;color:#166534}
+.b-inactive{background:#fee2e2;color:#dc2626}
+.btn{padding:6px 14px;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer}
+.btn-primary{background:#0a1628;color:#fff}
+.btn-danger{background:#fee2e2;color:#dc2626;border:1px solid #fecaca}
+.btn-warn{background:#fef3c7;color:#92400e;border:1px solid #fde68a}
+.form-row{display:flex;gap:10px;flex-wrap:wrap;padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#f0f9ff}
+.form-row label{font-size:10px;font-weight:700;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase}
+.form-row input,.form-row select{padding:7px 10px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:12px;min-width:150px}
+.form-row input:focus,.form-row select:focus{border-color:#1d4ed8;outline:none}
+.err{background:#fef2f2;color:#dc2626;padding:8px 14px;border-radius:6px;font-size:12px;margin:10px 20px}
+.ok{background:#f0fdf4;color:#16a34a;padding:8px 14px;border-radius:6px;font-size:12px;margin:10px 20px}
+</style></head><body>
+<div class="topbar">
+  <h1>&#128272; MPCP Admin Panel — User Management</h1>
+  <div style="display:flex;gap:16px;align-items:center">
+    <a href="/">&#8592; Back to App</a>
+    <a href="/logout">Sign Out</a>
+  </div>
+</div>
+<div class="container">
+  {% if msg %}<div class="{{ 'ok' if msg_type=='ok' else 'err' }}">{{ msg }}</div>{% endif %}
+
+  <!-- Create User -->
+  <div class="card">
+    <div class="card-head"><h2>&#43; Create New User</h2></div>
+    <form method="POST" action="/admin/users/create">
+      <div class="form-row">
+        <div><label>Full Name *</label><input name="full_name" placeholder="Full name" required></div>
+        <div><label>Username *</label><input name="username" placeholder="username" required></div>
+        <div><label>Password *</label><input name="password" type="password" placeholder="Min 6 chars" required></div>
+        <div><label>Role *</label>
+          <select name="role">
+            <option value="user">User</option>
+            <option value="moderator">Moderator</option>
+            <option value="dept_admin">Dept Admin</option>
+            {% if current_user_role == 'master_admin' %}<option value="master_admin">Master Admin</option>{% endif %}
+          </select></div>
+        <div><label>Department</label>
+          <select name="dept_code">
+            <option value="">— None —</option>
+            {% for d in departments %}<option value="{{ d.code }}">{{ d.name }}</option>{% endfor %}
+          </select></div>
+        <div><label>Emp Code</label><input name="emp_code" placeholder="EMP000XXX"></div>
+        <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" type="submit">Create User</button></div>
+      </div>
+    </form>
+  </div>
+
+  <!-- Users Table -->
+  <div class="card">
+    <div class="card-head"><h2>&#128100; All Users ({{ users|length }})</h2>
+      <input placeholder="Search..." oninput="filterTable(this.value)" style="padding:5px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;width:200px">
+    </div>
+    <table id="users-table">
+      <thead><tr><th>Name / Username</th><th>Department</th><th>Role</th><th>Emp Code</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td><div style="font-weight:700">{{ u.full_name }}</div><div style="color:#6b7a99;font-size:11px">@{{ u.username }}</div></td>
+          <td>{{ u.dept_name or u.dept_code or '—' }}</td>
+          <td><span class="badge b-{{ u.role.replace('_admin','').replace('master','master') }}">{{ u.role.replace('_',' ').upper() }}</span></td>
+          <td style="font-family:monospace">{{ u.emp_code or '—' }}</td>
+          <td><span style="color:{{ '#16a34a' if u.active else '#dc2626' }};font-weight:700">{{ 'Active' if u.active else 'Inactive' }}</span></td>
+          <td style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px">
+            <form method="POST" action="/admin/users/{{ u.id }}/reset" style="display:inline">
+              <input name="new_password" placeholder="New password" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;width:120px">
+              <button class="btn btn-warn" type="submit">Reset PW</button>
+            </form>
+            <form method="POST" action="/admin/users/{{ u.id }}/toggle" style="display:inline">
+              <button class="btn {{ 'btn-danger' if u.active else 'btn-primary' }}" type="submit">{{ 'Disable' if u.active else 'Enable' }}</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+<script>
+function filterTable(q){
+  const rows=document.querySelectorAll('#users-table tbody tr')
+  rows.forEach(function(r){r.style.display=r.textContent.toLowerCase().includes(q.toLowerCase())?'':'none'})
+}
+</script>
+</body></html>"""
+
+def admin_users_data(db, current_role, current_dept):
+    if current_role == 'master_admin':
+        users = R(db.execute(
+            "SELECT u.*,d.name dept_name FROM users u LEFT JOIN departments d ON d.code=u.dept_code ORDER BY u.dept_code,u.full_name"
+        ).fetchall())
+    else:
+        users = R(db.execute(
+            "SELECT u.*,d.name dept_name FROM users u LEFT JOIN departments d ON d.code=u.dept_code WHERE u.dept_code=? ORDER BY u.full_name",
+            (current_dept,)
+        ).fetchall())
+    depts = R(db.execute("SELECT code,name FROM departments WHERE active=1 ORDER BY name").fetchall())
+    return users, depts
+
+@app.route('/admin')
+@app.route('/admin/users')
+def admin_panel():
+    err = require_role('master_admin','dept_admin')
+    if err: return err
+    u = current_user()
+    db = get_master_conn()
+    users, depts = admin_users_data(db, u['role'], u.get('dept_code'))
+    db.close()
+    return render_template_string(ADMIN_HTML, users=users, depts=depts,
+        current_user_role=u['role'], msg=None, msg_type=None)
+
+@app.route('/admin/users/create', methods=['POST'])
+def admin_create_user():
+    err = require_role('master_admin','dept_admin')
+    if err: return err
+    u = current_user()
+    d = request.form
+    pw = d.get('password','')
+    if not d.get('full_name') or not d.get('username') or not pw:
+        return _admin_msg('Full name, username and password required', 'err')
+    if len(pw) < 6:
+        return _admin_msg('Password must be at least 6 characters', 'err')
+    role = d.get('role','user')
+    if u['role'] == 'dept_admin':
+        role = role if role in ('user','moderator') else 'user'
+    dept_code = d.get('dept_code') or u.get('dept_code')
+    if u['role'] == 'dept_admin': dept_code = u['dept_code']
+    db = get_master_conn()
+    try:
+        new_id = uid()
+        db.execute("INSERT INTO users VALUES(?,?,?,?,?,?,?,?,?)",
+            (new_id, d['username'].strip().lower(), hash_password(pw),
+             d['full_name'], role, dept_code, d.get('emp_code',''), 1,
+             datetime.datetime.now().isoformat()))
+        db.commit()
+        return _admin_msg(f"User @{d['username']} created successfully", 'ok')
+    except sqlite3.IntegrityError:
+        return _admin_msg(f"Username @{d['username']} already exists", 'err')
+    finally: db.close()
+
+@app.route('/admin/users/<uid2>/reset', methods=['POST'])
+def admin_reset_pw(uid2):
+    err = require_role('master_admin','dept_admin')
+    if err: return err
+    pw = request.form.get('new_password','')
+    if len(pw) < 6:
+        return _admin_msg('Password must be at least 6 characters', 'err')
+    db = get_master_conn()
+    db.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(pw), uid2))
+    db.commit(); db.close()
+    return _admin_msg('Password reset successfully', 'ok')
+
+@app.route('/admin/users/<uid2>/toggle', methods=['POST'])
+def admin_toggle_user(uid2):
+    err = require_role('master_admin','dept_admin')
+    if err: return err
+    u = current_user()
+    db = get_master_conn()
+    target = db.execute("SELECT * FROM users WHERE id=?", (uid2,)).fetchone()
+    if not target: db.close(); return _admin_msg('User not found', 'err')
+    if u['role']=='dept_admin' and dict(target).get('dept_code')!=u['dept_code']:
+        db.close(); return _admin_msg('Access denied', 'err')
+    new_active = 0 if dict(target)['active'] else 1
+    db.execute("UPDATE users SET active=? WHERE id=?", (new_active, uid2))
+    db.commit(); db.close()
+    status = 'enabled' if new_active else 'disabled'
+    return _admin_msg(f"User {status} successfully", 'ok')
+
+def _admin_msg(msg, msg_type):
+    u = current_user()
+    db = get_master_conn()
+    users, depts = admin_users_data(db, u['role'], u.get('dept_code'))
+    db.close()
+    return render_template_string(ADMIN_HTML, users=users, depts=depts,
+        current_user_role=u['role'], msg=msg, msg_type=msg_type)
 
 if __name__ == '__main__':
     app.run(debug=False, port=5050, host='0.0.0.0')

@@ -267,6 +267,7 @@ tbody tr:hover .row-actions{opacity:1}
 .kpi-bar-fill{height:100%;border-radius:4px;transition:.6s}
 .info-box{background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:12px 16px;margin-bottom:16px}
 .info-box p{font-size:11px;color:#0c4a6e;line-height:1.6}
+#logout-btn:hover{background:#dc2626!important;color:#fff!important}
 </style>
 </head>
 <body>
@@ -294,11 +295,12 @@ tbody tr:hover .row-actions{opacity:1}
   <div id="nav">
     <button class="nav-tab active" onclick="switchTab('dashboard')">📊 Dashboard</button>
     <button class="nav-tab" onclick="switchTab('team')">👥 Team</button>
-    <button class="nav-tab" onclick="switchTab('master')">🔧 Master Setup</button>
+    <button class="nav-tab tab-admin-only" onclick="switchTab('master')">🔧 Master Setup</button>
+    <button class="nav-tab tab-mod-only" onclick="switchTab('master')">🔧 Master Setup</button>
     <button class="nav-tab" onclick="switchTab('data')">📁 Data Manager</button>
     <button class="nav-tab" onclick="switchTab('reports')">📈 Reports</button>
     
-      <button class="nav-tab" onclick="switchTab('org')">&#127970; Org &amp; Cascade</button>
+      <button class="nav-tab tab-admin-only" onclick="switchTab('org')">&#127970; Org &amp; Cascade</button>
   </div>
 </div>
 
@@ -977,16 +979,40 @@ function exportXL(url){ const a=document.createElement('a');a.href=url;a.downloa
 function renderUserBadge() {
   const u = S.authUser; if(!u) return
   const badge = document.getElementById('user-badge')
-  if (!badge) return
+  if (!badge) {
+    // inject into nav if missing
+    const nav = document.getElementById('main-tabs')
+    if (nav && nav.parentNode) {
+      const d = document.createElement('div')
+      d.id = 'user-badge'
+      d.style.cssText = 'flex-shrink:0;padding:4px 8px'
+      nav.parentNode.appendChild(d)
+    }
+  }
+  const b = document.getElementById('user-badge'); if(!b) return
   const isMaster = u.role === 'master_admin'
-  badge.innerHTML = '<div style="display:flex;align-items:center;gap:10px">'
-    + (isMaster ? '<select id="dept-switcher" class="form-select" style="font-size:11px;padding:4px 8px;height:28px;width:160px;background:#1a2d4a;color:#fff;border-color:#2d4a6b" onchange="switchDept(this.value)"><option value="">All Departments</option></select>' : '<span style="font-size:11px;color:#60a5fa;font-weight:700">'+esc(u.dept_name||u.dept_code||'')+'</span>')
-    + '<div style="display:flex;align-items:center;gap:6px;background:#1a2d4a;border-radius:20px;padding:4px 12px 4px 6px">'
-    + '<div style="width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">'+((u.full_name||'?').split(' ').map(function(w){return w[0]}).join('').slice(0,2).toUpperCase())+'</div>'
-    + '<div><div style="font-size:11px;font-weight:700;color:#fff;line-height:1.2">'+esc(u.full_name||u.username)+'</div>'
-    + '<div style="font-size:9px;color:#60a5fa;text-transform:uppercase;letter-spacing:.5px">'+esc(u.role.replace('_',' '))+'</div></div>'
-    + '<a href="/logout" style="margin-left:6px;color:#94a3b8;font-size:14px;text-decoration:none;font-weight:700" title="Logout">&#10005;</a>'
+  const isDeptAdmin = u.role === 'dept_admin'
+  const isMod = u.role === 'moderator'
+  const isUser = u.role === 'user'
+  const deptLabel = u.dept_name || u.dept_code || ''
+  const initials = (u.full_name||'?').split(' ').map(function(w){return w[0]||''}).join('').slice(0,2).toUpperCase()
+
+  b.innerHTML =
+    '<div style="display:flex;align-items:center;gap:8px">'
+    + (isMaster
+        ? '<select id="dept-switcher" onchange="switchDept(this.value)" style="font-size:11px;padding:3px 8px;height:28px;width:150px;background:#1a2d4a;color:#fff;border:1px solid #2d4a6b;border-radius:6px"><option value="">All Departments</option></select>'
+        : '<div style="background:#1a2d4a;border-radius:6px;padding:3px 10px;font-size:11px;color:#60a5fa;font-weight:700">&#127970; '+esc(deptLabel)+'</div>')
+    + '<div style="display:flex;align-items:center;gap:6px;background:#1a2d4a;border-radius:20px;padding:3px 10px 3px 5px">'
+    + '<div style="width:26px;height:26px;border-radius:50%;background:#1d4ed8;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">'+initials+'</div>'
+    + '<div style="line-height:1.3">'
+    + '<div style="font-size:11px;font-weight:700;color:#fff">'+esc(u.full_name||u.username)+'</div>'
+    + '<div style="font-size:9px;color:#60a5fa;text-transform:uppercase;letter-spacing:.4px">'+esc((u.role||'').replace(/_/g,' '))+'</div>'
     + '</div></div>'
+    + (canAdmin() ? '<a href="/admin" target="_blank" title="Admin Panel" style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;background:#1a2d4a;border-radius:8px;color:#60a5fa;font-size:12px;text-decoration:none;border:1px solid #2d4a6b;flex-shrink:0;font-weight:700">&#9881;</a>' : '')
+    + '<a href="/logout" id="logout-btn" title="Sign Out" style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;background:#1a2d4a;border-radius:8px;color:#f87171;font-size:14px;text-decoration:none;border:1px solid #2d4a6b;flex-shrink:0">&#10148;</a>'
+    + '</div>'
+
+  // Populate dept switcher for master admin
   if (isMaster) {
     fetch('/api/departments').then(function(r){return r.json()}).then(function(depts){
       const sel = document.getElementById('dept-switcher'); if(!sel) return
@@ -996,8 +1022,39 @@ function renderUserBadge() {
         if(d.code===S.activeDept) o.selected=true
         sel.appendChild(o)
       })
-    })
+    }).catch(function(){})
   }
+
+  // Apply role-based tab visibility
+  applyRoleVisibility(u.role)
+}
+
+function applyRoleVisibility(role) {
+  const isMaster = role === 'master_admin'
+  const isDeptAdmin = role === 'dept_admin'
+  const isMod = role === 'moderator'
+  const isUser = role === 'user'
+
+  // Master Setup tab: visible to admin + dept_admin + moderator, hidden from user
+  qq('.tab-admin-only').forEach(function(el){
+    el.style.display = (isMaster || isDeptAdmin) ? '' : 'none'
+  })
+  qq('.tab-mod-only').forEach(function(el){
+    el.style.display = isMod ? '' : 'none'
+  })
+
+  // Org & Cascade: admin + dept_admin only
+  // (already handled by tab-admin-only class)
+
+  // Master Setup sub-tabs: Users/Departments hidden from moderator
+  qq('.sub-tab[onclick*="users"], .sub-tab[onclick*="departments"]').forEach(function(el){
+    el.style.display = (isMaster || isDeptAdmin) ? '' : 'none'
+  })
+
+  // master-admin-only items (departments tab)
+  qq('.master-admin-only').forEach(function(el){
+    el.style.display = isMaster ? '' : 'none'
+  })
 }
 
 async function switchDept(deptCode) {
@@ -1005,6 +1062,20 @@ async function switchDept(deptCode) {
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({dept_code:deptCode})})
   if(r.ok){ S.activeDept=deptCode||null; await loadAll(); toast(deptCode?'Switched to '+deptCode:'All departments','ok') }
+}
+
+
+function canEdit() {
+  const r = S.authUser?.role
+  return r === 'master_admin' || r === 'dept_admin' || r === 'moderator'
+}
+function canAdmin() {
+  const r = S.authUser?.role
+  return r === 'master_admin' || r === 'dept_admin'
+}
+function requireEdit(msg) {
+  if (!canEdit()) { toast(msg || 'You do not have permission to edit', 'err'); return false }
+  return true
 }
 
 function filterMPs(){const s=(q('#mp-search')?.value||'').toLowerCase();qq('[data-s]').forEach(el=>el.style.display=(el.dataset.s+' '+(el.dataset.r||'')).toLowerCase().includes(s)?'':'none')}

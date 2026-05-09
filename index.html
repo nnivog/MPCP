@@ -325,6 +325,8 @@ tbody tr:hover .row-actions{opacity:1}
       <button class="sub-tab" onclick="switchMaster('links')">Role Assignments</button>
 			<button class="sub-tab" onclick="switchMaster('locations')">&#128205; Locations</button>
       <button class="sub-tab" onclick="switchMaster('levels')">⭐ Emp Levels</button>
+      <button class="sub-tab master-admin-only" onclick="switchMaster('departments')">&#127970; Departments</button>
+      <button class="sub-tab" onclick="switchMaster('users')">&#128100; Users</button>
       <button class="sub-tab" onclick="switchMaster('dashboard_builder')">&#128196; Dashboard Builder</button>
     </div>
     <div id="master-content"><div class="spinner"></div></div>
@@ -375,7 +377,7 @@ tbody tr:hover .row-actions{opacity:1}
 // ── STATE ────────────────────────────────────────────────────────────────────
 const S = {
   employees:[], mps:[], cps:[], roles:[], perf:[], cache:[], cascade:[], bsToday:{}, dashLayouts:[], sectors:[],
-  locations:[], currentTab:'dashboard', teamView:'cards', masterSub:'mps',
+  locations:[], currentTab:'dashboard', teamView:'cards', masterSub:'mps', authUser:null, activeDept:null, authUser:null, activeDept:null,
   dataSub:'perf', reportSub:'overview', currentFY:'2081-82'
 }
 const DC = { HOD:'#0f2540',Vehicle:'#1d4ed8',Registration:'#6d28d9',Warehouse:'#047857',Stock:'#b45309',Ops:'#475569',Finance:'#0e7490',HR:'#be185d' }
@@ -407,6 +409,21 @@ async function safeGet(url, fallback=[]) {
 }
 
 async function loadAll() {
+  try {
+    const _meRes = await fetch('/api/auth/me')
+    if (_meRes.status === 401) { window.location='/login'; return }
+    if (_meRes.ok) {
+      const me = await _meRes.json()
+      if (me && !me.error) {
+        S.authUser = me
+        S.activeDept = me.active_dept || me.dept_code || null
+        renderUserBadge()
+        qq('.master-admin-only').forEach(function(el){
+          el.style.display=(me.role==='master_admin')?'':'none'
+        })
+      }
+    }
+  } catch(e) { console.warn('Auth check skipped:', e) }
   const [e,m,c,r,p,ca,locs,casc,bst,layouts,sects] = await Promise.all([
     safeGet('/api/employees',[]), safeGet('/api/mps',[]), safeGet('/api/cps',[]),
     safeGet('/api/roles',[]), safeGet('/api/perf',[]), safeGet('/api/cache',[]),
@@ -883,6 +900,8 @@ function renderMaster() {
   else if(S.masterSub==='roles') renderRoles()
   else if(S.masterSub==='locations') renderLocations()
   else if(S.masterSub==='levels') renderLevels()
+  else if(S.masterSub==='users') renderUsers()
+  else if(S.masterSub==='departments') renderDepartments()
   else if(S.masterSub==='sectors') renderSectors()
   else if(S.masterSub==='dashboard_builder') renderDashboardBuilder()
   else renderLinks()
@@ -953,6 +972,40 @@ function renderMPs() {
 
 function exportOpen(url){ window.open(url,'_blank') }
 function exportXL(url){ const a=document.createElement('a');a.href=url;a.download='';document.body.appendChild(a);a.click();a.remove() }
+
+
+function renderUserBadge() {
+  const u = S.authUser; if(!u) return
+  const badge = document.getElementById('user-badge')
+  if (!badge) return
+  const isMaster = u.role === 'master_admin'
+  badge.innerHTML = '<div style="display:flex;align-items:center;gap:10px">'
+    + (isMaster ? '<select id="dept-switcher" class="form-select" style="font-size:11px;padding:4px 8px;height:28px;width:160px;background:#1a2d4a;color:#fff;border-color:#2d4a6b" onchange="switchDept(this.value)"><option value="">All Departments</option></select>' : '<span style="font-size:11px;color:#60a5fa;font-weight:700">'+esc(u.dept_name||u.dept_code||'')+'</span>')
+    + '<div style="display:flex;align-items:center;gap:6px;background:#1a2d4a;border-radius:20px;padding:4px 12px 4px 6px">'
+    + '<div style="width:24px;height:24px;border-radius:50%;background:#1d4ed8;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">'+((u.full_name||'?').split(' ').map(function(w){return w[0]}).join('').slice(0,2).toUpperCase())+'</div>'
+    + '<div><div style="font-size:11px;font-weight:700;color:#fff;line-height:1.2">'+esc(u.full_name||u.username)+'</div>'
+    + '<div style="font-size:9px;color:#60a5fa;text-transform:uppercase;letter-spacing:.5px">'+esc(u.role.replace('_',' '))+'</div></div>'
+    + '<a href="/logout" style="margin-left:6px;color:#94a3b8;font-size:14px;text-decoration:none;font-weight:700" title="Logout">&#10005;</a>'
+    + '</div></div>'
+  if (isMaster) {
+    fetch('/api/departments').then(function(r){return r.json()}).then(function(depts){
+      const sel = document.getElementById('dept-switcher'); if(!sel) return
+      depts.forEach(function(d){
+        const o=document.createElement('option')
+        o.value=d.code; o.textContent=d.name
+        if(d.code===S.activeDept) o.selected=true
+        sel.appendChild(o)
+      })
+    })
+  }
+}
+
+async function switchDept(deptCode) {
+  const r = await fetch('/api/auth/switch_dept',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({dept_code:deptCode})})
+  if(r.ok){ S.activeDept=deptCode||null; await loadAll(); toast(deptCode?'Switched to '+deptCode:'All departments','ok') }
+}
 
 function filterMPs(){const s=(q('#mp-search')?.value||'').toLowerCase();qq('[data-s]').forEach(el=>el.style.display=(el.dataset.s+' '+(el.dataset.r||'')).toLowerCase().includes(s)?'':'none')}
 function openMPForm(id){
@@ -2685,6 +2738,187 @@ async function delSector(id,name){
 
 
 // ── RENDER LOCATIONS TAB ──────────────────────────────────────────────────────
+
+
+
+function renderDepartments() {
+  if(!S.authUser||S.authUser.role!=='master_admin'){
+    q('#master-content').innerHTML='<div class="info-box"><p>Master Admin only.</p></div>';return
+  }
+  fetch('/api/departments').then(function(r){return r.json()}).then(function(depts){
+    let html='<div class="card"><div class="card-head"><p>Departments ('+depts.length+' / 15)</p>'
+    html+='<button class="btn btn-primary btn-sm" onclick="openDeptForm()">+ New Department</button></div>'
+    html+='<div class="card-body">'
+    html+='<p style="font-size:11px;color:var(--muted);margin-bottom:16px">Each department has its own isolated database. Create a department, then assign a Dept Admin in the Users tab.</p>'
+    html+='<div class="grid-3">'
+    depts.forEach(function(d){
+      const pct=d.compliance!==null&&d.compliance!==undefined?d.compliance:null
+      const barCol=pct===null?'#94a3b8':pct>=95?'#16a34a':pct>=80?'#d97706':'#dc2626'
+      html+='<div class="stat-box" style="border-top:4px solid '+barCol+';text-align:left;padding:14px">'
+      html+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">'
+      html+='<div>'
+      html+='<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-family:monospace">'+esc(d.code)+'</div>'
+      html+='<div style="font-size:14px;font-weight:700;color:var(--text);margin-top:2px">'+esc(d.name)+'</div>'
+      html+='</div>'
+      html+='<span style="background:'+(d.active?'#dcfce7':'#fee2e2')+';color:'+(d.active?'#16a34a':'#dc2626')+';padding:2px 8px;border-radius:4px;font-size:9px;font-weight:700">'+(d.active?'ACTIVE':'INACTIVE')+'</span>'
+      html+='</div>'
+      html+='<div style="display:flex;gap:16px;font-size:11px;color:var(--muted);margin-bottom:10px">'
+      html+='<span>&#128100; '+d.user_count+' users</span>'
+      html+='<span>&#128106; '+(d.employees||'?')+' employees</span>'
+      html+='</div>'
+      if(pct!==null){
+        html+='<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px">'
+        html+='<span style="color:var(--muted)">Compliance</span>'
+        html+='<span style="font-weight:700;color:'+barCol+'">'+pct+'%</span></div>'
+        html+='<div style="height:4px;background:#f1f5f9;border-radius:2px;overflow:hidden">'
+        html+='<div style="height:4px;width:'+Math.min(pct,100)+'%;background:'+barCol+';border-radius:2px"></div></div>'
+      } else {
+        html+='<div style="font-size:10px;color:var(--muted);font-style:italic">No performance data yet</div>'
+      }
+      html+='<div style="display:flex;gap:6px;margin-top:12px">'
+      html+='<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="switchDept('+JSON.stringify(d.code)+').then(function(){switchTab(\"dashboard\")})">&#128065; View</button>'
+      html+='<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="openDeptForm('+JSON.stringify(d.id)+','+JSON.stringify(d.name)+','+JSON.stringify(d.active)+')">&#9998; Edit</button>'
+      html+='</div>'
+      html+='</div>'
+    })
+    if(!depts.length) html+='<div class="info-box"><p>No departments yet. Create your first department to get started.</p></div>'
+    html+='</div></div></div>'
+
+    // Also show master summary stats at top
+    fetch('/api/master/summary').then(function(r){return r.json()}).then(function(summary){
+      const totalEmps=summary.reduce(function(s,d){return s+(d.employees||0)},0)
+      const totalMPs=summary.reduce(function(s,d){return s+(d.mps||0)},0)
+      const totalCPs=summary.reduce(function(s,d){return s+(d.cps||0)},0)
+      const withComp=summary.filter(function(d){return d.compliance!==null})
+      const avgComp=withComp.length?Math.round(withComp.reduce(function(s,d){return s+d.compliance},0)/withComp.length*10)/10:null
+      const statsHtml='<div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap">'
+        +'<div class="stat-box" style="padding:10px 16px;flex:1;min-width:100px"><div class="val" style="color:var(--blue)">'+depts.length+'</div><div class="lbl">Departments</div></div>'
+        +'<div class="stat-box" style="padding:10px 16px;flex:1;min-width:100px"><div class="val" style="color:var(--violet)">'+totalEmps+'</div><div class="lbl">Total Employees</div></div>'
+        +'<div class="stat-box" style="padding:10px 16px;flex:1;min-width:100px"><div class="val" style="color:#047857">'+totalMPs+'</div><div class="lbl">Total MPs</div></div>'
+        +'<div class="stat-box" style="padding:10px 16px;flex:1;min-width:100px"><div class="val" style="color:#d97706">'+totalCPs+'</div><div class="lbl">Total CPs</div></div>'
+        +(avgComp!==null?'<div class="stat-box" style="padding:10px 16px;flex:1;min-width:100px"><div class="val" style="color:'+(avgComp>=95?'#16a34a':avgComp>=80?'#d97706':'#dc2626')+'">'+avgComp+'%</div><div class="lbl">Avg Compliance</div></div>':'')
+        +'</div>'
+      q('#master-content').innerHTML=statsHtml+html
+    }).catch(function(){q('#master-content').innerHTML=html})
+  })
+}
+
+function openDeptForm(did, dname, dactive) {
+  const isEdit=!!did
+  const body='<div class="form-group"><label class="form-label">Department Name *</label>'
+    +'<input class="form-input" id="df-name" placeholder="e.g. Finance & Accounts" value="'+(dname?esc(dname):'')+'"></div>'
+    +(isEdit?'':'<div class="form-group"><label class="form-label">Department Code *</label>'
+    +'<input class="form-input" id="df-code" placeholder="e.g. finance (lowercase, no spaces)">'
+    +'<p class="text-xs text-muted mt-4">Used as DB filename. Cannot be changed later.</p></div>')
+    +(isEdit?'<div class="form-group"><label class="form-label">Status</label>'
+    +'<select class="form-select" id="df-active"><option value="1"'+(dactive?' selected':'')+'">Active</option><option value="0"'+(dactive?'':' selected')+'>Inactive</option></select></div>':'')
+  openModal(isEdit?'Edit Department':'New Department',body,[
+    {label:isEdit?'Save':'Create Department',cls:'btn-primary',fn:async function(){
+      const name=q('#df-name')?.value?.trim()
+      if(!name){toast('Department name required','err');return}
+      let r
+      if(isEdit){
+        const active=q('#df-active')?.value==='1'
+        r=await api.put('/api/departments/'+did,{name,active})
+      } else {
+        const code=q('#df-code')?.value?.trim().toLowerCase().replace(/[^a-z0-9_]/g,'_')
+        if(!code){toast('Code required','err');return}
+        r=await api.post('/api/departments',{code,name})
+      }
+      if(r?.ok||r?.id){toast(isEdit?'Department updated':'Department created — DB initialized','ok');closeModal();renderDepartments()}
+      else toast('Error: '+(r?.error||'Unknown'),'err')
+    }},
+    {label:'Cancel',cls:'btn-ghost',fn:()=>closeModal()}
+  ],true)
+}
+
+function renderUsers() {
+  const isMaster = S.authUser&&S.authUser.role==='master_admin'
+  const isDeptAdmin = S.authUser&&S.authUser.role==='dept_admin'
+  if(!isMaster&&!isDeptAdmin){q('#master-content').innerHTML='<div class="info-box"><p>Access denied.</p></div>';return}
+  fetch('/api/users').then(function(r){return r.json()}).then(function(users){
+    let html='<div class="card"><div class="card-head"><p>User Management</p>'
+    html+='<button class="btn btn-primary btn-sm" onclick="openUserForm()">+ New User</button></div>'
+    html+='<div class="card-body"><table style="width:100%;border-collapse:collapse;font-size:12px">'
+    html+='<thead><tr style="background:#f8fafc">'
+    html+='<th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;color:#6b7a99;text-transform:uppercase;border-bottom:2px solid var(--border)">User</th>'
+    html+='<th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;color:#6b7a99;text-transform:uppercase;border-bottom:2px solid var(--border)">Department</th>'
+    html+='<th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;color:#6b7a99;text-transform:uppercase;border-bottom:2px solid var(--border)">Role</th>'
+    html+='<th style="padding:8px 10px;text-align:left;font-size:10px;font-weight:700;color:#6b7a99;text-transform:uppercase;border-bottom:2px solid var(--border)">Emp Code</th>'
+    html+='<th style="padding:8px 10px;text-align:center;font-size:10px;font-weight:700;color:#6b7a99;text-transform:uppercase;border-bottom:2px solid var(--border)">Actions</th>'
+    html+='</tr></thead><tbody>'
+    users.forEach(function(u){
+      const rc=u.role==='master_admin'?'#7c3aed':u.role==='dept_admin'?'#1d4ed8':'#047857'
+      html+='<tr style="border-bottom:1px solid var(--border)">'
+      html+='<td style="padding:8px 10px"><div style="font-weight:700;font-size:12px">'+esc(u.full_name)+'</div>'
+      html+='<div style="font-size:10px;color:#6b7a99">@'+esc(u.username)+'</div></td>'
+      html+='<td style="padding:8px 10px;font-size:11px">'+esc(u.dept_name||u.dept_code||'All')+'</td>'
+      html+='<td style="padding:8px 10px"><span style="background:'+rc+'20;color:'+rc+';padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700">'+esc(u.role.replace('_',' ').toUpperCase())+'</span></td>'
+      html+='<td style="padding:8px 10px;font-size:11px;font-family:monospace">'+esc(u.emp_code||'—')+'</td>'
+      html+='<td style="padding:8px 10px;text-align:center">'
+      html+='<button class="btn btn-ghost btn-sm" onclick="openUserForm('+JSON.stringify(u.id)+')" style="font-size:10px;margin-right:4px">Edit</button>'
+      html+='<button class="btn btn-ghost btn-sm" style="color:var(--red);font-size:10px" onclick="resetUserPw('+JSON.stringify(u.id)+','+JSON.stringify(u.username)+')">Reset PW</button>'
+      html+='</td></tr>'
+    })
+    html+='</tbody></table></div></div>'
+    q('#master-content').innerHTML=html
+  })
+}
+
+function openUserForm(uid2) {
+  fetch('/api/departments').then(function(r){return r.ok?r.json():[]}).then(function(depts){
+    const deptOpts=depts.map(function(d){return'<option value="'+d.code+'">'+esc(d.name)+'</option>'}).join('')
+    const isMasterAdmin=S.authUser&&S.authUser.role==='master_admin'
+    const body='<div class="form-grid-2">'
+      +'<div class="form-group"><label class="form-label">Full Name *</label><input class="form-input" id="uf-name" placeholder="Full name"></div>'
+      +'<div class="form-group"><label class="form-label">Username *</label><input class="form-input" id="uf-user" placeholder="username"'+(uid2?' disabled':'')+'></div>'
+      +'</div><div class="form-grid-2">'
+      +'<div class="form-group"><label class="form-label">'+(uid2?'New Password (blank=keep)':'Password *')+'</label><input class="form-input" type="password" id="uf-pw" placeholder="'+(uid2?'Leave blank to keep':'Min 6 chars')+'"></div>'
+      +'<div class="form-group"><label class="form-label">Role *</label>'
+      +'<select class="form-select" id="uf-role"><option value="user">User</option><option value="dept_admin">Dept Admin</option>'+(isMasterAdmin?'<option value="master_admin">Master Admin</option>':'')+'</select></div>'
+      +'</div><div class="form-grid-2">'
+      +'<div class="form-group"><label class="form-label">Department</label><select class="form-select" id="uf-dept"><option value="">— None (Master) —</option>'+deptOpts+'</select></div>'
+      +'<div class="form-group"><label class="form-label">Employee Code</label><input class="form-input" id="uf-emp" placeholder="e.g. EMP000513"></div>'
+      +'</div>'
+
+    const saveBtn={label:uid2?'Save Changes':'Create User',cls:'btn-primary',fn:async function(){
+      const pw=q('#uf-pw')?.value||''
+      if(!uid2&&(!q('#uf-name')?.value||!q('#uf-user')?.value||!pw)){toast('Fill required fields','err');return}
+      if(pw&&pw.length<6){toast('Password min 6 chars','err');return}
+      const payload={full_name:q('#uf-name').value,role:q('#uf-role').value,
+        dept_code:q('#uf-dept').value||null,emp_code:q('#uf-emp')?.value||''}
+      if(!uid2) payload.username=q('#uf-user').value
+      if(pw) payload.password=pw
+      const r=uid2?await api.put('/api/users/'+uid2,payload):await api.post('/api/users',payload)
+      if(r?.ok||r?.id){toast(uid2?'User updated':'User created','ok');closeModal();renderUsers()}
+      else toast('Error: '+(r?.error||'Unknown'),'err')
+    }}
+
+    openModal(uid2?'Edit User':'New User',body,[saveBtn,{label:'Cancel',cls:'btn-ghost',fn:()=>closeModal()}],true)
+
+    if(uid2){
+      fetch('/api/users').then(r=>r.json()).then(function(users){
+        const u=users.find(function(x){return x.id===uid2}); if(!u)return
+        setTimeout(function(){
+          if(q('#uf-name'))q('#uf-name').value=u.full_name||''
+          if(q('#uf-user'))q('#uf-user').value=u.username||''
+          if(q('#uf-role'))q('#uf-role').value=u.role||'user'
+          if(q('#uf-dept'))q('#uf-dept').value=u.dept_code||''
+          if(q('#uf-emp'))q('#uf-emp').value=u.emp_code||''
+        },60)
+      })
+    }
+  })
+}
+
+async function resetUserPw(uid2,username){
+  const pw=prompt('New password for @'+username+' (min 6 chars):')
+  if(!pw)return
+  if(pw.length<6){toast('Min 6 characters','err');return}
+  const r=await api.put('/api/users/'+uid2,{password:pw})
+  if(r?.ok)toast('Password reset for @'+username,'ok')
+  else toast('Error resetting password','err')
+}
 
 function renderLevels(){
   const defs=[{l:1,label:'Head of Department',col:'#0f2540'},{l:2,label:'Team Lead / Manager',col:'#1d4ed8'},{l:3,label:'Operations Staff',col:'#047857'}]

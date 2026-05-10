@@ -2454,77 +2454,66 @@ thead th:nth-child(3),thead th:nth-child(4){{width:90px;text-align:center}}
 # AUTH ROUTES
 # ══════════════════════════════════════════════════════════════════════════
 
-LOGIN_HTML = """
-<!DOCTYPE html><html><head><meta charset="UTF-8">
+LOGIN_HTML = """<!DOCTYPE html><html><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MPCP Login</title>
+<title>MPCP Management System — Sipradi Trading</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;background:linear-gradient(135deg,#0a1628,#1a2d4a);min-height:100vh;display:flex;align-items:center;justify-content:center}
-.card{background:#fff;border-radius:16px;padding:36px;width:380px;box-shadow:0 24px 80px rgba(0,0,0,.5)}
-.logo{text-align:center;margin-bottom:24px}
-.logo h1{font-size:20px;font-weight:900;color:#0a1628}
-.logo p{font-size:11px;color:#6b7a99;margin-top:3px}
-.fg{margin-bottom:14px}
-label{display:block;font-size:10px;font-weight:700;color:#374151;margin-bottom:5px;text-transform:uppercase;letter-spacing:.6px}
-input,select{width:100%;padding:10px 14px;border:1.5px solid #e5e7eb;border-radius:8px;font-size:13px;outline:none;transition:.2s;color:#0f1a2e}
-input:focus,select:focus{border-color:#1d4ed8;box-shadow:0 0 0 3px #1d4ed820}
-.btn{width:100%;padding:12px;background:#0a1628;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;margin-top:6px}
-.btn:hover{background:#1d4ed8}
-.err{background:#fef2f2;border:1px solid #fecaca;color:#dc2626;padding:10px 14px;border-radius:8px;font-size:12px;margin-bottom:14px}
-.divider{text-align:center;font-size:10px;color:#9ca3af;margin:14px 0;position:relative}
-.divider::before{content:"";position:absolute;top:50%;left:0;right:0;height:1px;background:#e5e7eb}
-.divider span{background:#fff;padding:0 10px;position:relative}
-.alt-link{display:block;text-align:center;font-size:12px;color:#6b7a99;text-decoration:none;padding:9px;border:1.5px solid #e5e7eb;border-radius:8px;font-weight:600}
-.alt-link:hover{border-color:#0a1628;color:#0a1628}
-.foot{text-align:center;margin-top:18px;font-size:10px;color:#9ca3af}
+body{font-family:'Roboto',sans-serif;background:#F4F4F4;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.top-bar{width:100%;background:#ED1C24;padding:8px 0;text-align:center;position:fixed;top:0}
+.top-bar span{font-family:'Montserrat',sans-serif;font-size:11px;font-weight:700;color:#fff;letter-spacing:1px;text-transform:uppercase}
+.wrapper{width:420px;margin-top:40px}
+.brand{text-align:center;margin-bottom:28px}
+.brand-logo{width:64px;height:64px;background:#ED1C24;border-radius:8px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:28px}
+.brand h1{font-family:'Montserrat',sans-serif;font-size:22px;font-weight:800;color:#2E2E2E;letter-spacing:-.5px}
+.brand p{font-size:12px;color:#777;margin-top:4px;font-weight:500}
+.card{background:#fff;border-radius:6px;padding:36px;box-shadow:0 4px 20px rgba(0,0,0,.10);border-top:4px solid #ED1C24}
+.fg{margin-bottom:18px}
+label{display:block;font-family:'Montserrat',sans-serif;font-size:10px;font-weight:700;color:#777;margin-bottom:6px;text-transform:uppercase;letter-spacing:.7px}
+input{width:100%;padding:11px 14px;border:1.5px solid #DDDDDD;border-radius:4px;font-size:14px;font-family:'Roboto',sans-serif;color:#2E2E2E;outline:none;transition:.2s}
+input:focus{border-color:#ED1C24;box-shadow:0 0 0 3px rgba(215,25,32,.08)}
+.btn{width:100%;padding:13px;background:#ED1C24;color:#fff;border:none;border-radius:4px;font-size:13px;font-family:'Montserrat',sans-serif;font-weight:700;cursor:pointer;margin-top:4px;transition:.2s;letter-spacing:.5px;text-transform:uppercase}
+.btn:hover{background:#C1121F}
+.err{background:#FFF5F5;border:1px solid #FECACA;color:#ED1C24;padding:10px 14px;border-radius:4px;font-size:12px;margin-bottom:16px;font-weight:500}
+.foot{text-align:center;margin-top:20px;font-size:10px;color:#aaa;font-family:'Montserrat',sans-serif;letter-spacing:.3px}
+.divider{border:none;border-top:1px solid #DDDDDD;margin:16px 0}
 </style></head><body>
-<div class="card">
-  <div class="logo"><h1>&#128200; SC-MPCP System</h1><p>Sipradi Trading Pvt. Ltd.</p></div>
-  {% if error %}<div class="err">&#9888; {{ error }}</div>{% endif %}
-  <form method="POST" action="/login">
-    {% if not admin_mode %}
-    <div class="fg"><label>Department</label>
-      <select name="dept_hint" id="dept-sel">
-        <option value="">&#8212; Select your department &#8212;</option>
-        {% for d in departments %}
-        <option value="{{ d.code }}"{% if d.code == selected_dept %} selected{% endif %}>{{ d.name }}</option>
-        {% endfor %}
-      </select>
-    </div>
-    {% endif %}
-    <div class="fg"><label>Username</label>
-      <input type="text" name="username" placeholder="Enter username" autofocus required value="{{ prefill_username }}"></div>
-    <div class="fg"><label>Password</label>
-      <input type="password" name="password" placeholder="Enter password" required></div>
-    {% if admin_mode %}<input type="hidden" name="admin_mode" value="1">{% endif %}
-    <button class="btn">{% if admin_mode %}&#128274; Sign In as Admin{% else %}Sign In{% endif %}</button>
-  </form>
-  <div class="divider"><span>or</span></div>
-  {% if not admin_mode %}
-  <a href="/login?admin=1" class="alt-link">&#128274; Master Admin Login</a>
-  {% else %}
-  <a href="/login" class="alt-link">&#8592; Back to Department Login</a>
-  {% endif %}
-  <div class="foot">SC-MPCP &copy; {{ year }} Sipradi Trading Pvt. Ltd.</div>
-</div></body></html>
-"""
+<div class="top-bar"><span>Sipradi Trading Pvt. Ltd. &mdash; Authorized Tata Motors Dealer</span></div>
+<div class="wrapper">
+  <div class="brand">
+    <div class="brand-logo">&#128200;</div>
+    <h1>MPCP Management System</h1>
+    <p>Manpower Compliance & Performance Control</p>
+  </div>
+  <div class="card">
+    {% if error %}<div class="err">&#9888;&nbsp; {{ error }}</div>{% endif %}
+    <form method="POST" action="/login">
+      <div class="fg">
+        <label>Username</label>
+        <input type="text" name="username" placeholder="Enter your username" autofocus required value="{{ prefill_username }}">
+      </div>
+      <div class="fg">
+        <label>Password</label>
+        <input type="password" name="password" placeholder="Enter your password" required>
+      </div>
+      <button class="btn" type="submit">Sign In &rarr;</button>
+    </form>
+  </div>
+  <div class="foot">&copy; {{ year }} Sipradi Trading Pvt. Ltd. &mdash; MPCP v2.0</div>
+</div>
+</body></html>"""
 @app.route('/login', methods=['GET','POST'])
 def login():
     error = None
-    admin_mode = request.args.get('admin')=='1' or request.form.get('admin_mode')=='1'
-    db = get_master_conn()
-    departments = R(db.execute('SELECT code,name FROM departments WHERE active=1 ORDER BY name').fetchall())
-    db.close()
-    selected_dept = request.form.get('dept_hint','') or request.args.get('dept','')
     if request.method == 'POST':
         username = request.form.get('username','').strip().lower()
         password = request.form.get('password','')
         db = get_master_conn()
         user = db.execute(
-            'SELECT u.*,d.name dept_name FROM users u '
-            'LEFT JOIN departments d ON d.code=u.dept_code '
-            'WHERE u.username=? AND u.active=1', (username,)
+            "SELECT u.*,d.name dept_name FROM users u "
+            "LEFT JOIN departments d ON d.code=u.dept_code "
+            "WHERE u.username=? AND u.active=1", (username,)
         ).fetchone()
         db.close()
         if user and verify_password(password, user['password_hash']):
@@ -2540,13 +2529,13 @@ def login():
                 'active_dept': user['dept_code']
             }
             return redirect('/')
-        error = 'Invalid username or password'
+        error = 'Invalid username or password. Please try again.'
     import datetime as _dt
     return render_template_string(LOGIN_HTML,
-        error=error, admin_mode=admin_mode,
-        departments=departments, selected_dept=selected_dept,
-        prefill_username='admin' if admin_mode else '',
+        error=error,
+        prefill_username='',
         year=_dt.datetime.now().year)
+
 @app.route('/logout')
 def logout():
     session.clear()
@@ -2743,99 +2732,145 @@ def master_summary():
 
 
 # ── ADMIN PANEL ────────────────────────────────────────────────────────────
-ADMIN_HTML = """<!DOCTYPE html><html><head><meta charset="UTF-8">
+ADMIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MPCP Admin Panel</title>
+<title>MPCP Admin Panel — User Management</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Open+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;background:#f8fafc;color:#0f1a2e;font-size:13px}
-.topbar{background:#0a1628;color:#fff;padding:12px 24px;display:flex;justify-content:space-between;align-items:center}
-.topbar h1{font-size:15px;font-weight:800}
-.topbar a{color:#60a5fa;font-size:12px;text-decoration:none}
-.container{max-width:1100px;margin:24px auto;padding:0 16px}
-.card{background:#fff;border-radius:12px;border:1px solid #e5e7eb;margin-bottom:20px;overflow:hidden}
-.card-head{padding:14px 20px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;background:#f8fafc}
-.card-head h2{font-size:13px;font-weight:700;color:#0a1628}
+body{font-family:'Open Sans',sans-serif;background:#F5F5F5;color:#1A1A1A;font-size:13px}
+.topbar{background:#ED1C24;padding:12px 24px;display:flex;justify-content:space-between;align-items:center}
+.topbar h1{font-family:'Montserrat',sans-serif;font-size:14px;font-weight:800;color:#fff;letter-spacing:.3px;text-transform:uppercase}
+.topbar a{color:rgba(255,255,255,.85);font-size:11px;text-decoration:none;font-family:'Montserrat',sans-serif;font-weight:600;padding:5px 12px;border:1px solid rgba(255,255,255,.4);border-radius:3px;transition:.2s}
+.topbar a:hover{background:rgba(255,255,255,.15)}
+.container{max-width:1200px;margin:24px auto;padding:0 20px}
+.card{background:#fff;border-radius:4px;border:1px solid #DDDDDD;margin-bottom:20px;box-shadow:0 1px 4px rgba(0,0,0,.08);overflow:hidden}
+.card-head{padding:13px 20px;border-bottom:1px solid #EEEEEE;display:flex;justify-content:space-between;align-items:center;background:#FAFAFA}
+.card-head h2{font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;color:#1A1A1A;text-transform:uppercase;letter-spacing:.5px}
 table{width:100%;border-collapse:collapse}
-thead th{padding:9px 14px;text-align:left;font-size:10px;font-weight:700;color:#6b7a99;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #e5e7eb;background:#f8fafc}
-tbody td{padding:9px 14px;border-bottom:1px solid #f1f5f9;font-size:12px}
-tbody tr:hover{background:#f8fafc}
-.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700}
-.b-master{background:#ede9fe;color:#7c3aed}
-.b-dept{background:#dbeafe;color:#1d4ed8}
-.b-mod{background:#fef3c7;color:#92400e}
-.b-user{background:#dcfce7;color:#166534}
-.b-inactive{background:#fee2e2;color:#dc2626}
-.btn{padding:6px 14px;border:none;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer}
-.btn-primary{background:#0a1628;color:#fff}
-.btn-danger{background:#fee2e2;color:#dc2626;border:1px solid #fecaca}
-.btn-warn{background:#fef3c7;color:#92400e;border:1px solid #fde68a}
-.form-row{display:flex;gap:10px;flex-wrap:wrap;padding:16px 20px;border-bottom:1px solid #e5e7eb;background:#f0f9ff}
-.form-row label{font-size:10px;font-weight:700;color:#374151;display:block;margin-bottom:4px;text-transform:uppercase}
-.form-row input,.form-row select{padding:7px 10px;border:1.5px solid #e5e7eb;border-radius:6px;font-size:12px;min-width:150px}
-.form-row input:focus,.form-row select:focus{border-color:#1d4ed8;outline:none}
-.err{background:#fef2f2;color:#dc2626;padding:8px 14px;border-radius:6px;font-size:12px;margin:10px 20px}
-.ok{background:#f0fdf4;color:#16a34a;padding:8px 14px;border-radius:6px;font-size:12px;margin:10px 20px}
+thead th{padding:10px 14px;text-align:left;font-size:10px;font-weight:700;font-family:'Montserrat',sans-serif;color:#777;text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid #EEEEEE;background:#F8F8F8}
+tbody td{padding:10px 14px;border-bottom:1px solid #F4F4F4;font-size:12px;vertical-align:middle}
+tbody tr:hover{background:#FFF8F8}
+tbody tr:nth-child(even){background:#FAFAFA}
+.badge{display:inline-block;padding:3px 8px;border-radius:3px;font-size:10px;font-weight:700;font-family:'Montserrat',sans-serif;text-transform:uppercase;letter-spacing:.3px}
+.b-master_admin{background:#FFF0F0;color:#ED1C24;border:1px solid #FECACA}
+.b-dept_admin{background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE}
+.b-moderator{background:#FFFBEB;color:#92400E;border:1px solid #FDE68A}
+.b-user{background:#F0FDF4;color:#166534;border:1px solid #BBF7D0}
+.btn{font-family:'Montserrat',sans-serif;padding:6px 14px;border:none;border-radius:3px;font-size:10px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:.4px;transition:.15s}
+.btn-primary{background:#ED1C24;color:#fff}
+.btn-primary:hover{background:#C1121F}
+.btn-ghost{background:#fff;color:#444;border:1.5px solid #DDDDDD}
+.btn-ghost:hover{border-color:#ED1C24;color:#ED1C24}
+.btn-danger{background:#fff;color:#ED1C24;border:1.5px solid #FECACA}
+.btn-danger:hover{background:#ED1C24;color:#fff}
+.btn-warn{background:#FFFBEB;color:#92400E;border:1.5px solid #FDE68A}
+.btn-success{background:#166534;color:#fff}
+.form-row{display:flex;gap:12px;flex-wrap:wrap;padding:16px 20px;border-bottom:1px solid #EEEEEE;background:#FAFFF9;align-items:flex-end}
+.form-row .fg{flex:1;min-width:130px}
+.form-row label{display:block;font-family:'Montserrat',sans-serif;font-size:10px;font-weight:700;color:#777;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
+.form-row input,.form-row select{width:100%;padding:8px 10px;border:1.5px solid #DDDDDD;border-radius:3px;font-size:12px;font-family:'Open Sans',sans-serif;color:#1A1A1A;outline:none;background:#fff;transition:.2s}
+.form-row input:focus,.form-row select:focus{border-color:#ED1C24;box-shadow:0 0 0 3px rgba(237,28,36,.08)}
+.msg-ok{background:#F0FDF4;border-left:4px solid #16A34A;color:#166534;padding:10px 16px;border-radius:3px;font-size:12px;margin-bottom:16px;font-weight:500}
+.msg-err{background:#FFF0F0;border-left:4px solid #ED1C24;color:#C1121F;padding:10px 16px;border-radius:3px;font-size:12px;margin-bottom:16px;font-weight:500}
+.search-box{padding:6px 12px;border:1.5px solid #DDDDDD;border-radius:3px;font-size:12px;width:220px;font-family:'Open Sans',sans-serif;outline:none;transition:.2s}
+.search-box:focus{border-color:#ED1C24}
+/* Edit modal */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:100;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:#fff;border-radius:4px;width:500px;max-width:95vw;box-shadow:0 8px 32px rgba(0,0,0,.2);overflow:hidden}
+.modal-head{background:#ED1C24;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}
+.modal-head h3{font-family:'Montserrat',sans-serif;font-size:13px;font-weight:700;color:#fff;text-transform:uppercase;letter-spacing:.4px}
+.modal-body{padding:24px 20px}
+.modal-foot{padding:14px 20px;border-top:1px solid #EEEEEE;display:flex;gap:8px;justify-content:flex-end}
+.mfg{margin-bottom:14px}
+.mfg label{display:block;font-family:'Montserrat',sans-serif;font-size:10px;font-weight:700;color:#777;margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
+.mfg input,.mfg select{width:100%;padding:9px 12px;border:1.5px solid #DDDDDD;border-radius:3px;font-size:13px;font-family:'Open Sans',sans-serif;outline:none;transition:.2s}
+.mfg input:focus,.mfg select:focus{border-color:#ED1C24;box-shadow:0 0 0 3px rgba(237,28,36,.08)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 </style></head><body>
 <div class="topbar">
-  <h1>&#128272; MPCP Admin Panel — User Management</h1>
-  <div style="display:flex;gap:16px;align-items:center">
+  <h1>&#128101; User Management &mdash; Admin Panel</h1>
+  <div style="display:flex;gap:8px">
     <a href="/">&#8592; Back to App</a>
-    <a href="/logout">Sign Out</a>
+    <a href="/logout">Sign Out &#128682;</a>
   </div>
 </div>
 <div class="container">
-  {% if msg %}<div class="{{ 'ok' if msg_type=='ok' else 'err' }}">{{ msg }}</div>{% endif %}
+  {% if msg %}<div class="{{ 'msg-ok' if msg_type=='ok' else 'msg-err' }}">{{ '✓' if msg_type=='ok' else '⚠' }}&nbsp; {{ msg }}</div>{% endif %}
 
-  <!-- Create User -->
   <div class="card">
     <div class="card-head"><h2>&#43; Create New User</h2></div>
     <form method="POST" action="/admin/users/create">
       <div class="form-row">
-        <div><label>Full Name *</label><input name="full_name" placeholder="Full name" required></div>
-        <div><label>Username *</label><input name="username" placeholder="username" required></div>
-        <div><label>Password *</label><input name="password" type="password" placeholder="Min 6 chars" required></div>
-        <div><label>Role *</label>
+        <div class="fg"><label>Full Name *</label><input name="full_name" placeholder="Full name" required></div>
+        <div class="fg"><label>Username *</label><input name="username" placeholder="username" required></div>
+        <div class="fg"><label>Password *</label><input name="password" type="password" placeholder="Min 6 chars" required></div>
+        <div class="fg"><label>Role *</label>
           <select name="role">
             <option value="user">User</option>
             <option value="moderator">Moderator</option>
-            <option value="dept_admin">Dept Admin</option>
+            {% if current_user_role in ('master_admin','dept_admin') %}<option value="dept_admin">Dept Admin</option>{% endif %}
             {% if current_user_role == 'master_admin' %}<option value="master_admin">Master Admin</option>{% endif %}
-          </select></div>
-        <div><label>Department</label>
+          </select>
+        </div>
+        <div class="fg"><label>Department</label>
+          {% if current_user_role == 'master_admin' %}
           <select name="dept_code">
-            <option value="">— None —</option>
+            <option value="">&#8212; None (Master) &#8212;</option>
             {% for d in departments %}<option value="{{ d.code }}">{{ d.name }}</option>{% endfor %}
-          </select></div>
-        <div><label>Emp Code</label><input name="emp_code" placeholder="EMP000XXX"></div>
-        <div style="display:flex;align-items:flex-end"><button class="btn btn-primary" type="submit">Create User</button></div>
+          </select>
+          {% else %}
+          <input type="text" value="{{ current_dept_name }}" disabled style="background:#F5F5F5;color:#777">
+          <input type="hidden" name="dept_code" value="{{ current_dept_code }}">
+          {% endif %}
+        </div>
+        <div class="fg"><label>Emp Code</label><input name="emp_code" placeholder="EMP000XXX"></div>
+        <div class="fg" style="min-width:auto"><button class="btn btn-primary" type="submit" style="white-space:nowrap;padding:8px 18px">&#43; Create User</button></div>
       </div>
     </form>
   </div>
 
-  <!-- Users Table -->
   <div class="card">
-    <div class="card-head"><h2>&#128100; All Users ({{ users|length }})</h2>
-      <input placeholder="Search..." oninput="filterTable(this.value)" style="padding:5px 10px;border:1px solid #e5e7eb;border-radius:6px;font-size:12px;width:200px">
+    <div class="card-head">
+      <h2>&#128100; All Users ({{ users|length }})</h2>
+      <input class="search-box" placeholder="&#128269; Search users..." oninput="filterTable(this.value)">
     </div>
     <table id="users-table">
-      <thead><tr><th>Name / Username</th><th>Department</th><th>Role</th><th>Emp Code</th><th>Status</th><th>Actions</th></tr></thead>
+      <thead><tr>
+        <th>Name / Username</th>
+        <th>Department</th>
+        <th>Role</th>
+        <th>Emp Code</th>
+        <th>Status</th>
+        <th style="text-align:center">Actions</th>
+      </tr></thead>
       <tbody>
         {% for u in users %}
         <tr>
-          <td><div style="font-weight:700">{{ u.full_name }}</div><div style="color:#6b7a99;font-size:11px">@{{ u.username }}</div></td>
-          <td>{{ u.dept_name or u.dept_code or '—' }}</td>
-          <td><span class="badge b-{{ u.role.replace('_admin','').replace('master','master') }}">{{ u.role.replace('_',' ').upper() }}</span></td>
-          <td style="font-family:monospace">{{ u.emp_code or '—' }}</td>
-          <td><span style="color:{{ '#16a34a' if u.active else '#dc2626' }};font-weight:700">{{ 'Active' if u.active else 'Inactive' }}</span></td>
-          <td style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px">
-            <form method="POST" action="/admin/users/{{ u.id }}/reset" style="display:inline">
-              <input name="new_password" placeholder="New password" style="padding:4px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:11px;width:120px">
-              <button class="btn btn-warn" type="submit">Reset PW</button>
-            </form>
-            <form method="POST" action="/admin/users/{{ u.id }}/toggle" style="display:inline">
-              <button class="btn {{ 'btn-danger' if u.active else 'btn-primary' }}" type="submit">{{ 'Disable' if u.active else 'Enable' }}</button>
-            </form>
+          <td>
+            <div style="font-weight:700;font-family:'Montserrat',sans-serif;font-size:12px">{{ u.full_name }}</div>
+            <div style="color:#777;font-size:11px;margin-top:2px">@{{ u.username }}</div>
+          </td>
+          <td style="color:#444">{{ u.dept_name or u.dept_code or '&#8212;' }}</td>
+          <td><span class="badge b-{{ u.role }}">{{ u.role.replace('_',' ').upper() }}</span></td>
+          <td style="font-family:monospace;font-size:11px;color:#555">{{ u.emp_code or '&#8212;' }}</td>
+          <td>
+            <span style="font-family:'Montserrat',sans-serif;font-size:10px;font-weight:700;color:{{ '#16A34A' if u.active else '#ED1C24' }}">
+              {{ 'ACTIVE' if u.active else 'INACTIVE' }}
+            </span>
+          </td>
+          <td style="text-align:center">
+            <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+              <button class="btn btn-ghost" onclick="openEdit('{{ u.id }}','{{ u.username }}','{{ u.full_name }}','{{ u.role }}','{{ u.dept_code or '' }}','{{ u.emp_code or '' }}')" style="font-size:10px">&#9998; Edit</button>
+              <form method="POST" action="/admin/users/{{ u.id }}/reset" style="display:flex;gap:4px;align-items:center">
+                <input name="new_password" placeholder="New password" style="padding:5px 8px;border:1.5px solid #DDDDDD;border-radius:3px;font-size:11px;width:120px;font-family:'Open Sans',sans-serif;outline:none" onfocus="this.style.borderColor='#ED1C24'" onblur="this.style.borderColor='#DDDDDD'">
+                <button class="btn btn-warn" type="submit" style="white-space:nowrap">Reset PW</button>
+              </form>
+              <form method="POST" action="/admin/users/{{ u.id }}/toggle">
+                <button class="btn {{ 'btn-danger' if u.active else 'btn-success' }}" type="submit">{{ 'Disable' if u.active else 'Enable' }}</button>
+              </form>
+            </div>
           </td>
         </tr>
         {% endfor %}
@@ -2843,11 +2878,71 @@ tbody tr:hover{background:#f8fafc}
     </table>
   </div>
 </div>
+
+<!-- Edit User Modal -->
+<div class="modal-overlay" id="edit-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>&#9998; Edit User</h3>
+      <button onclick="closeEdit()" style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer">&#10005;</button>
+    </div>
+    <form method="POST" id="edit-form">
+      <div class="modal-body">
+        <div class="grid2">
+          <div class="mfg"><label>Full Name *</label><input name="full_name" id="e-name" required></div>
+          <div class="mfg"><label>Username (locked)</label><input id="e-username" disabled style="background:#F5F5F5;color:#777"></div>
+        </div>
+        <div class="grid2">
+          <div class="mfg"><label>New Password (blank = keep)</label><input name="password" type="password" placeholder="Leave blank to keep"></div>
+          <div class="mfg"><label>Role *</label>
+            <select name="role" id="e-role">
+              <option value="user">User</option>
+              <option value="moderator">Moderator</option>
+              {% if current_user_role in ('master_admin','dept_admin') %}<option value="dept_admin">Dept Admin</option>{% endif %}
+              {% if current_user_role == 'master_admin' %}<option value="master_admin">Master Admin</option>{% endif %}
+            </select>
+          </div>
+        </div>
+        <div class="grid2">
+          <div class="mfg"><label>Department</label>
+            {% if current_user_role == 'master_admin' %}
+            <select name="dept_code" id="e-dept">
+              <option value="">&#8212; None (Master) &#8212;</option>
+              {% for d in departments %}<option value="{{ d.code }}">{{ d.name }}</option>{% endfor %}
+            </select>
+            {% else %}
+            <input type="text" value="{{ current_dept_name }}" disabled style="background:#F5F5F5;color:#777">
+            <input type="hidden" name="dept_code" value="{{ current_dept_code }}">
+            {% endif %}
+          </div>
+          <div class="mfg"><label>Emp Code</label><input name="emp_code" id="e-emp" placeholder="EMP000XXX"></div>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button type="button" class="btn btn-ghost" onclick="closeEdit()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 function filterTable(q){
-  const rows=document.querySelectorAll('#users-table tbody tr')
-  rows.forEach(function(r){r.style.display=r.textContent.toLowerCase().includes(q.toLowerCase())?'':'none'})
+  document.querySelectorAll('#users-table tbody tr').forEach(function(r){
+    r.style.display=r.textContent.toLowerCase().includes(q.toLowerCase())?'':'none'
+  })
 }
+function openEdit(id,username,name,role,dept,emp){
+  document.getElementById('edit-form').action='/admin/users/'+id+'/edit'
+  document.getElementById('e-name').value=name
+  document.getElementById('e-username').value=username
+  document.getElementById('e-role').value=role
+  var de=document.getElementById('e-dept'); if(de) de.value=dept
+  document.getElementById('e-emp').value=emp
+  document.getElementById('edit-modal').classList.add('open')
+}
+function closeEdit(){document.getElementById('edit-modal').classList.remove('open')}
+document.getElementById('edit-modal').addEventListener('click',function(e){if(e.target===this)closeEdit()})
 </script>
 </body></html>"""
 
@@ -2873,8 +2968,11 @@ def admin_panel():
     db = get_master_conn()
     users, depts = admin_users_data(db, u['role'], u.get('dept_code'))
     db.close()
-    return render_template_string(ADMIN_HTML, users=users, depts=depts,
-        current_user_role=u['role'], msg=None, msg_type=None)
+    return render_template_string(ADMIN_HTML, users=users, departments=depts,
+        current_user_role=u['role'],
+        current_dept_code=u.get('dept_code',''),
+        current_dept_name=next((d['name'] for d in depts if d['code']==u.get('dept_code')), 'All Departments'),
+        msg=None, msg_type=None)
 
 @app.route('/admin/users/create', methods=['POST'])
 def admin_create_user():
@@ -2889,9 +2987,11 @@ def admin_create_user():
         return _admin_msg('Password must be at least 6 characters', 'err')
     role = d.get('role','user')
     if u['role'] == 'dept_admin':
-        role = role if role in ('user','moderator') else 'user'
-    dept_code = d.get('dept_code') or u.get('dept_code')
-    if u['role'] == 'dept_admin': dept_code = u['dept_code']
+        role = role if role in ('user','moderator','dept_admin') else 'user'
+        dept_code = u['dept_code']  # dept_admin locked to own dept
+    else:
+        # master_admin can assign any dept (including None for master-level users)
+        dept_code = d.get('dept_code','').strip() or None
     db = get_master_conn()
     try:
         new_id = uid()
@@ -2938,8 +3038,11 @@ def _admin_msg(msg, msg_type):
     db = get_master_conn()
     users, depts = admin_users_data(db, u['role'], u.get('dept_code'))
     db.close()
-    return render_template_string(ADMIN_HTML, users=users, depts=depts,
-        current_user_role=u['role'], msg=msg, msg_type=msg_type)
+    return render_template_string(ADMIN_HTML, users=users, departments=depts,
+        current_user_role=u['role'],
+        current_dept_code=u.get('dept_code',''),
+        current_dept_name=next((d['name'] for d in depts if d['code']==u.get('dept_code')), 'All Departments'),
+        msg=msg, msg_type=msg_type)
 
 if __name__ == '__main__':
     app.run(debug=False, port=5050, host='0.0.0.0')

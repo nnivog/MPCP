@@ -2,8 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Sipradi SC-MPCP System</title>
-<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<title>Sipradi MPCP Management System</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script>
 // ── FY AUTO-DETECT ───────────────────────────────────────────────────────
@@ -16,42 +15,48 @@ async function fyFromDate(dateStr) {
 }
 function todayISO() { return new Date().toISOString().split('T')[0]; }
 </script>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#f0f2f7;--surface:#fff;--border:#e2e6ef;--text:#0f1a2e;--muted:#6b7a99;
-  --navy:#0a1628;--blue:#1d4ed8;--green:#16a34a;--amber:#d97706;--red:#dc2626;
-  --violet:#6d28d9;--teal:#0891b2;
-  --hod:#0f2540;--vehicle:#1d4ed8;--registration:#6d28d9;
-  --warehouse:#047857;--stock:#b45309;--ops:#475569;
-  --radius:12px;--shadow:0 2px 16px rgba(0,0,0,.08)
+  --red:#ED1C24; --red-dark:#C1121F; --red-light:#FFF0F0;
+  --blue:#ED1C24; --blue-dark:#C1121F;
+  --violet:#6d28d9;
+  --bg:#F5F5F5; --card:#FFFFFF;
+  --border:#DDDDDD; --border-light:#EEEEEE;
+  --text:#1A1A1A; --muted:#666666;
+  --radius:4px;
+  --shadow:0 1px 4px rgba(0,0,0,.10);
+  --shadow-md:0 4px 16px rgba(0,0,0,.12);
+  --font-head:'Montserrat',sans-serif;
+  --font-body:'Open Sans',sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);font-size:14px;min-height:100vh}
+body{font-family:var(--font-body);background:var(--bg);color:var(--text);font-size:13px;margin:0;-webkit-font-smoothing:antialiased}
 h1,h2,h3{font-family:'Syne',sans-serif}
 
 /* ── HEADER ── */
-#header{background:linear-gradient(135deg,#0a1628 0%,#0f2540 100%);padding:12px 24px 0;position:sticky;top:0;z-index:100;box-shadow:0 2px 20px rgba(0,0,0,.4)}
-#header-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+#header{background:#FFFFFF;border-bottom:3px solid var(--red);padding:0;box-shadow:0 2px 8px rgba(0,0,0,.08);position:sticky;top:0;z-index:200}
+#header-top{display:flex;align-items:center;justify-content:space-between;padding:10px 24px;min-height:52px}
 #header h1{font-size:18px;color:#fff;letter-spacing:-.5px}
-#header-meta{font-size:11px;color:#93c5fd;margin-top:2px}
+#header-meta{font-size:11px;color:var(--text);margin-top:2px}
 #header-meta span{margin-right:12px}
 #header-meta .dot{color:#4ade80}
-#header-meta .fy-pill{background:rgba(255,255,255,.15);padding:2px 10px;border-radius:20px;font-weight:700;color:#fbbf24;font-family:'Syne',sans-serif}
+#header-meta .fy-pill{background:rgba(255,255,255,.15);padding:2px 10px;border-radius:20px;font-weight:700;color:var(--red);font-family:'Syne',sans-serif}
 .hdr-actions{display:flex;gap:8px}
-.hbtn{font-size:11px;color:#93c5fd;border:1px solid rgba(255,255,255,.2);background:transparent;padding:5px 12px;border-radius:8px;cursor:pointer;transition:.2s;font-family:'Syne',sans-serif;font-weight:700}
-.hbtn:hover{color:#fff;border-color:rgba(255,255,255,.5)}
-#nav{display:flex;gap:0;overflow-x:auto}
-.nav-tab{font-size:12px;font-weight:700;font-family:'Syne',sans-serif;padding:10px 20px;border:none;background:transparent;color:#93c5fd;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:.2s;letter-spacing:.3px}
-.nav-tab:hover{color:#fff}.nav-tab.active{color:#fff;border-bottom-color:#60a5fa}
+.hbtn{font-family:var(--font-head);font-size:10px;font-weight:700;padding:6px 14px;border:1.5px solid #DDDDDD;border-radius:3px;background:#fff;color:#444;cursor:pointer;transition:.2s;text-transform:uppercase;letter-spacing:.4px}
+.hbtn:hover{border-color:var(--red);color:var(--red)}
+#nav{display:flex;gap:0;background:#FFFFFF;padding:0 24px}
+.nav-tab{font-family:var(--font-head);font-size:11px;font-weight:700;padding:13px 18px;border:none;background:transparent;color:#555;cursor:pointer;border-bottom:3px solid transparent;transition:color .2s,border-color .2s;letter-spacing:.6px;text-transform:uppercase;white-space:nowrap}
+.nav-tab:hover{color:var(--red);background:var(--red-light)}.nav-tab.active{color:var(--red);border-bottom-color:var(--red);font-weight:800}
 
 /* ── LAYOUT ── */
 #app{max-width:1400px;margin:0 auto;padding:20px}
 .tab-panel{display:none}.tab-panel.active{display:block}
 
 /* ── CARDS ── */
-.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow)}
-.card-head{padding:14px 18px;border-bottom:1px solid var(--border);background:#f8fafc;border-radius:var(--radius) var(--radius) 0 0;display:flex;align-items:center;justify-content:space-between}
-.card-head p{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);font-family:'Syne',sans-serif}
+.card{background:#fff;border-radius:var(--radius);border:1px solid var(--border);box-shadow:var(--shadow);overflow:hidden}
+.card-head{padding:13px 18px;border-bottom:1px solid var(--border);background:#FAFAFA;display:flex;align-items:center;justify-content:space-between}
+.card-head p,.card-head>p{font-family:var(--font-head);font-size:12px;font-weight:700;color:var(--text);text-transform:uppercase;letter-spacing:.5px;margin:0}
 .card-body{padding:18px}
 
 /* ── GRID ── */
@@ -63,9 +68,9 @@ h1,h2,h3{font-family:'Syne',sans-serif}
 @media(max-width:900px){.grid-2,.grid-3,.grid-4,.grid-5{grid-template-columns:1fr!important}}
 
 /* ── STAT BOX ── */
-.stat-box{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;text-align:center}
-.stat-box .val{font-size:28px;font-weight:800;font-family:'Syne',sans-serif;line-height:1}
-.stat-box .lbl{font-size:11px;color:var(--muted);margin-top:4px;font-weight:600;letter-spacing:.4px;text-transform:uppercase}
+.stat-box{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:18px;text-align:center;box-shadow:var(--shadow)}
+.stat-box .val{font-size:26px;font-weight:800;font-family:var(--font-head);color:var(--red);line-height:1}
+.stat-box .lbl{font-size:10px;font-weight:600;font-family:var(--font-head);color:var(--muted);margin-top:5px;text-transform:uppercase;letter-spacing:.5px}
 .stat-box .sub{font-size:11px;color:var(--muted);margin-top:2px}
 
 /* ── COMPLIANCE CARD (the key display widget) ── */
@@ -80,18 +85,18 @@ h1,h2,h3{font-family:'Syne',sans-serif}
 .cc-total{color:var(--muted);font-weight:600}.cc-c{color:var(--green);font-weight:700}.cc-nc{color:var(--red);font-weight:700}
 
 /* ── BUTTONS ── */
-.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:10px;font-size:12px;font-weight:700;font-family:'Syne',sans-serif;border:none;cursor:pointer;transition:.15s;letter-spacing:.3px;text-decoration:none}
-.btn-primary{background:var(--blue);color:#fff}.btn-primary:hover{background:#1e40af}
-.btn-success{background:var(--green);color:#fff}.btn-success:hover{background:#15803d}
-.btn-danger{background:var(--red);color:#fff}.btn-danger:hover{background:#b91c1c}
-.btn-ghost{background:transparent;border:1.5px solid var(--border);color:var(--muted)}.btn-ghost:hover{background:#f8fafc;color:var(--text)}
+.btn{font-size:12px;font-weight:600;font-family:var(--font-head);padding:8px 16px;border-radius:4px;border:none;cursor:pointer;transition:.2s;letter-spacing:.2px}
+.btn-primary{background:var(--red);color:#fff;border:none}.btn-primary:hover{background:var(--red-dark)}
+.btn-success{background:#166534;color:#fff;border:none}.btn-success:hover{background:#14532d}
+.btn-danger{background:#fff;color:var(--red);border:1.5px solid var(--red)}.btn-danger:hover{background:var(--red);color:#fff}
+.btn-ghost{background:#fff;color:var(--text);border:1.5px solid var(--border)}.btn-ghost:hover{border-color:var(--red);color:var(--red);background:var(--red-light)}
 .btn-amber{background:#fef3c7;color:#92400e;border:1px solid #fcd34d}.btn-amber:hover{background:#fde68a}
-.btn-sm{padding:5px 12px;font-size:11px}
-.btn-icon{padding:6px;border-radius:8px;background:transparent;border:1px solid var(--border);cursor:pointer;color:var(--muted);font-size:13px;transition:.15s}.btn-icon:hover{background:#f0f2f7;color:var(--text)}
+.btn-sm{padding:5px 10px;font-size:10px}
+.btn-icon{background:none;border:none;cursor:pointer;padding:4px;border-radius:3px;transition:.15s}.btn-icon:hover{background:#f0f2f7;color:var(--text)}
 
 /* ── FORMS (exact Master Setup style) ── */
 .form-group{margin-bottom:14px}
-.form-label{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:6px;font-family:'Syne',sans-serif}
+.form-label{display:block;font-size:10px;font-weight:700;font-family:var(--font-head);color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
 .form-input,.form-select,.form-textarea{width:100%;border:1.5px solid var(--border);border-radius:10px;padding:9px 12px;font-size:13px;background:#f8fafc;transition:.15s;font-family:'DM Sans',sans-serif;color:var(--text)}
 .form-input:focus,.form-select:focus,.form-textarea:focus{outline:none;border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(29,78,216,.1)}
 .form-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
@@ -101,10 +106,10 @@ h1,h2,h3{font-family:'Syne',sans-serif}
 .tbl-wrap{overflow-x:auto;border-radius:var(--radius);border:1px solid var(--border)}
 table{width:100%;border-collapse:collapse;font-size:12px}
 thead tr{background:#f8fafc;border-bottom:2px solid var(--border)}
-thead th{padding:10px 14px;text-align:left;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);white-space:nowrap;font-family:'Syne',sans-serif}
+thead th{padding:10px 14px;text-align:left;font-size:10px;font-weight:700;font-family:var(--font-head);color:var(--muted);text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border);background:#F8F8F8}
 tbody tr{border-bottom:1px solid var(--border)}.tbody tr:last-child{border:none}
-tbody tr:hover{background:#f8fafc}
-tbody td{padding:10px 14px;vertical-align:middle}
+tbody tr:hover{background:#FFF8F8}
+tbody td{padding:10px 14px;border-bottom:1px solid var(--border-light);color:var(--text);vertical-align:middle}
 
 /* ── BADGES ── */
 .badge{display:inline-block;font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;font-family:'Syne',sans-serif;letter-spacing:.3px}
@@ -128,12 +133,12 @@ tbody td{padding:10px 14px;vertical-align:middle}
 
 /* ── MP CARDS ── */
 .mp-card{background:var(--surface);border:2px solid var(--border);border-radius:var(--radius);overflow:hidden;cursor:pointer;transition:.2s}
-.mp-card:hover{border-color:#93c5fd;box-shadow:0 4px 20px rgba(29,78,216,.12)}
+.mp-card:hover{border-color:var(--text);box-shadow:0 4px 20px rgba(29,78,216,.12)}
 .mp-card.expanded{border-color:var(--blue);box-shadow:0 6px 32px rgba(29,78,216,.2)}
 .mp-card-head{padding:14px 16px;display:flex;gap:12px;align-items:flex-start}
 .mp-ref{font-family:monospace;font-size:11px;font-weight:900;color:#fff;background:#0f2540;padding:4px 8px;border-radius:6px;display:block;text-align:center;white-space:nowrap}
 .mp-pct{font-size:20px;font-weight:900;font-family:'Syne',sans-serif;text-align:center;margin-top:4px}
-.mp-body{flex:1;min-width:0}
+.mp-body{font-family:var(--font-body);background:var(--bg);color:var(--text);font-size:13px;margin:0;-webkit-font-smoothing:antialiased}
 .mp-title{font-size:13px;font-weight:700;color:var(--text);line-height:1.4}
 .mp-tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
 .tag{display:inline-block;font-size:10px;padding:2px 8px;border-radius:20px;font-weight:600;background:#f1f5f9;color:#475569}
@@ -148,19 +153,19 @@ tbody td{padding:10px 14px;vertical-align:middle}
 .mp-expand.open{display:block}
 .cp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-top:10px}
 .cp-card{background:#fff;border:1px solid #dbeafe;border-radius:10px;padding:12px;transition:.15s}
-.cp-card:hover{border-color:#93c5fd}
+.cp-card:hover{border-color:var(--text)}
 .cp-ref{font-family:monospace;font-size:10px;font-weight:700;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px}
 
 /* ── MODAL ── */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:999;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
 .modal-overlay.hidden{display:none}
 .modal{background:#fff;border-radius:16px;width:100%;max-width:600px;box-shadow:0 24px 80px rgba(0,0,0,.3);margin:auto}
 .modal.wide{max-width:820px}
-.modal-head{padding:18px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;border-radius:16px 16px 0 0;z-index:10}
-.modal-head h3{font-size:15px;font-weight:800;font-family:'Syne',sans-serif}
+.modal-head{padding:16px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;border-radius:4px 4px 0 0;z-index:10}
+.modal-head h3{font-family:var(--font-head);font-size:14px;font-weight:700;color:var(--text);text-transform:uppercase;letter-spacing:.3px}
 .modal-close{width:32px;height:32px;border-radius:50%;border:none;background:transparent;cursor:pointer;font-size:20px;color:var(--muted);display:flex;align-items:center;justify-content:center;transition:.15s}
 .modal-close:hover{background:#f1f5f9;color:var(--text)}
-.modal-body{padding:24px;max-height:70vh;overflow-y:auto}
+.modal-body{font-family:var(--font-body);background:var(--bg);color:var(--text);font-size:13px;margin:0;-webkit-font-smoothing:antialiased}
 .modal-foot{padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;background:#f8fafc;border-radius:0 0 16px 16px}
 
 /* ── OWNER/ITEM PICKERS (Master Setup style) ── */
@@ -175,8 +180,8 @@ tbody td{padding:10px 14px;vertical-align:middle}
 
 /* ── SUB-TABS ── */
 .sub-tabs{display:flex;border-bottom:2px solid var(--border);margin-bottom:20px;gap:0;overflow-x:auto}
-.sub-tab{font-size:12px;font-weight:700;font-family:'Syne',sans-serif;padding:10px 18px;border:none;background:transparent;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;white-space:nowrap;transition:.15s;letter-spacing:.3px}
-.sub-tab:hover{color:var(--text)}.sub-tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+.sub-tab{font-family:var(--font-head);font-size:10px;font-weight:700;padding:10px 16px;border:none;background:transparent;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent;transition:.2s;text-transform:uppercase;letter-spacing:.5px}
+.sub-tab:hover{color:var(--red);background:var(--red-light)}.sub-tab.active{color:var(--red);border-bottom-color:var(--red);font-weight:800}
 
 /* ── SEARCH ── */
 .search-wrap{position:relative}.search-wrap input{padding-left:32px}
@@ -187,7 +192,7 @@ tbody td{padding:10px 14px;vertical-align:middle}
 .hod-stats{display:flex;gap:12px;flex-wrap:wrap;margin-left:auto}
 .hod-stat{background:rgba(255,255,255,.1);border-radius:10px;padding:10px 18px;text-align:center}
 .hod-stat .v{font-size:22px;font-weight:900;color:#fff;font-family:'Syne',sans-serif}
-.hod-stat .l{font-size:10px;color:#93c5fd;margin-top:2px;font-weight:600;letter-spacing:.4px;text-transform:uppercase}
+.hod-stat .l{font-size:10px;color:var(--text);margin-top:2px;font-weight:600;letter-spacing:.4px;text-transform:uppercase}
 
 /* ── PROFILE ── */
 .profile-header{border-left:4px solid;border-radius:12px;padding:16px 20px;display:flex;align-items:center;gap:16px;margin-bottom:16px}
@@ -206,8 +211,8 @@ tbody td{padding:10px 14px;vertical-align:middle}
 .sample-banner h4{font-size:12px;font-weight:800;color:#0369a1;font-family:'Syne',sans-serif;text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}
 .sample-banner p{font-size:11px;color:#0c4a6e;line-height:1.6}
 .sample-files{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-.sample-link{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;background:#fff;border:1px solid #93c5fd;border-radius:8px;font-size:11px;font-weight:700;color:#1d4ed8;text-decoration:none;transition:.15s}
-.sample-link:hover{background:#dbeafe;border-color:#60a5fa}
+.sample-link{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;background:#fff;border:1px solid #93c5fd;border-radius:8px;font-size:11px;font-weight:700;color:#ED1C24;text-decoration:none;transition:.15s}
+.sample-link:hover{background:#dbeafe;border-color:var(--red)}
 
 /* ── FY CACHE CARDS ── */
 .fy-cache-card{border:2px solid var(--border);border-radius:var(--radius);padding:16px;background:var(--surface);transition:.2s}
@@ -216,14 +221,14 @@ tbody td{padding:10px 14px;vertical-align:middle}
 
 /* ── SECTION HEAD ── */
 .section-head{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px}
-.section-head h2{font-size:16px;font-weight:900;color:var(--text);font-family:'Syne',sans-serif}
+.section-head h2{font-family:var(--font-head);font-size:15px;font-weight:700;color:var(--text);margin:0}
 .section-head p{font-size:11px;color:var(--muted);margin-top:2px}
 
 /* ── TOAST / SPINNER / MISC ── */
 #toast{position:fixed;bottom:24px;right:24px;z-index:9999;pointer-events:none}
 .toast-msg{background:#0f2540;color:#fff;padding:12px 20px;border-radius:10px;font-size:12px;font-weight:600;margin-top:8px;transform:translateX(120%);transition:.3s;box-shadow:0 4px 20px rgba(0,0,0,.3)}
 .toast-msg.show{transform:none}.toast-msg.success{background:#15803d}.toast-msg.error{background:#b91c1c}
-.spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;margin:40px auto}
+.spinner{width:32px;height:32px;border:3px solid #EEEEEE;border-top-color:var(--red);border-radius:50%;animation:spin 0.7s linear infinite;margin:60px auto}
 @keyframes spin{to{transform:rotate(360deg)}}
 .flex{display:flex}.flex-1{flex:1}.items-center{align-items:center}.items-start{align-items:flex-start}
 .justify-between{justify-content:space-between}.gap-4{gap:4px}.gap-6{gap:6px}.gap-8{gap:8px}
@@ -235,49 +240,49 @@ tbody td{padding:10px 14px;vertical-align:middle}
 .truncate{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.italic{font-style:italic}
 .hidden{display:none!important}
 .org-node{background:#fff;border:2px solid var(--border);border-radius:12px;padding:12px 14px;min-width:176px;max-width:210px;cursor:pointer;transition:.2s;position:relative;display:inline-flex;flex-direction:column}
-.org-node:hover{border-color:#60a5fa;box-shadow:0 4px 16px rgba(29,78,216,.12)}
+.org-node:hover{border-color:var(--red);box-shadow:0 4px 16px rgba(29,78,216,.12)}
 .org-node.selected{border-color:var(--blue);box-shadow:0 0 0 3px rgba(29,78,216,.15)}
 .rollup-bar{height:6px;border-radius:6px;background:#e2e8f0;overflow:hidden;margin-top:4px}
 .rollup-bar-fill{height:100%;border-radius:6px;transition:.6s}
 .level-badge{display:inline-block;font-size:9px;font-weight:900;padding:2px 7px;border-radius:20px;font-family:'Syne',sans-serif;letter-spacing:.4px;text-transform:uppercase}
-.level-1{background:#0f2540;color:#fff}.level-2{background:#1d4ed8;color:#fff}
+.level-1{background:#0f2540;color:#fff}.level-2{background:#ED1C24;color:#fff}
 .level-3{background:#6d28d9;color:#fff}.level-4{background:#047857;color:#fff}.level-5{background:#b45309;color:#fff}
 .bs-date-picker{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .bs-date-picker select,.bs-date-picker input[type=number]{border:1.5px solid var(--border);border-radius:8px;padding:6px 8px;font-size:12px;background:#f8fafc;font-family:'DM Sans',sans-serif}
 .bs-date-picker input[type=number]{width:58px;text-align:center}
 .assign-card{border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;cursor:pointer;transition:.15s;background:#fff;margin-bottom:6px}
-.assign-card:hover{border-color:#60a5fa;background:#f0f9ff}
+.assign-card:hover{border-color:var(--red);background:#f0f9ff}
 .assign-card.selected{border-color:var(--blue);background:#eff6ff}
 
 .cascade-node{border-left:3px solid var(--border);padding-left:16px;margin-left:8px}
 .cascade-role-box{background:linear-gradient(135deg,#0a1628,#0f2540);color:#fff;border-radius:12px;padding:12px 16px;margin-bottom:10px}
 .cascade-mp-box{background:#f0f9ff;border:1.5px solid #bae6fd;border-radius:10px;padding:10px 14px;margin-bottom:8px}
 .cascade-cp-row{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:#fff;cursor:pointer;transition:.15s}
-.cascade-cp-row:hover{border-color:#60a5fa;background:#f0f9ff}
+.cascade-cp-row:hover{border-color:var(--red);background:#f0f9ff}
 .cascade-cp-row.linked{border-color:#16a34a;background:#f0fdf4}
 .cascade-arrow{font-size:20px;color:#94a3b8;text-align:center;margin:4px 0}
 .level-badge{display:inline-block;font-size:9px;font-weight:900;padding:2px 7px;border-radius:20px;font-family:'Syne',sans-serif;letter-spacing:.4px;text-transform:uppercase}
 .level-1{background:#0f2540;color:#fff}
-.level-2{background:#1d4ed8;color:#fff}
+.level-2{background:#ED1C24;color:#fff}
 .level-3{background:#6d28d9;color:#fff}
 .row-actions{display:flex;gap:6px;opacity:0;transition:.15s}
 tbody tr:hover .row-actions{opacity:1}
 .color-swatch{width:20px;height:20px;border-radius:50%;display:inline-block;vertical-align:middle;flex-shrink:0}
 .kpi-bar{height:4px;border-radius:4px;background:#e2e8f0;overflow:hidden;margin-top:6px}
 .kpi-bar-fill{height:100%;border-radius:4px;transition:.6s}
-.info-box{background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:12px 16px;margin-bottom:16px}
+.info-box{background:#FFF8F8;border:1px solid #FECACA;border-left:4px solid var(--red);border-radius:var(--radius);padding:14px 18px;color:var(--text);font-size:12px}
 .info-box p{font-size:11px;color:#0c4a6e;line-height:1.6}
 #logout-btn:hover{background:#dc2626!important;color:#fff!important}
+
 </style>
 </head>
 <body>
 
 <div id="header">
   <div id="header-top">
+    <div class="logo"><span style="color:var(--red);font-family:var(--font-head);font-size:18px;font-weight:800">SIPRADI TRADING PVT. LTD.</span><span style="font-size:10px;font-weight:600;color:#999;margin-left:10px;font-family:var(--font-head);letter-spacing:.5px">MPCP MANAGEMENT SYSTEM</span></div>
     <div>
-      <p style="font-size:10px;color:#93c5fd;font-weight:700;text-transform:uppercase;letter-spacing:1px">Sipradi Trading Pvt. Ltd.</p>
-      <h1>SC-MPCP Control System</h1>
-      <div id="header-meta">
+      <div id="header-meta" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
         <span id="hdr-emps">— members</span>
         <span id="hdr-mps">— MPs</span>
         <span id="hdr-cps">— CPs</span>
@@ -292,15 +297,16 @@ tbody tr:hover .row-actions{opacity:1}
       <button class="hbtn" onclick="switchFY()">⇄ Switch FY</button>
     </div>
   </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;background:#FFFFFF">
   <div id="nav">
-    <button class="nav-tab active" onclick="switchTab('dashboard')">📊 Dashboard</button>
-    <button class="nav-tab" onclick="switchTab('team')">👥 Team</button>
-    <button class="nav-tab tab-admin-only" onclick="switchTab('master')">🔧 Master Setup</button>
-    <button class="nav-tab tab-mod-only" onclick="switchTab('master')">🔧 Master Setup</button>
-    <button class="nav-tab" onclick="switchTab('data')">📁 Data Manager</button>
-    <button class="nav-tab" onclick="switchTab('reports')">📈 Reports</button>
-    
-      <button class="nav-tab tab-admin-only" onclick="switchTab('org')">&#127970; Org &amp; Cascade</button>
+    <button class="nav-tab active" onclick="switchTab('dashboard')">&#128202; Dashboard</button>
+    <button class="nav-tab" onclick="switchTab('team')">&#128101; Team</button>
+    <button class="nav-tab tab-master-setup" onclick="switchTab('master')">&#128295; Master Setup</button>
+    <button class="nav-tab" onclick="switchTab('data')">&#128193; Data Manager</button>
+    <button class="nav-tab" onclick="switchTab('reports')">&#128200; Reports</button>
+    <button class="nav-tab tab-admin-only" onclick="switchTab('org')">&#127970; Org &amp; Cascade</button>
+  </div>
+  <div id="user-badge" style="flex-shrink:0;padding:4px 12px"></div>
   </div>
 </div>
 
@@ -382,7 +388,7 @@ const S = {
   locations:[], currentTab:'dashboard', teamView:'cards', masterSub:'mps', authUser:null, activeDept:null, authUser:null, activeDept:null,
   dataSub:'perf', reportSub:'overview', currentFY:'2081-82'
 }
-const DC = { HOD:'#0f2540',Vehicle:'#1d4ed8',Registration:'#6d28d9',Warehouse:'#047857',Stock:'#b45309',Ops:'#475569',Finance:'#0e7490',HR:'#be185d' }
+const DC = { HOD:'#0f2540',Vehicle:'#ED1C24',Registration:'#6d28d9',Warehouse:'#047857',Stock:'#b45309',Ops:'#475569',Finance:'#0e7490',HR:'#be185d' }
 const BS_MONTHS = ['Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush','Magh','Falgun','Chaitra','Baisakh','Jestha','Ashadh']
 const BS_Q = {Shrawan:'Q1',Bhadra:'Q1',Ashwin:'Q1',Kartik:'Q2',Mangsir:'Q2',Poush:'Q2',Magh:'Q3',Falgun:'Q3',Chaitra:'Q3',Baisakh:'Q4',Jestha:'Q4',Ashadh:'Q4'}
 let charts = {}
@@ -420,6 +426,12 @@ async function loadAll() {
         S.authUser = me
         S.activeDept = me.active_dept || me.dept_code || null
         renderUserBadge()
+        applyRoleVisibility(me.role)
+        // Master admin with no dept selected - show dept picker overlay
+        if (me.role === 'master_admin' && !S.activeDept) {
+          showDeptPickerOverlay()
+          return
+        }
         qq('.master-admin-only').forEach(function(el){
           el.style.display=(me.role==='master_admin')?'':'none'
         })
@@ -1000,16 +1012,16 @@ function renderUserBadge() {
   b.innerHTML =
     '<div style="display:flex;align-items:center;gap:8px">'
     + (isMaster
-        ? '<select id="dept-switcher" onchange="switchDept(this.value)" style="font-size:11px;padding:3px 8px;height:28px;width:150px;background:#1a2d4a;color:#fff;border:1px solid #2d4a6b;border-radius:6px"><option value="">All Departments</option></select>'
-        : '<div style="background:#1a2d4a;border-radius:6px;padding:3px 10px;font-size:11px;color:#60a5fa;font-weight:700">&#127970; '+esc(deptLabel)+'</div>')
-    + '<div style="display:flex;align-items:center;gap:6px;background:#1a2d4a;border-radius:20px;padding:3px 10px 3px 5px">'
-    + '<div style="width:26px;height:26px;border-radius:50%;background:#1d4ed8;color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0">'+initials+'</div>'
+        ? '<select id="dept-switcher" onchange="switchDept(this.value)" style="font-size:11px;padding:3px 8px;height:28px;width:170px;background:#fff;color:var(--text);border:1.5px solid var(--border);border-radius:3px;font-family:var(--font-body)"><option value="">All Departments</option></select>'
+        : '<div style="background:var(--red-light);border-radius:3px;padding:4px 10px;font-size:10px;color:var(--red);font-weight:700;font-family:var(--font-head);letter-spacing:.3px;border:1px solid #FECACA;text-transform:uppercase">&#127970; '+esc(deptLabel)+'</div>')
+    + '<div style="display:flex;align-items:center;gap:6px;background:#F8F8F8;border-radius:3px;padding:3px 10px 3px 6px;border:1px solid var(--border)">'
+    + '<div style="width:28px;height:28px;border-radius:50%;background:var(--red);color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;font-family:var(--font-head)">'+initials+'</div>'
     + '<div style="line-height:1.3">'
-    + '<div style="font-size:11px;font-weight:700;color:#fff">'+esc(u.full_name||u.username)+'</div>'
-    + '<div style="font-size:9px;color:#60a5fa;text-transform:uppercase;letter-spacing:.4px">'+esc((u.role||'').replace(/_/g,' '))+'</div>'
+    + '<div style="font-size:11px;font-weight:700;color:var(--text);font-family:var(--font-head)">'+esc(u.full_name||u.username)+'</div>'
+    + '<div style="font-size:9px;color:var(--red);text-transform:uppercase;letter-spacing:.5px;font-weight:700;font-family:var(--font-head)">'+esc((u.role||'').replace(/_/g,' '))+'</div>'
     + '</div></div>'
-    + (canAdmin() ? '<a href="/admin" target="_blank" title="Admin Panel" style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;background:#1a2d4a;border-radius:8px;color:#60a5fa;font-size:12px;text-decoration:none;border:1px solid #2d4a6b;flex-shrink:0;font-weight:700">&#9881;</a>' : '')
-    + '<a href="/logout" id="logout-btn" title="Sign Out" style="display:flex;align-items:center;justify-content:center;width:28px;height:28px;background:#1a2d4a;border-radius:8px;color:#f87171;font-size:14px;text-decoration:none;border:1px solid #2d4a6b;flex-shrink:0">&#10148;</a>'
+    + (canAdmin() ? '<a href="/admin" target="_blank" title="User Management" style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;background:#F8F8F8;border-radius:3px;color:var(--text);font-size:14px;text-decoration:none;border:1.5px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center">&#128101;</a>' : '')
+    + '<a href="/logout" id="logout-btn" title="Sign Out" style="display:flex;align-items:center;justify-content:center;width:30px;height:30px;background:var(--red-light);border-radius:3px;color:var(--red);font-size:14px;text-decoration:none;border:1.5px solid #FECACA;flex-shrink:0;display:flex;align-items:center;justify-content:center">&#128682;</a>'
     + '</div>'
 
   // Populate dept switcher for master admin
@@ -1029,32 +1041,84 @@ function renderUserBadge() {
   applyRoleVisibility(u.role)
 }
 
-function applyRoleVisibility(role) {
-  const isMaster = role === 'master_admin'
-  const isDeptAdmin = role === 'dept_admin'
-  const isMod = role === 'moderator'
-  const isUser = role === 'user'
 
-  // Master Setup tab: visible to admin + dept_admin + moderator, hidden from user
-  qq('.tab-admin-only').forEach(function(el){
-    el.style.display = (isMaster || isDeptAdmin) ? '' : 'none'
+function showDeptPickerOverlay() {
+  fetch('/api/departments').then(function(r){return r.json()}).catch(function(){return []}).then(function(depts){
+    if (!depts || !depts.length) return
+    var overlay = document.createElement('div')
+    overlay.id = 'dept-picker-overlay'
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(255,255,255,.97);z-index:500;display:flex;align-items:center;justify-content:center'
+    var inner = document.createElement('div')
+    inner.style.cssText = 'width:460px;max-width:95vw;padding:24px'
+    inner.innerHTML = '<div style="text-align:center;margin-bottom:24px">'
+      + '<div style="width:52px;height:52px;background:#ED1C24;border-radius:6px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;font-size:24px">&#127970;</div>'
+      + '<h2 style="font-family:var(--font-head);font-size:17px;font-weight:800;color:#1A1A1A;margin-bottom:6px">Select Department</h2>'
+      + '<p style="color:#666;font-size:12px">Choose a department to view its dashboard</p>'
+      + '</div>'
+    var list = document.createElement('div')
+    list.style.cssText = 'max-height:400px;overflow-y:auto'
+    depts.forEach(function(d){
+      var btn = document.createElement('button')
+      btn.style.cssText = 'display:block;width:100%;padding:12px 16px;margin-bottom:8px;background:#fff;border:1.5px solid #DDDDDD;border-radius:4px;font-family:var(--font-head);font-size:12px;font-weight:700;color:#1A1A1A;cursor:pointer;text-align:left;text-transform:uppercase;letter-spacing:.3px;transition:.2s'
+      btn.onmouseover = function(){ this.style.borderColor='#ED1C24'; this.style.color='#ED1C24' }
+      btn.onmouseout  = function(){ this.style.borderColor='#DDDDDD'; this.style.color='#1A1A1A' }
+      btn.textContent = d.name
+      btn.onclick = function(){ pickDeptAndLoad(d.code) }
+      list.appendChild(btn)
+    })
+    inner.appendChild(list)
+    overlay.appendChild(inner)
+    document.body.appendChild(overlay)
   })
-  qq('.tab-mod-only').forEach(function(el){
-    el.style.display = isMod ? '' : 'none'
+}
+
+async function pickDeptAndLoad(deptCode) {
+  var overlay = document.getElementById('dept-picker-overlay')
+  if (overlay) overlay.remove()
+  await switchDept(deptCode)
+  loadAll()
+}
+
+
+function applyRoleVisibility(role) {
+  const isMaster    = role === 'master_admin'
+  const isDeptAdmin = role === 'dept_admin'
+  const isMod       = role === 'moderator'
+  const isUser      = role === 'user'
+  const canSeeMaster = isMaster || isDeptAdmin || isMod
+
+  // Master Setup tab (single tab, class tab-master-setup): everyone except user
+  qq('.tab-master-setup').forEach(function(el){
+    el.style.display = canSeeMaster ? '' : 'none'
+  })
+  // Also handle legacy tab-admin-only / tab-mod-only if still present
+  qq('.tab-admin-only').forEach(function(el){
+    const oc = el.getAttribute('onclick') || ''
+    if (oc.includes("'org'")) {
+      el.style.display = (isMaster || isDeptAdmin) ? '' : 'none'
+    } else {
+      el.style.display = canSeeMaster ? '' : 'none'
+    }
   })
 
   // Org & Cascade: admin + dept_admin only
-  // (already handled by tab-admin-only class)
-
-  // Master Setup sub-tabs: Users/Departments hidden from moderator
-  qq('.sub-tab[onclick*="users"], .sub-tab[onclick*="departments"]').forEach(function(el){
-    el.style.display = (isMaster || isDeptAdmin) ? '' : 'none'
+  qq('.tab-admin-only').forEach(function(el){
+    const oc = el.getAttribute('onclick') || ''
+    if (oc.includes("'org'")) el.style.display = (isMaster || isDeptAdmin) ? '' : 'none'
   })
 
-  // master-admin-only items (departments tab)
-  qq('.master-admin-only').forEach(function(el){
-    el.style.display = isMaster ? '' : 'none'
-  })
+  // Sub-tabs inside Master Setup: Users/Departments = admin only
+  setTimeout(function(){
+    qq('.sub-tab').forEach(function(el){
+      const oc = el.getAttribute('onclick') || ''
+      if (oc.includes("'users'") || oc.includes("'departments'")) {
+        el.style.display = (isMaster || isDeptAdmin) ? '' : 'none'
+      }
+    })
+    qq('.master-admin-only').forEach(function(el){
+      el.style.display = isMaster ? '' : 'none'
+    })
+  }, 200)
 }
 
 async function switchDept(deptCode) {
@@ -1240,7 +1304,7 @@ function renderRoles(){
 }
 function openRoleForm(id){
   const role=id?getRole(id):null
-  const COLORS=['#1d4ed8','#6d28d9','#047857','#b45309','#0891b2','#be185d','#0f2540','#dc2626']
+  const COLORS=['#ED1C24','#6d28d9','#047857','#b45309','#0891b2','#be185d','#0f2540','#dc2626']
   openModal(role?'Edit Role Template':'Create Role Template',`
     <div class="form-grid-2">
       <div class="form-group"><label class="form-label">Role Code</label><input class="form-input" id="rf-code" value="${esc(role?.code||'')}" placeholder="ROLE-VIM"></div>
@@ -1932,7 +1996,7 @@ async function openQuickEntry() {
         <label class="form-label">Date *</label>
         <input type="date" id="qe-date" class="form-input" value="${today}"
           onchange="qeUpdateFY(this.value)">
-        <div id="qe-fy-pill" class="text-xs mt-8" style="color:#1d4ed8;font-weight:700">
+        <div id="qe-fy-pill" class="text-xs mt-8" style="color:#ED1C24;font-weight:700">
           FY: ${_qFY} | ${_qMonth}
         </div>
       </div>
@@ -2036,7 +2100,7 @@ function qeLoadTarget() {
   if (cp && cp.target) {
     box.classList.remove('hidden');
     box.innerHTML = `<p>Target for <strong>${esc(ref)}</strong>: 
-      <strong style="color:#1d4ed8">${esc(cp.target)}</strong> — enter the actual value achieved</p>`;
+      <strong style="color:#ED1C24">${esc(cp.target)}</strong> — enter the actual value achieved</p>`;
   } else {
     box.classList.add('hidden');
   }
@@ -2400,7 +2464,7 @@ function renderOverviewReport(){
           {label:'Compliant', data:monthData.map(d=>d.comp), backgroundColor:'#16a34a99', borderRadius:4},
           {label:'Non-Compliant', data:monthData.map(d=>d.nc), backgroundColor:'#dc262699', borderRadius:4},
           {label:'% Compliant', data:monthData.map(d=>d.pct), type:'line',
-           borderColor:'#1d4ed8', backgroundColor:'transparent',
+           borderColor:'#ED1C24', backgroundColor:'transparent',
            tension:.3, yAxisID:'y2', pointRadius:4}
         ]
       },
@@ -2477,7 +2541,7 @@ async function renderYoYReport(){
   const trendData={labels:BS_MONTHS,
     datasets:[
       {label:yA,data:BS_MONTHS.map(m=>{const d=dA.by_month?.[m];return d?.total?+(d.compliant/d.total*100).toFixed(2):null}),borderColor:'#94a3b8',borderDash:[5,4],tension:.3,spanGaps:true},
-      {label:yB,data:BS_MONTHS.map(m=>{const d=dB.by_month?.[m];return d?.total?+(d.compliant/d.total*100).toFixed(2):null}),borderColor:'#1d4ed8',borderWidth:2.5,tension:.3,spanGaps:true}
+      {label:yB,data:BS_MONTHS.map(m=>{const d=dB.by_month?.[m];return d?.total?+(d.compliant/d.total*100).toFixed(2):null}),borderColor:'#ED1C24',borderWidth:2.5,tension:.3,spanGaps:true}
     ]}
 
   let html=`
@@ -2532,7 +2596,7 @@ async function renderYoYReport(){
   charts['yoy-mp']=new Chart(q('#yoy-mp'),{type:'bar',data:{
     labels:mpLabels,
     datasets:[{label:yA,data:mpLabels.map(r=>dA.by_mp?.[r]?.pct_c??null),backgroundColor:'#94a3b8cc'},
-              {label:yB,data:mpLabels.map(r=>dB.by_mp?.[r]?.pct_c??null),backgroundColor:'#1d4ed8cc'}]},
+              {label:yB,data:mpLabels.map(r=>dB.by_mp?.[r]?.pct_c??null),backgroundColor:'#ED1C24cc'}]},
     options:{responsive:true,plugins:{legend:{position:'top'}},scales:{y:{min:0,max:100,ticks:{callback:v=>v+'%'}},x:{ticks:{font:{family:'monospace',size:9}}}}}})
 }
 
@@ -2651,14 +2715,14 @@ function renderMPCPReport(){
 
 // ── LOCATIONS & SECTORS ───────────────────────────────────────────────────────
 const LOC_COLORS = {
-    Office:    '#1d4ed8',
+    Office:    '#ED1C24',
     Border:    '#b45309',
     Warehouse: '#047857',
     Depot:     '#6d28d9',
     Branch:    '#0891b2'
 }
 const SECTOR_COLORS_DEFAULT = {
-    Vehicle:      '#1d4ed8',
+    Vehicle:      '#ED1C24',
     Registration: '#6d28d9',
     Warehouse:    '#047857',
     Stock:        '#b45309',
@@ -2767,7 +2831,7 @@ function renderSectors() {
 
 function openSectorForm(id) {
   const sec = id ? (S.sectors||[]).find(s=>s.id===id) : null
-  const PRESET = ['#0f2540','#1d4ed8','#6d28d9','#047857','#b45309','#475569','#0e7490','#be185d','#dc2626','#d97706','#16a34a','#0891b2']
+  const PRESET = ['#0f2540','#ED1C24','#6d28d9','#047857','#b45309','#475569','#0e7490','#be185d','#dc2626','#d97706','#16a34a','#0891b2']
   openModal(sec?`Edit Sector: ${sec.name}`:'New Sector / Department',
     `<div class="form-grid-2">
       <div class="form-group"><label class="form-label">Sector Name *</label>
@@ -2919,7 +2983,7 @@ function renderUsers() {
     html+='<th style="padding:8px 10px;text-align:center;font-size:10px;font-weight:700;color:#6b7a99;text-transform:uppercase;border-bottom:2px solid var(--border)">Actions</th>'
     html+='</tr></thead><tbody>'
     users.forEach(function(u){
-      const rc=u.role==='master_admin'?'#7c3aed':u.role==='dept_admin'?'#1d4ed8':'#047857'
+      const rc=u.role==='master_admin'?'#7c3aed':u.role==='dept_admin'?'#ED1C24':'#047857'
       html+='<tr style="border-bottom:1px solid var(--border)">'
       html+='<td style="padding:8px 10px"><div style="font-weight:700;font-size:12px">'+esc(u.full_name)+'</div>'
       html+='<div style="font-size:10px;color:#6b7a99">@'+esc(u.username)+'</div></td>'
@@ -2992,7 +3056,7 @@ async function resetUserPw(uid2,username){
 }
 
 function renderLevels(){
-  const defs=[{l:1,label:'Head of Department',col:'#0f2540'},{l:2,label:'Team Lead / Manager',col:'#1d4ed8'},{l:3,label:'Operations Staff',col:'#047857'}]
+  const defs=[{l:1,label:'Head of Department',col:'#0f2540'},{l:2,label:'Team Lead / Manager',col:'#ED1C24'},{l:3,label:'Operations Staff',col:'#047857'}]
   let html='<div class="card"><div class="card-head"><p>Employee Levels</p></div><div class="card-body">'
   html+='<p style="font-size:12px;color:var(--muted);margin-bottom:16px">Levels control hierarchy, rollup scores and org tree depth. Assign via Employee edit form.</p>'
   html+='<div class="grid-3">'
@@ -3519,7 +3583,7 @@ function renderTreeNodes(nodes, depth) {
         const col = dc(emp.dept||'Ops')
         const lvlBadge = `<span class="level-badge level-${emp.level||1}">Level ${emp.level||1}</span>`
         const roles = (emp.roles||[]).map(function(r){
-            return `<span class="badge" style="background:${r.color||'#1d4ed8'};color:#fff;margin:2px">${esc(r.code)}</span>`
+            return `<span class="badge" style="background:${r.color||'#ED1C24'};color:#fff;margin:2px">${esc(r.code)}</span>`
         }).join('')
 
         let mpHtml = ''
@@ -3559,7 +3623,7 @@ function renderTreeNodes(nodes, depth) {
                             ${lvlBadge}
                             <span class="emp-code" style="background:rgba(255,255,255,.15);color:#fff;border-color:transparent">${esc(emp.emp_code||'')}</span>
                         </div>
-                        <p style="font-size:11px;color:#93c5fd;margin-top:2px">${esc(emp.role||'')}</p>
+                        <p style="font-size:11px;color:var(--text);margin-top:2px">${esc(emp.role||'')}</p>
                         ${roles?`<div style="margin-top:6px">${roles}</div>`:''}
                     </div>
                 </div>
@@ -3692,7 +3756,7 @@ function printOrgTree() {
     return (name||'').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   }
   function lvlColor(l) {
-    return l==1?'#0a1628':l==2?'#1d4ed8':'#047857';
+    return l==1?'#0a1628':l==2?'#ED1C24':'#047857';
   }
   function drawNode(n) {
     const ownPct  = n.own    && n.own.pct    !== null ? n.own.pct    : null;
@@ -3745,9 +3809,10 @@ function printOrgTree() {
   const scale = Math.min(scaleX, scaleY, 0.99).toFixed(3);
 
   const w = window.open('','_blank','width=1600,height=1000');
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&family=Open+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:Arial,sans-serif;background:#fff;color:#0f1a2e;padding:6px;width:100%;overflow:visible}
+body{font-family:var(--font-body);background:var(--bg);color:var(--text);font-size:13px;margin:0;-webkit-font-smoothing:antialiased}
 .no-print{margin-bottom:8px}
 .print-hdr{display:flex;justify-content:space-between;align-items:center;padding-bottom:6px;border-bottom:2px solid #0a1628;margin-bottom:10px}
 h1{font-size:13px;font-weight:700;color:#0a1628}
@@ -3781,20 +3846,20 @@ h1{font-size:13px;font-weight:700;color:#0a1628}
 @page{size:A4 landscape;margin:6mm}
 @media print{
   .no-print{display:none!important}
-  body{padding:0;overflow:visible}
+  body{font-family:var(--font-body);background:var(--bg);color:var(--text);font-size:13px;margin:0;-webkit-font-smoothing:antialiased}
   *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
 }
 </style></head><body>
 <div class="no-print">
-  <button onclick="window.print()" style="padding:5px 14px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px;margin-right:6px">&#128438; Print / Save PDF</button>
+  <button onclick="window.print()" style="padding:5px 14px;background:#ED1C24;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px;margin-right:6px">&#128438; Print / Save PDF</button>
   <button onclick="window.close()" style="padding:5px 12px;background:#f8fafc;color:#374151;border:1px solid #d1d5db;border-radius:6px;cursor:pointer;font-size:11px">Close</button>
 </div>
 <div class="print-hdr">
   <div><h1>Organisation Hierarchy — Compliance View</h1>
   <div class="meta">FY: ${fy||'All'} &nbsp;·&nbsp; ${loc} &nbsp;·&nbsp; ${new Date().toLocaleDateString('en-GB')} &nbsp;·&nbsp; ${totalNodes} employees</div></div>
   <div class="legend">
-    <div class="leg"><span style="background:#0a1628"></span>L1 HOD</div>
-    <div class="leg"><span style="background:#1d4ed8"></span>L2 Lead</div>
+    <div class="leg"><span style="background:var(--text)"></span>L1 HOD</div>
+    <div class="leg"><span style="background:#ED1C24"></span>L2 Lead</div>
     <div class="leg"><span style="background:#047857"></span>L3 Ops</div>
     <div class="leg"><span style="background:#16a34a"></span>≥95%</div>
     <div class="leg"><span style="background:#d97706"></span>80–94%</div>
@@ -4242,7 +4307,7 @@ const WIDGET_TYPES = [
   {id:'mp_cards',     label:'MP Card Grid',          icon:'🗂️', desc:'Managing points as cards'},
 ]
 
-const CHART_COLORS = ['#1d4ed8','#16a34a','#d97706','#dc2626','#6d28d9','#0891b2','#047857','#b45309','#be185d','#0e7490']
+const CHART_COLORS = ['#ED1C24','#16a34a','#d97706','#dc2626','#6d28d9','#0891b2','#047857','#b45309','#be185d','#0e7490']
 
 let activeDashLayout = null   // currently loaded layout
 let dashWidgetCharts = {}     // chart.js instances keyed by widget id
@@ -4271,9 +4336,9 @@ function renderDefaultDashboard() {
   <div class="hod-banner">
     <div class="avatar avatar-lg" style="background:${dc(hod.dept)}">${av(hod.name)}</div>
     <div>
-      <p style="font-size:10px;color:#93c5fd;font-weight:700;text-transform:uppercase;letter-spacing:1px">Head of Department</p>
+      <p style="font-size:10px;color:var(--text);font-weight:700;text-transform:uppercase;letter-spacing:1px">Head of Department</p>
       <p style="font-size:22px;font-weight:900;color:#fff;font-family:'Syne',sans-serif">${esc(hod.name)}</p>
-      <p style="font-size:12px;color:#93c5fd">${esc(hod.role)}</p>
+      <p style="font-size:12px;color:var(--text)">${esc(hod.role)}</p>
     </div>
     <div class="hod-stats">
       ${[['MPs',S.mps.length],['CPs',S.cps.length],['Team',S.employees.length-1],['Roles',S.roles.length]].map(([l,v])=>`<div class="hod-stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('')}
@@ -4501,12 +4566,12 @@ async function loadWidget(idx, cfg) {
         label: cfg.title||'Compliance %',
         data: data.values,
         backgroundColor: isLine?'rgba(29,78,216,0.1)':bgColors,
-        borderColor: isLine?'#1d4ed8':bgColors,
+        borderColor: isLine?'#ED1C24':bgColors,
         borderWidth: isLine?2:0,
         borderRadius: isPie?0:8,
         fill: isLine,
         tension: 0.4,
-        pointBackgroundColor: '#1d4ed8',
+        pointBackgroundColor: '#ED1C24',
       }]
     },
     options: {

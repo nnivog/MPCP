@@ -39,6 +39,25 @@ def get_master_conn():
     return c
 
 # ── PASSWORD UTILS ─────────────────────────────────────────────────────────
+
+def log_audit(action, target_type='', target_id='', detail=''):
+    try:
+        import datetime as _dt
+        mdb = get_master_conn()
+        u = session.get('mpcp_user') or {}
+        mdb.execute(
+            "INSERT INTO audit_log(ts,actor_id,actor_name,action,target_type,target_id,detail,ip) VALUES(?,?,?,?,?,?,?,?)",
+            (_dt.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+             u.get('id',''), u.get('full_name','system'),
+             action, target_type, str(target_id), detail,
+             request.remote_addr if request else '')
+        )
+        mdb.commit()
+        mdb.close()
+    except Exception:
+        pass
+
+
 def hash_password(pw):
     salt = secrets.token_hex(16)
     h = hashlib.pbkdf2_hmac('sha256', pw.encode(), salt.encode(), 260000)
@@ -72,6 +91,16 @@ CREATE TABLE IF NOT EXISTS users(
   emp_code TEXT DEFAULT '',
   active INTEGER DEFAULT 1,
   created_at TEXT DEFAULT '');
+CREATE TABLE IF NOT EXISTS audit_log(
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  actor_id TEXT,
+  actor_name TEXT,
+  action TEXT NOT NULL,
+  target_type TEXT,
+  target_id TEXT,
+  detail TEXT,
+  ip TEXT);
 """)
     # Create default master admin if no users exist
     existing = db.execute("SELECT COUNT(*) c FROM users").fetchone()['c']
@@ -2278,6 +2307,16 @@ td{{padding:6px 10px;border-bottom:1px solid #e8eaf0;font-size:11px;vertical-ali
 .mp-row{{background:#f0fdf4!important}}
 .no-print{{margin-bottom:12px}}
 @media print{{.no-print{{display:none}}@page{{margin:12mm}}.page-break{{page-break-before:always}}}}
+.tab-bar{display:flex;gap:4px;margin-bottom:20px;border-bottom:2px solid #EEEEEE;padding-bottom:0}
+.tab-btn{font-family:'Montserrat',sans-serif;font-size:11px;font-weight:700;padding:8px 18px;border:none;background:none;cursor:pointer;color:#777;border-bottom:3px solid transparent;margin-bottom:-2px;text-transform:uppercase;letter-spacing:.3px}
+.tab-btn.active{color:#ED1C24;border-bottom-color:#ED1C24}
+.tab-btn:hover{color:#ED1C24}
+.tab-panel{display:none}.tab-panel.active{display:block}
+.audit-table td{font-size:11px;padding:8px 12px}
+.audit-action{font-family:'Montserrat',sans-serif;font-weight:700;font-size:10px;padding:2px 7px;border-radius:3px;background:#F0FDF4;color:#166534}
+.audit-action.login{background:#EFF6FF;color:#1D4ED8}
+.audit-action.delete,.audit-action.disable{background:#FFF0F0;color:#ED1C24}
+.audit-action.edit{background:#FFFBEB;color:#92400E}
 </style></head><body>
 <div class="no-print"><button onclick="window.print()" style="padding:6px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;cursor:pointer;margin-right:8px">🖨 Print / Save PDF</button><button onclick="window.close()" style="padding:6px 16px;background:#f1f5f9;color:#0f1a2e;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">Close</button></div>
 <h1>{title}</h1><div class="sub">{subtitle}</div>
@@ -2496,6 +2535,16 @@ thead th:nth-child(3),thead th:nth-child(4){{width:90px;text-align:center}}
   *{{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
   tr{{page-break-inside:avoid}}
 }}
+.tab-bar{display:flex;gap:4px;margin-bottom:20px;border-bottom:2px solid #EEEEEE;padding-bottom:0}
+.tab-btn{font-family:'Montserrat',sans-serif;font-size:11px;font-weight:700;padding:8px 18px;border:none;background:none;cursor:pointer;color:#777;border-bottom:3px solid transparent;margin-bottom:-2px;text-transform:uppercase;letter-spacing:.3px}
+.tab-btn.active{color:#ED1C24;border-bottom-color:#ED1C24}
+.tab-btn:hover{color:#ED1C24}
+.tab-panel{display:none}.tab-panel.active{display:block}
+.audit-table td{font-size:11px;padding:8px 12px}
+.audit-action{font-family:'Montserrat',sans-serif;font-weight:700;font-size:10px;padding:2px 7px;border-radius:3px;background:#F0FDF4;color:#166534}
+.audit-action.login{background:#EFF6FF;color:#1D4ED8}
+.audit-action.delete,.audit-action.disable{background:#FFF0F0;color:#ED1C24}
+.audit-action.edit{background:#FFFBEB;color:#92400E}
 </style></head><body>
 <div class="no-print">
   <button onclick="window.print()" style="padding:5px 14px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px">&#128438; Print / Save PDF (A4)</button>
@@ -2553,6 +2602,16 @@ input:focus{border-color:#ED1C24;box-shadow:0 0 0 3px rgba(215,25,32,.08)}
 .err{background:#FFF5F5;border:1px solid #FECACA;color:#ED1C24;padding:10px 14px;border-radius:4px;font-size:12px;margin-bottom:16px;font-weight:500}
 .foot{text-align:center;margin-top:20px;font-size:10px;color:#aaa;font-family:'Montserrat',sans-serif;letter-spacing:.3px}
 .divider{border:none;border-top:1px solid #DDDDDD;margin:16px 0}
+.tab-bar{display:flex;gap:4px;margin-bottom:20px;border-bottom:2px solid #EEEEEE;padding-bottom:0}
+.tab-btn{font-family:'Montserrat',sans-serif;font-size:11px;font-weight:700;padding:8px 18px;border:none;background:none;cursor:pointer;color:#777;border-bottom:3px solid transparent;margin-bottom:-2px;text-transform:uppercase;letter-spacing:.3px}
+.tab-btn.active{color:#ED1C24;border-bottom-color:#ED1C24}
+.tab-btn:hover{color:#ED1C24}
+.tab-panel{display:none}.tab-panel.active{display:block}
+.audit-table td{font-size:11px;padding:8px 12px}
+.audit-action{font-family:'Montserrat',sans-serif;font-weight:700;font-size:10px;padding:2px 7px;border-radius:3px;background:#F0FDF4;color:#166534}
+.audit-action.login{background:#EFF6FF;color:#1D4ED8}
+.audit-action.delete,.audit-action.disable{background:#FFF0F0;color:#ED1C24}
+.audit-action.edit{background:#FFFBEB;color:#92400E}
 </style></head><body>
 
 <div class="wrapper">
@@ -2863,6 +2922,16 @@ tbody tr:nth-child(even){background:#FAFAFA}
 .mfg input,.mfg select{width:100%;padding:9px 12px;border:1.5px solid #DDDDDD;border-radius:3px;font-size:13px;font-family:'Open Sans',sans-serif;outline:none;transition:.2s}
 .mfg input:focus,.mfg select:focus{border-color:#ED1C24;box-shadow:0 0 0 3px rgba(237,28,36,.08)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tab-bar{display:flex;gap:4px;margin-bottom:20px;border-bottom:2px solid #EEEEEE;padding-bottom:0}
+.tab-btn{font-family:'Montserrat',sans-serif;font-size:11px;font-weight:700;padding:8px 18px;border:none;background:none;cursor:pointer;color:#777;border-bottom:3px solid transparent;margin-bottom:-2px;text-transform:uppercase;letter-spacing:.3px}
+.tab-btn.active{color:#ED1C24;border-bottom-color:#ED1C24}
+.tab-btn:hover{color:#ED1C24}
+.tab-panel{display:none}.tab-panel.active{display:block}
+.audit-table td{font-size:11px;padding:8px 12px}
+.audit-action{font-family:'Montserrat',sans-serif;font-weight:700;font-size:10px;padding:2px 7px;border-radius:3px;background:#F0FDF4;color:#166534}
+.audit-action.login{background:#EFF6FF;color:#1D4ED8}
+.audit-action.delete,.audit-action.disable{background:#FFF0F0;color:#ED1C24}
+.audit-action.edit{background:#FFFBEB;color:#92400E}
 </style></head><body>
 <div class="topbar">
   <h1>&#128101; User Management &mdash; Admin Panel</h1>
@@ -2874,6 +2943,11 @@ tbody tr:nth-child(even){background:#FAFAFA}
 <div class="container">
   {% if msg %}<div class="{{ 'msg-ok' if msg_type=='ok' else 'msg-err' }}">{{ '✓' if msg_type=='ok' else '⚠' }}&nbsp; {{ msg }}</div>{% endif %}
 
+  <div class="tab-bar">
+    <button class="tab-btn active" onclick="switchAdminTab('users',this)">&#128100; Users</button>
+    <button class="tab-btn" onclick="switchAdminTab('audit',this)">&#128203; Audit Log</button>
+  </div>
+  <div id="admin-tab-users" class="tab-panel active">
   <div class="card">
     <div class="card-head"><h2>&#43; Create New User</h2></div>
     <form method="POST" action="/admin/users/create">
@@ -3018,6 +3092,76 @@ function openEdit(id,username,name,role,dept,emp){
 }
 function closeEdit(){document.getElementById('edit-modal').classList.remove('open')}
 document.getElementById('edit-modal').addEventListener('click',function(e){if(e.target===this)closeEdit()})
+  </div>
+  <div id="admin-tab-audit" class="tab-panel">
+    <div class="card">
+      <div class="card-head">
+        <h2>&#128203; Audit Log</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="search-box" placeholder="&#128269; Filter..." oninput="filterAudit(this.value)" style="width:200px">
+          <button class="btn btn-ghost" onclick="loadAudit()">&#8635; Refresh</button>
+        </div></div>
+      <div style="overflow-x:auto"><table id="audit-table">
+        <thead><tr><th>Timestamp</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead>
+        <tbody id="audit-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;color:#999">Click Refresh to load</td></tr></tbody>
+      </table></div></div></div>
+<script>
+function switchAdminTab(name,btn){
+  document.querySelectorAll(".tab-panel").forEach(p=>p.classList.remove("active"))
+  document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"))
+  document.getElementById("admin-tab-"+name).classList.add("active")
+  btn.classList.add("active")
+  if(name==="audit")loadAudit()
+}
+function filterAudit(q){
+  q=q.toLowerCase()
+  document.querySelectorAll("#audit-table tbody tr").forEach(tr=>{
+    tr.style.display=tr.textContent.toLowerCase().includes(q)?"":"none"
+  })
+}
+function loadAudit(){
+  fetch("/api/audit_log").then(r=>r.json()).then(rows=>{
+    const ac=a=>{a=(a||"").toLowerCase();if(a.includes("login"))return"login";if(a.includes("delete")||a.includes("disable"))return"delete";if(a.includes("edit"))return"edit";return""}
+    const tb=document.getElementById("audit-tbody")
+    if(!rows.length){tb.innerHTML="<tr><td colspan=6 style=text-align:center;padding:20px;color:#999>No audit records yet</td></tr>";return}
+    tb.innerHTML=rows.map(r=>`<tr><td style=white-space:nowrap;color:#666>${r.ts||""}</td><td style=font-weight:600>${r.actor_name||""}</td><td><span class="audit-action ${ac(r.action)}">${r.action||""}</span></td><td style=color:#666>${r.target_type||""} ${r.target_id||""}</td><td style=max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap title="${r.detail||""}"><small>${r.detail||""}</small></td><td style=color:#999;font-size:10px>${r.ip||""}</td></tr>`).join("")
+  }).catch(e=>document.getElementById("audit-tbody").innerHTML="<tr><td colspan=6 style=color:#ED1C24;padding:12px>Error: "+e.message+"</td></tr>")
+}
+  </div>
+  <div id="admin-tab-audit" class="tab-panel">
+    <div class="card">
+      <div class="card-head">
+        <h2>&#128203; Audit Log</h2>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input class="search-box" placeholder="&#128269; Filter..." oninput="filterAudit(this.value)" style="width:200px">
+          <button class="btn btn-ghost" onclick="loadAudit()">&#8635; Refresh</button>
+        </div></div>
+      <div style="overflow-x:auto"><table id="audit-table">
+        <thead><tr><th>Timestamp</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead>
+        <tbody id="audit-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;color:#999">Click Refresh to load</td></tr></tbody>
+      </table></div></div></div>
+<script>
+function switchAdminTab(name,btn){
+  document.querySelectorAll(".tab-panel").forEach(p=>p.classList.remove("active"))
+  document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"))
+  document.getElementById("admin-tab-"+name).classList.add("active")
+  btn.classList.add("active")
+  if(name==="audit")loadAudit()
+}
+function filterAudit(q){
+  q=q.toLowerCase()
+  document.querySelectorAll("#audit-table tbody tr").forEach(tr=>{
+    tr.style.display=tr.textContent.toLowerCase().includes(q)?"":"none"
+  })
+}
+function loadAudit(){
+  fetch("/api/audit_log").then(r=>r.json()).then(rows=>{
+    const ac=a=>{a=(a||"").toLowerCase();if(a.includes("login"))return"login";if(a.includes("delete")||a.includes("disable"))return"delete";if(a.includes("edit"))return"edit";return""}
+    const tb=document.getElementById("audit-tbody")
+    if(!rows.length){tb.innerHTML="<tr><td colspan=6 style=text-align:center;padding:20px;color:#999>No audit records yet</td></tr>";return}
+    tb.innerHTML=rows.map(r=>`<tr><td style=white-space:nowrap;color:#666>${r.ts||""}</td><td style=font-weight:600>${r.actor_name||""}</td><td><span class="audit-action ${ac(r.action)}">${r.action||""}</span></td><td style=color:#666>${r.target_type||""} ${r.target_id||""}</td><td style=max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap title="${r.detail||""}"><small>${r.detail||""}</small></td><td style=color:#999;font-size:10px>${r.ip||""}</td></tr>`).join("")
+  }).catch(e=>document.getElementById("audit-tbody").innerHTML="<tr><td colspan=6 style=color:#ED1C24;padding:12px>Error: "+e.message+"</td></tr>")
+}
 </script>
 </body></html>"""
 
@@ -3033,6 +3177,18 @@ def admin_users_data(db, current_role, current_dept):
         ).fetchall())
     depts = R(db.execute("SELECT code,name FROM departments WHERE active=1 ORDER BY name").fetchall())
     return users, depts
+
+@app.route('/api/audit_log')
+def get_audit_log():
+    err = require_role('master_admin')
+    if err: return err
+    db = get_master_conn()
+    rows = db.execute(
+        "SELECT * FROM audit_log ORDER BY ts DESC LIMIT 200"
+    ).fetchall()
+    db.close()
+    return jsonify([dict(r) for r in rows])
+
 
 @app.route('/admin')
 @app.route('/admin/users')
@@ -3089,6 +3245,7 @@ def admin_reset_pw(uid2):
         return _admin_msg('Password must be at least 6 characters', 'err')
     db = get_master_conn()
     db.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(pw), uid2))
+    log_audit('PASSWORD_RESET', 'user', uid2, 'Admin password reset')
     db.commit(); db.close()
     return _admin_msg('Password reset successfully', 'ok')
 
@@ -3104,6 +3261,7 @@ def admin_toggle_user(uid2):
         db.close(); return _admin_msg('Access denied', 'err')
     new_active = 0 if dict(target)['active'] else 1
     db.execute("UPDATE users SET active=? WHERE id=?", (new_active, uid2))
+    log_audit('USER_'+(' ENABLE' if new_active else 'DISABLE').strip(), 'user', uid2, f'active={new_active}')
     db.commit(); db.close()
     status = 'enabled' if new_active else 'disabled'
     return _admin_msg(f"User {status} successfully", 'ok')

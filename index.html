@@ -95,7 +95,7 @@ h1,h2,h3{font-family:'Syne',sans-serif}
 .btn-icon{background:none;border:none;cursor:pointer;padding:4px;border-radius:3px;transition:.15s}.btn-icon:hover{background:#f0f2f7;color:var(--text)}
 
 /* ── FORMS (exact Master Setup style) ── */
-.form-group{margin-bottom:14px}
+.form-group{margin-bottom:0}
 .form-label{display:block;font-size:10px;font-weight:700;font-family:var(--font-head);color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px}
 .form-input,.form-select,.form-textarea{width:100%;border:1.5px solid var(--border);border-radius:10px;padding:9px 12px;font-size:13px;background:#f8fafc;transition:.15s;font-family:'DM Sans',sans-serif;color:var(--text)}
 .form-input:focus,.form-select:focus,.form-textarea:focus{outline:none;border-color:var(--blue);background:#fff;box-shadow:0 0 0 3px rgba(29,78,216,.1)}
@@ -157,15 +157,15 @@ tbody td{padding:10px 14px;border-bottom:1px solid var(--border-light);color:var
 .cp-ref{font-family:monospace;font-size:10px;font-weight:700;background:#dbeafe;color:#1e40af;padding:2px 6px;border-radius:4px}
 
 /* ── MODAL ── */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px}
 .modal-overlay.hidden{display:none}
-.modal{background:#fff;border-radius:16px;width:100%;max-width:600px;box-shadow:0 24px 80px rgba(0,0,0,.3);margin:auto}
-.modal.wide{max-width:820px}
-.modal-head{padding:16px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;background:#fff;border-radius:4px 4px 0 0;z-index:10}
+.modal{background:#fff;border-radius:4px;width:96vw;max-width:720px;display:flex;flex-direction:column;max-height:90vh;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+.modal.wide{max-width:980px;width:98vw}
+.modal-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:#fff}
 .modal-head h3{font-family:var(--font-head);font-size:14px;font-weight:700;color:var(--text);text-transform:uppercase;letter-spacing:.3px}
 .modal-close{width:32px;height:32px;border-radius:50%;border:none;background:transparent;cursor:pointer;font-size:20px;color:var(--muted);display:flex;align-items:center;justify-content:center;transition:.15s}
 .modal-close:hover{background:#f1f5f9;color:var(--text)}
-.modal-body{font-family:var(--font-body);background:var(--bg);color:var(--text);font-size:13px;margin:0;-webkit-font-smoothing:antialiased}
+.modal-body{padding:20px 24px;overflow-y:auto;flex:1;min-height:0}
 .modal-foot{padding:16px 24px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end;background:#f8fafc;border-radius:0 0 16px 16px}
 
 /* ── OWNER/ITEM PICKERS (Master Setup style) ── */
@@ -274,6 +274,11 @@ tbody tr:hover .row-actions{opacity:1}
 .info-box p{font-size:11px;color:#0c4a6e;line-height:1.6}
 #logout-btn:hover{background:#dc2626!important;color:#fff!important}
 
+
+#header-meta{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:4px}
+#header-meta span{font-family:var(--font-head);font-size:11px;font-weight:700;color:#1A1A1A;white-space:nowrap}
+.fy-pill{background:var(--red-light);color:var(--red)!important;padding:2px 8px;border-radius:3px;border:1px solid #FECACA}
+#header-meta .dot{color:#16A34A!important;font-weight:700}
 </style>
 </head>
 <body>
@@ -332,9 +337,7 @@ tbody tr:hover .row-actions{opacity:1}
       <button class="sub-tab" onclick="switchMaster('roles')">Role Templates</button>
       <button class="sub-tab" onclick="switchMaster('links')">Role Assignments</button>
 			<button class="sub-tab" onclick="switchMaster('locations')">&#128205; Locations</button>
-      <button class="sub-tab" onclick="switchMaster('levels')">⭐ Emp Levels</button>
       <button class="sub-tab master-admin-only" onclick="switchMaster('departments')">&#127970; Departments</button>
-      <button class="sub-tab" onclick="switchMaster('users')">&#128100; Users</button>
       <button class="sub-tab" onclick="switchMaster('dashboard_builder')">&#128196; Dashboard Builder</button>
     </div>
     <div id="master-content"><div class="spinner"></div></div>
@@ -456,8 +459,8 @@ async function loadAll() {
 }
 
 function updateHeader() {
-  $('hdr-emps').textContent = S.employees.length+' members'
-  $('hdr-mps').textContent  = S.mps.length+' MPs'
+  $('hdr-emps').textContent = (S.employees||[]).length+' members'
+  $('hdr-mps').textContent  = (S.mps||[]).length+' MPs'
   $('hdr-cps').textContent  = S.cps.length+' CPs'
   $('hdr-roles').textContent= S.roles.length+' Roles'
   $('hdr-perf').textContent = S.perf.length+' Records'
@@ -596,12 +599,7 @@ function openModal(title, body, actions=[], wide=false) {
   })
   q('#modal-overlay').classList.remove('hidden')
 }
-function handleBackdrop(e) {
-  // Close modal when clicking the dark overlay (outside the white card)
-  if (e.target === $('modal-overlay')) {
-    closeModal();
-  }
-}
+function handleBackdrop(e) { /* outside click disabled */ }
 function closeModal() {
   $('modal-overlay').classList.add('hidden');
   $('modal-body').innerHTML = '';
@@ -1979,98 +1977,118 @@ async function openQuickEntry() {
   const fyData = await fyFromDate(today);
   _qFY    = fyData ? fyData.fy       : S.currentFY;
   _qMonth = fyData ? fyData.bs_month : '';
+  _qQ     = fyData ? fyData.quarter  : '';
 
-  const empOpts = S.employees.map(e =>
+  const empOpts = (S.employees||[]).map(e =>
     `<option value="${esc(e.emp_code)}">${esc(e.name)} — ${esc(e.emp_code)}</option>`
   ).join('');
 
-  const cpOpts = S.cps.map(c =>
-    `<option value="${esc(c.ref)}">[${esc(c.ref)}] ${esc(c.title.slice(0,55))}${c.title.length>55?'…':''}</option>`
+  const mpOpts = (S.mps||[]).map(m =>
+    `<option value="${esc(m.ref)}">[${esc(m.ref)}] ${esc((m.title||'').slice(0,55))}</option>`
   ).join('');
 
-  openModal('⚡ Quick Performance Entry', `
-    <p class="text-xs text-muted mb-12">Fill 4 fields. FY, month &amp; status are auto-calculated.</p>
+  const cpOpts = (S.cps||[]).map(cp =>
+    `<option value="${esc(cp.ref)}">[${esc(cp.ref)}] ${esc((cp.title||'').slice(0,55))}</option>`
+  ).join('');
 
-    <div class="form-grid-2">
+  const units = (typeof UNITS!=="undefined"?UNITS:["%","Days","Hours","Count","Nos","Trips","Tons"]);
+  const unitOpts = units.map(u=>`<option>${u}</option>`).join('');
+
+  openModal('⚡ Quick Performance Entry', `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
       <div class="form-group">
         <label class="form-label">Date *</label>
-        <input type="date" id="qe-date" class="form-input" value="${today}"
-          onchange="qeUpdateFY(this.value)">
-        <div id="qe-fy-pill" class="text-xs mt-8" style="color:#ED1C24;font-weight:700">
-          FY: ${_qFY} | ${_qMonth}
-        </div>
+        <input type="date" id="qe-date" class="form-input" value="${today}" onchange="qeUpdateFY(this.value)">
+      </div>
+      <div class="form-group">
+        <label class="form-label">FY</label>
+        <input type="text" id="qe-fy" class="form-input" value="${_qFY}" readonly style="background:#F8F8F8">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Month</label>
+        <input type="text" id="qe-month" class="form-input" value="${_qMonth}" readonly style="background:#F8F8F8">
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div class="form-group">
+        <label class="form-label">Quarter</label>
+        <input type="text" id="qe-q" class="form-input" value="${_qQ||''}" readonly style="background:#F8F8F8">
       </div>
       <div class="form-group">
         <label class="form-label">Employee *</label>
-        <select id="qe-emp" class="form-select"><option value="">— Select —</option>${empOpts}</select>
+        <select id="qe-emp" class="form-select" onchange="qeFilterMPs()">
+          <option value="">— Select Employee —</option>${empOpts}
+        </select>
       </div>
     </div>
 
-    <div class="form-group">
-      <label class="form-label">Checking Point (CP) *</label>
-      <select id="qe-cp" class="form-select" onchange="qeLoadTarget()">
-        <option value="">— Select CP —</option>${cpOpts}
-      </select>
-      <div id="qe-target-info" class="info-box mt-8 hidden"></div>
-    </div>
-
-    <div class="form-group">
-      <label class="form-label">Input Mode</label>
-      <div style="display:flex;gap:8px">
-        <button id="qe-btn-count" onclick="qeSetMode('count')"
-          class="btn btn-primary btn-sm">📊 Count Mode</button>
-        <button id="qe-btn-pct" onclick="qeSetMode('percent')"
-          class="btn btn-ghost btn-sm">% Mode</button>
-      </div>
-      <p class="text-xs text-muted mt-8" id="qe-mode-hint">
-        Count Mode: enter total done + how many were on-time/compliant
-      </p>
-    </div>
-
-    <div id="qe-inputs">
-      <div class="form-grid-2">
-        <div class="form-group">
-          <label class="form-label" id="qe-lbl-total">Total Units Done *</label>
-          <input type="number" id="qe-total" class="form-input" min="1"
-            placeholder="e.g. 250" oninput="qeAutoCalc()">
-        </div>
-        <div class="form-group">
-          <label class="form-label" id="qe-lbl-b">Compliant / On-Time *</label>
-          <input type="number" id="qe-valb" class="form-input" min="0"
-            placeholder="e.g. 240" oninput="qeAutoCalc()">
-        </div>
-      </div>
-    </div>
-
-    <div id="qe-calc-display" class="hidden" style="background:#f8fafc;border:1px solid #e2e6ef;
-      border-radius:10px;padding:12px 16px;margin-bottom:14px">
-    </div>
-
-    <div class="form-grid-2">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
       <div class="form-group">
-        <label class="form-label">Target Value</label>
-        <input type="number" step="0.1" id="qe-tgt" class="form-input" placeholder="e.g. 100" value="0">
+        <label class="form-label">Managing Point (MP)</label>
+        <select id="qe-mp" class="form-select" onchange="qeFilterCPs()">
+          <option value="">— Select MP —</option>${mpOpts}
+        </select>
       </div>
       <div class="form-group">
-        <label class="form-label">Actual Value</label>
-        <div style="display:flex;gap:6px">
-          <input type="number" step="0.01" id="qe-actual" class="form-input" placeholder="e.g. 96.5" style="flex:1">
-          <select id="qe-unit" class="form-select" style="width:80px">
-            ${(typeof UNITS!=="undefined"?UNITS:["%","Days","Hours","Count","Nos","Trips","Tons"]).map(u=>`<option>${u}</option>`).join("")}
-          </select>
-        </div>
+        <label class="form-label">Checking Point (CP) *</label>
+        <select id="qe-cp" class="form-select" onchange="qeLoadTarget()">
+          <option value="">— Select CP —</option>${cpOpts}
+        </select>
       </div>
     </div>
 
-    <div class="form-group">
-      <label class="form-label">Remarks</label>
-      <input type="text" id="qe-notes" class="form-input" placeholder="Optional notes">
+    <div id="qe-target-info" class="info-box hidden" style="margin-bottom:10px"></div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+      <div class="form-group">
+        <label class="form-label">Metric / KPI</label>
+        <input type="text" id="qe-metric" class="form-input" placeholder="e.g. Delivery Rate">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Total *</label>
+        <input type="number" id="qe-total" class="form-input" min="0" placeholder="e.g. 100" oninput="qeAutoCalc()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Unit</label>
+        <select id="qe-unit" class="form-select">${unitOpts}</select>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:10px">
+      <div class="form-group">
+        <label class="form-label">✓ Compliant (C)</label>
+        <input type="number" id="qe-valb" class="form-input" min="0" placeholder="e.g. 90" oninput="qeAutoCalc()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">% C</label>
+        <input type="text" id="qe-pct-c" class="form-input" readonly style="background:#F0FDF4;color:#16A34A;font-weight:700">
+      </div>
+      <div class="form-group">
+        <label class="form-label">✗ Non-Compliant</label>
+        <input type="text" id="qe-nc" class="form-input" readonly style="background:#FFF0F0;color:#ED1C24">
+      </div>
+      <div class="form-group">
+        <label class="form-label">% NC</label>
+        <input type="text" id="qe-pct-nc" class="form-input" readonly style="background:#FFF0F0;color:#ED1C24">
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-bottom:6px">
+      <div class="form-group">
+        <label class="form-label">Status (Auto)</label>
+        <input type="text" id="qe-status" class="form-input" readonly style="background:#F8F8F8;font-weight:700;text-align:center">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes</label>
+        <input type="text" id="qe-notes" class="form-input" placeholder="Optional notes">
+      </div>
     </div>
   `, [
-    {label:'Cancel', cls:'btn-ghost', fn: ()=>closeModal()},
     {label:'💾 Save Entry', cls:'btn-primary', fn: ()=>qeSave()},
-  ]);
+  ], true);
 }
+
 
 function qeSetMode(mode) {
   _qMode = mode;
@@ -2106,50 +2124,36 @@ function qeLoadTarget() {
   }
 }
 
-function qeAutoCalc() {
-  const total = parseInt($('qe-total')?.value || 0);
-  const display = $('qe-calc-display');
-  if (!display || !total || total <= 0) { display?.classList.add('hidden'); return; }
-
-  let compliant, nc, pctC;
-  const valB = parseFloat($('qe-valb')?.value || 0);
-
-  if (_qMode === 'count') {
-    compliant = Math.floor(valB);
-    if (compliant > total) {
-      display.classList.remove('hidden');
-      display.innerHTML = '<span style="color:#dc2626;font-weight:700">⚠ Compliant cannot exceed total</span>';
-      return;
-    }
-    nc   = total - compliant;
-    pctC = (compliant / total * 100).toFixed(2);
-  } else {
-    if (valB < 0 || valB > 100) {
-      display.classList.remove('hidden');
-      display.innerHTML = '<span style="color:#dc2626;font-weight:700">⚠ % must be between 0 and 100</span>';
-      return;
-    }
-    compliant = Math.round(total * valB / 100);
-    nc   = total - compliant;
-    pctC = parseFloat(valB).toFixed(2);
+async function qeUpdateFY(dateStr) {
+  const fyData = await fyFromDate(dateStr)
+  if (fyData) {
+    _qFY = fyData.fy; _qMonth = fyData.bs_month; _qQ = fyData.quarter || ''
+    const setVal = (id, v) => { const el = document.getElementById(id); if(el) el.value = v }
+    setVal('qe-fy',    _qFY)
+    setVal('qe-month', _qMonth)
+    setVal('qe-q',     _qQ)
   }
-
-  const isC     = parseFloat(pctC) >= 95;
-  const statClr = isC ? '#16a34a' : '#dc2626';
-  const statLbl = isC ? '✓ Compliant' : '✗ Non-Compliant';
-
-  display.classList.remove('hidden');
-  display.innerHTML = `
-    <div style="display:flex;gap:20px;flex-wrap:wrap;font-size:12px">
-      <span>Total: <strong>${total.toLocaleString()}</strong></span>
-      <span style="color:#16a34a">✓ Compliant: <strong>${compliant.toLocaleString()}</strong></span>
-      <span style="color:#dc2626">✗ NC: <strong>${nc.toLocaleString()}</strong></span>
-      <span>Rate: <strong>${pctC}%</strong></span>
-      <span style="color:${statClr};font-weight:700">${statLbl}</span>
-    </div>`;
-
-  window._qPayload = { total, compliant, nc, pct_c: parseFloat(pctC) };
 }
+
+function qeAutoCalc() {
+  const total = parseFloat(document.getElementById('qe-total')?.value) || 0
+  const comp  = parseFloat(document.getElementById('qe-valb')?.value)  || 0
+  const nc    = Math.max(0, total - comp)
+  const pctC  = total > 0 ? (comp / total * 100).toFixed(1) : ''
+  const pctNC = total > 0 ? (nc   / total * 100).toFixed(1) : ''
+  const status = total > 0 ? (parseFloat(pctC) >= 95 ? 'C' : 'NC') : ''
+
+  const setVal = (id, v) => { const el = document.getElementById(id); if(el) el.value = v }
+  setVal('qe-nc',     nc > 0 || total > 0 ? nc : '')
+  setVal('qe-pct-c',  pctC  ? pctC  + '%' : '')
+  setVal('qe-pct-nc', pctNC ? pctNC + '%' : '')
+  setVal('qe-status', status)
+
+  const sEl = document.getElementById('qe-status')
+  if (sEl) sEl.style.background = status==='C'?'#F0FDF4':status==='NC'?'#FFF0F0':'#F8F8F8'
+  if (sEl) sEl.style.color = status==='C'?'#16A34A':status==='NC'?'#ED1C24':'#666'
+}
+
 
 async function qeSave(overwrite = false) {
   const date            = q('#qe-date')?.value;
@@ -3264,279 +3268,166 @@ async function delLoc(id) {
 }
 
 // ── LOCATION REPORT ───────────────────────────────────────────────────────────
-async function renderLocationReport() {
-    setSpinner('report-content')
-    const [locData, secData] = await Promise.all([
-        api.get('/api/analytics/by_location?fy='+encodeURIComponent(S.currentFY)),
-        api.get('/api/analytics/by_sector?fy='+encodeURIComponent(S.currentFY))
-    ])
-    const locEntries = Object.entries(locData)
-    const secEntries = Object.entries(secData)
+async function renderLocationReport(selFY, cmpFY) {
+  // FY options - get from perf data directly (cache may be empty)
+  const fyOpts = [...new Set((S.perf||[]).map(p=>p.fy))].sort((a,b)=>b.localeCompare(a))
+  // If still empty, fetch all-FY location data to discover available FYs
+  let primaryFY = selFY || fyOpts[0] || S.currentFY
 
-    let html = `<div class="section-head mb-16"><div>
-        <h2>Performance by Location &amp; Sector &mdash; FY ${esc(S.currentFY)}</h2>
-        <p>Employees can belong to multiple sectors and locations. Each bucket counts all assigned staff.</p>
-    </div></div>`
+  // Build FY selector toolbar
+  // Merge FY sources for dropdown
+  const allFYs = [...new Set([
+    ...(S.cache||[]).map(x=>x.fy),
+    ...(S.perf||[]).map(p=>p.fy),
+    primaryFY
+  ])].filter(Boolean).sort((a,b)=>b.localeCompare(a))
 
-    // ── SECTOR COMPLIANCE (from real API, junction-table based) ──
-    html += `<div class="card mb-20">
-        <div class="card-head"><p>By Sector / Department</p>
-          <span class="text-xs text-muted">${secEntries.length} sectors</span>
-        </div>
-        <div class="card-body"><div class="grid-4">`
-    secEntries.forEach(function(kv) {
-        const code=kv[0]; const s=kv[1]
-        const col = s.color || SECTOR_COLORS[code] || '#475569'
-        const pct = s.total ? (s.compliant/s.total*100).toFixed(1) : null
-        html += `<div class="compliance-card" style="border-left:4px solid ${col}">
-            <div class="cc-title">
-                <span class="dept-badge" style="background:${col}">${esc(s.name||code)}</span>
-                <span class="flex-1 text-xs text-muted">${s.emp_count} staff</span>
-                <span class="cc-pct" style="color:${pct?(+pct>=95?'var(--green)':+pct>=80?'var(--amber)':'var(--red)'):'#94a3b8'}">${pct!==null?pct+'%':'—'}</span>
-            </div>
-            ${pct!==null?`<div class="cc-bar"><span class="cc-bar-c" style="width:${Math.min(+pct,100)}%;background:${+pct>=95?'var(--green)':+pct>=80?'var(--amber)':'var(--red)'}"></span></div>
-            <div class="cc-nums">
-                <span class="cc-total">Total: <strong>${s.total}</strong></span>
-                <span class="cc-c">&#10003; ${s.compliant}</span>
-                <span class="cc-nc">&#10007; ${s.nc}</span>
-            </div>`:'<p class="text-xs text-muted italic">No data this FY</p>'}
-        </div>`
-    })
-    html += '</div></div></div>'
-
-    // ── LOCATION COMPLIANCE ──
-    html += `<div class="card mb-20">
-        <div class="card-head"><p>By Workstation Location</p></div>
-        <div class="card-body"><div class="grid-3">`
-    if (entries.length === 0) {
-        html += '<p class="text-sm text-muted italic">No locations configured. Add locations in Master Setup → Locations.</p>'
-    } else {
-        entries.forEach(function(kv) {
-            const code=kv[0]; const loc=kv[1]
-            html += compCard({
-                ref:   code,
-                title: loc.name + ' · ' + loc.type,
-                tot:   loc.total, comp: loc.compliant, nc: loc.nc,
-                pct_c: loc.pct_c, pct_nc: loc.pct_nc,
-                color: LOC_COLORS[loc.type]||'#475569'
-            })
-        })
-    }
-    html += '</div></div></div>'
-
-    // ── COMBINED TABLE ──
-    html += `<div class="card mb-20">
-        <div class="card-head"><p>Staff &rarr; Location &rarr; Sector Mapping</p></div>
-        <div class="card-body"><div class="tbl-wrap"><table>
-        <thead><tr>
-            <th>Location</th><th>Type</th><th>Address</th>
-            <th>Sectors Present</th><th>Staff</th><th>Compliance</th>
-        </tr></thead><tbody>`
-    if (entries.length === 0) {
-        html += '<tr><td colspan="6" class="text-muted text-xs" style="text-align:center;padding:20px">No locations configured</td></tr>'
-    } else {
-        entries.forEach(function(kv) {
-            const code=kv[0]; const loc=kv[1]
-            const col  = LOC_COLORS[loc.type]||'#475569'
-            const emps = (loc.emp_ids||[]).map(getEmp).filter(Boolean)
-            const sects = [...new Set(emps.map(e=>e.dept))]
-            const pct  = loc.pct_c
-            html += `<tr>
-                <td><span class="ref-badge" style="font-weight:900;background:#0f2540;color:#fff">${esc(code)}</span><br><span class="font-bold text-sm">${esc(loc.name)}</span></td>
-                <td><span class="badge" style="background:${col}20;color:${col}">${esc(loc.type)}</span></td>
-                <td class="text-xs text-muted">${esc(loc.address||'—')}</td>
-                <td>${sects.map(s=>`<span class="dept-badge" style="background:${SECTOR_COLORS[s]||'#475569'};font-size:9px;margin:2px">${s}</span>`).join('')}</td>
-                <td>${emps.map(e=>`<span class="owner-chip" style="background:${dc(e.dept)}" onclick="openProfile('${e.id}',event)">${e.name.split(' ')[0]}</span>`).join('')||'<span class="text-xs text-muted">—</span>'}</td>
-                <td>${loc.total>0
-                    ?`<span style="font-weight:900;color:${pct>=95?'var(--green)':pct>=80?'var(--amber)':'var(--red)'}">${pct}%</span> <span class="text-xs text-muted">(${loc.compliant}/${loc.total})</span>`
-                    :'<span class="text-xs text-muted">No data</span>'}</td>
-            </tr>`
-        })
-    }
-    html += '</tbody></table></div></div></div>'
-
-    // ── CHARTS ──
-    html += `<div class="grid-2">
-        <div class="card"><div class="card-head"><p>Location Compliance Chart</p></div>
-        <div class="card-body"><canvas id="loc-chart" height="120"></canvas></div></div>
-        <div class="card"><div class="card-head"><p>Sector Compliance Chart</p></div>
-        <div class="card-body"><canvas id="sec-chart" height="120"></canvas></div></div>
+  const fySelHTML = `
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:20px;padding:14px 16px;background:#F8F8F8;border-radius:4px;border:1px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:8px">
+        <label style="font-family:var(--font-head);font-size:11px;font-weight:700;color:#666;text-transform:uppercase">Primary FY</label>
+        <select id="loc-fy-primary" class="form-select" style="width:130px" onchange="renderLocationReport(this.value, document.getElementById('loc-fy-cmp')?.value||'')">
+          ${allFYs.map(f=>`<option value="${f}" ${f===primaryFY?'selected':''}>${f}</option>`).join('')}
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <label style="font-family:var(--font-head);font-size:11px;font-weight:700;color:#666;text-transform:uppercase">Compare With</label>
+        <select id="loc-fy-cmp" class="form-select" style="width:130px" onchange="renderLocationReport(document.getElementById('loc-fy-primary')?.value||'', this.value)">
+          <option value="">— None —</option>
+          ${fyOpts.filter(f=>f!==primaryFY).map(f=>`<option value="${f}" ${f===cmpFY?'selected':''}>${f}</option>`).join('')}
+        </select>
+      </div>
+      <span style="font-size:11px;color:#999;font-family:var(--font-head)">Showing data from department database</span>
     </div>`
 
-    q('#report-content').innerHTML = html
-    destroyChart('loc-chart'); destroyChart('sec-chart')
+  setSpinner('report-content')
 
-    // Location bar chart
-    if (entries.length) {
-        charts['loc-chart'] = new Chart(q('#loc-chart'), {
-            type:'bar',
-            data:{
-                labels: entries.map(function(kv){return kv[1].name}),
-                datasets:[{
-                    label:'Compliance %',
-                    data:  entries.map(function(kv){return kv[1].pct_c}),
-                    backgroundColor: entries.map(function(kv){return LOC_COLORS[kv[1].type]||'#475569'}),
-                    borderRadius:8
-                }]
-            },
-            options:{responsive:true,plugins:{legend:{display:false}},
-                scales:{y:{min:0,max:100,ticks:{callback:function(v){return v+'%'}},grid:{color:'#f1f5f9'}},x:{grid:{display:false}}}}
-        })
+  // Discover FYs from backend if S.perf is empty
+  let allLocData = {}
+  try { allLocData = await api.get('/api/analytics/by_location') } catch(e) {}
+
+  // If primaryFY has no data, find first FY that does
+  if (!selFY) {
+    const perfFYs = [...new Set((S.perf||[]).map(p=>p.fy))].sort((a,b)=>b.localeCompare(a))
+    // Try each FY until we find one with location data
+    for (const fy of perfFYs) {
+      const test = await api.get('/api/analytics/by_location?fy='+encodeURIComponent(fy))
+      if (Object.keys(test).length > 0) { primaryFY = fy; break }
     }
+  }
 
-    // Sector bar chart
-    const sectEntries = Object.entries(sectors).filter(function(kv){return kv[1].tot>0})
-    if (sectEntries.length) {
-        charts['sec-chart'] = new Chart(q('#sec-chart'), {
-            type:'bar',
-            data:{
-                labels: sectEntries.map(function(kv){return kv[0]}),
-                datasets:[{
-                    label:'Compliance %',
-                    data:  sectEntries.map(function(kv){const s=kv[1];return s.tot?(s.comp/s.tot*100).toFixed(1):0}),
-                    backgroundColor: sectEntries.map(function(kv){return SECTOR_COLORS[kv[0]]||'#475569'}),
-                    borderRadius:8
-                }]
-            },
-            options:{responsive:true,plugins:{legend:{display:false}},
-                scales:{y:{min:0,max:100,ticks:{callback:function(v){return v+'%'}},grid:{color:'#f1f5f9'}},x:{grid:{display:false}}}}
-        })
-    }
-}
+  // Fetch primary FY data
+  const [locData, secData] = await Promise.all([
+    api.get('/api/analytics/by_location?fy='+encodeURIComponent(primaryFY)),
+    api.get('/api/analytics/by_sector?fy='+encodeURIComponent(primaryFY))
+  ])
 
+  // Fetch comparison FY data if selected
+  let cmpLocData = {}, cmpSecData = {}
+  if (cmpFY) {
+    ;[cmpLocData, cmpSecData] = await Promise.all([
+      api.get('/api/analytics/by_location?fy='+encodeURIComponent(cmpFY)),
+      api.get('/api/analytics/by_sector?fy='+encodeURIComponent(cmpFY))
+    ])
+  }
 
-// ── CASCADE BUILDER ───────────────────────────────────────────────────────────
-let cascadeSub = 'builder'
-function switchCascade(s) {
-    cascadeSub = s
-    qq('#cascade-tabs .sub-tab').forEach(t=>t.classList.remove('active'))
-    event.target.classList.add('active')
-    renderCascadeTab()
-}
-function renderCascadeTab() {
-    if (cascadeSub==='tree') renderCascadeTree()
-    else renderCascadeBuilder()
-}
+  const locEntries = Object.entries(locData)
+  const secEntries = Object.entries(secData)
 
-// ── BUILDER VIEW ──────────────────────────────────────────────────────────────
-function openCascadeForm() {
-    // Step 1: pick parent employee
-    const empOpts = S.employees.map(function(e) {
-        return `<option value="${e.id}">${esc(e.name)} (${esc(e.emp_code||'')}) — L${e.level} ${esc(e.dept)}</option>`
-    }).join('')
+  let html = fySelHTML
+  html += `<div class="section-head mb-16"><div>
+    <h2>Performance by Location &amp; Sector — FY ${esc(primaryFY)}${cmpFY?' vs '+esc(cmpFY):''}</h2>
+    <p>Compliance breakdown by assigned workstation location and sector.</p>
+  </div></div>`
 
-    const body = `
-    <div class="info-box mb-12">
-      <p>Select the <strong>superior</strong> employee, then pick which of their <strong>CPs</strong> cascades down.
-      Then select the <strong>subordinate</strong> and which of their <strong>MPs</strong> it maps to.</p>
+  // ── LOCATION COMPLIANCE ──
+  html += `<div class="card mb-20">
+    <div class="card-head"><p>By Workstation Location</p>
+      <span class="text-xs text-muted">${locEntries.length} location(s)</span>
     </div>
-    <div class="form-group">
-      <label class="form-label">&#8593; Superior Employee (CP owner)</label>
-      <select class="form-select" id="cl-parent" onchange="refreshCascadeCP()">
-        <option value="">— Select superior —</option>${empOpts}
-      </select>
-    </div>
-    <div class="form-group" id="cl-cp-group" style="display:none">
-      <label class="form-label">Their CP (this will cascade down)</label>
-      <select class="form-select" id="cl-cp">
-        <option value="">— Select CP —</option>
-      </select>
-    </div>
-    <div class="form-group" id="cl-child-group" style="display:none">
-      <label class="form-label">&#8595; Subordinate Employee (MP owner)</label>
-      <select class="form-select" id="cl-child" onchange="refreshCascadeMP()">
-        <option value="">— Select subordinate —</option>${empOpts}
-      </select>
-    </div>
-    <div class="form-group" id="cl-mp-group" style="display:none">
-      <label class="form-label">Their MP (derived from superior's CP)</label>
-      <select class="form-select" id="cl-mp">
-        <option value="">— Select MP —</option>
-      </select>
-    </div>
-    <div id="cl-preview" style="display:none;margin-top:12px"></div>`
+    <div class="card-body">`
 
-    openModal('New Cascade Link', body, [{
-        label: 'Create Link', cls: 'btn-primary', fn: async function() {
-            const pid = q('#cl-parent').value
-            const cid = q('#cl-cp').value
-            const eid = q('#cl-child').value
-            const mid = q('#cl-mp').value
-            if (!pid||!cid||!eid||!mid) { toast('All fields required','error'); return }
-            await api.post('/api/cascade', {
-                parent_emp_id: pid, parent_cp_id: cid,
-                child_emp_id:  eid, child_mp_id:  mid
-            })
-            toast('Cascade link created','ok')
-            closeModal(); await loadAll()
-        }
-    }], true)
-
-    // show child group immediately
-    q('#cl-child-group').style.display = ''
-}
-
-function refreshCascadeCP() {
-    const pid = q('#cl-parent').value
-    const sel = q('#cl-cp')
-    if (!pid) { q('#cl-cp-group').style.display='none'; return }
-    const myCPs = S.cps.filter(function(c) {
-        return (c.owner_ids||[]).includes(pid)
+  if (locEntries.length === 0) {
+    html += `<div style="padding:32px;text-align:center">
+      <div style="font-size:32px;margin-bottom:12px">📍</div>
+      <p style="font-family:var(--font-head);font-weight:700;color:#444;margin-bottom:6px">No data for FY ${esc(primaryFY)}</p>
+      <p style="font-size:12px;color:#999">Try selecting a different FY above, or add performance records for this period.</p>
+    </div>`
+  } else {
+    html += '<div class="grid-3">'
+    locEntries.forEach(function(kv) {
+      const locName = kv[0]; const loc = kv[1]
+      const pct  = loc.pct != null ? +loc.pct : (loc.total ? +(loc.compliant/loc.total*100).toFixed(1) : null)
+      const col  = pct!=null ? (pct>=95?'var(--green)':pct>=80?'var(--amber)':'var(--red)') : '#94a3b8'
+      const nc   = loc.non_compliant != null ? loc.non_compliant : (loc.total - loc.compliant)
+      // Comparison delta
+      const cmp  = cmpLocData[locName]
+      const cmpPct = cmp && cmp.total ? +(cmp.compliant/cmp.total*100).toFixed(1) : null
+      const delta = (pct!=null && cmpPct!=null) ? (pct - cmpPct).toFixed(1) : null
+      const deltaHTML = delta!=null
+        ? `<span style="font-size:10px;font-weight:700;color:${+delta>=0?'var(--green)':'var(--red)'};margin-left:6px">${+delta>=0?'▲':'▼'}${Math.abs(delta)}%</span>`
+        : ''
+      html += `<div class="compliance-card" style="border-left:4px solid ${col}">
+        <div class="cc-title">
+          <span class="dept-badge" style="background:${col}">${esc(locName)}</span>
+          <span class="cc-pct" style="color:${col}">${pct!=null?pct+'%':'—'}${deltaHTML}</span>
+        </div>
+        ${pct!=null?`<div class="cc-bar"><span class="cc-bar-c" style="width:${Math.min(pct,100)}%;background:${col}"></span></div>
+        <div class="cc-nums">
+          <span class="cc-total">Total: <strong>${loc.total}</strong></span>
+          <span class="cc-c">✓ ${loc.compliant}</span>
+          <span class="cc-nc">✗ ${nc}</span>
+          ${cmpPct!=null?`<span style="font-size:10px;color:#999;margin-left:auto">${esc(cmpFY)}: ${cmpPct}%</span>`:''}
+        </div>`:'<p class="text-xs text-muted italic">No data</p>'}
+      </div>`
     })
-    sel.innerHTML = '<option value="">— Select CP —</option>' +
-        myCPs.map(function(c) {
-            const mp = S.mps.find(function(m){return m.id===c.mp_id})
-            return `<option value="${c.id}">[${esc(c.ref)}] ${esc(c.title)} ${mp?'(under '+esc(mp.ref)+')':''}</option>`
-        }).join('')
-    q('#cl-cp-group').style.display = ''
-}
+    html += '</div>'
+  }
+  html += '</div></div>'
 
-function refreshCascadeMP() {
-    const eid = q('#cl-child').value
-    const sel = q('#cl-mp')
-    if (!eid) { q('#cl-mp-group').style.display='none'; return }
-    const myMPs = S.mps.filter(function(m) {
-        return (m.owner_ids||[]).includes(eid)
+  // ── SECTOR COMPLIANCE ──
+  html += `<div class="card mb-20">
+    <div class="card-head"><p>By Sector / Department</p>
+      <span class="text-xs text-muted">${secEntries.length} sector(s)</span>
+    </div>
+    <div class="card-body">`
+
+  if (secEntries.length === 0) {
+    html += `<p style="padding:20px;text-align:center;font-size:12px;color:#999">No sector data for FY ${esc(primaryFY)}</p>`
+  } else {
+    html += '<div class="grid-4">'
+    secEntries.forEach(function(kv) {
+      const code=kv[0]; const s=kv[1]
+      const col = s.color || '#475569'
+      const pct = s.total ? +(s.compliant/s.total*100).toFixed(1) : null
+      const cmpS = cmpSecData[code]
+      const cmpPct = cmpS && cmpS.total ? +(cmpS.compliant/cmpS.total*100).toFixed(1) : null
+      const delta = (pct!=null && cmpPct!=null) ? (pct-cmpPct).toFixed(1) : null
+      const deltaHTML = delta!=null
+        ? `<span style="font-size:10px;font-weight:700;color:${+delta>=0?'var(--green)':'var(--red)'}">${+delta>=0?'▲':'▼'}${Math.abs(delta)}%</span>`
+        : ''
+      html += `<div class="compliance-card" style="border-left:4px solid ${col}">
+        <div class="cc-title">
+          <span class="dept-badge" style="background:${col}">${esc(s.name||code)}</span>
+          <span class="flex-1 text-xs text-muted">${s.emp_count||0} staff</span>
+          <span class="cc-pct" style="color:${pct?(pct>=95?'var(--green)':pct>=80?'var(--amber)':'var(--red)'):'#94a3b8'}">${pct!=null?pct+'%':'—'} ${deltaHTML}</span>
+        </div>
+        ${pct!=null?`<div class="cc-bar"><span class="cc-bar-c" style="width:${Math.min(pct,100)}%;background:${pct>=95?'var(--green)':pct>=80?'var(--amber)':'var(--red)'}"></span></div>
+        <div class="cc-nums">
+          <span class="cc-total">Total: <strong>${s.total}</strong></span>
+          <span class="cc-c">✓ ${s.compliant}</span>
+          <span class="cc-nc">✗ ${s.nc||0}</span>
+          ${cmpPct!=null?`<span style="font-size:10px;color:#999;margin-left:auto">${esc(cmpFY)}: ${cmpPct}%</span>`:''}
+        </div>`:'<p class="text-xs text-muted italic">No data this FY</p>'}
+      </div>`
     })
-    sel.innerHTML = '<option value="">— Select MP —</option>' +
-        myMPs.map(function(m) {
-            return `<option value="${m.id}">[${esc(m.ref)}] ${esc(m.title)}</option>`
-        }).join('')
-    q('#cl-mp-group').style.display = ''
-    updateCascadePreview()
+    html += '</div>'
+  }
+  html += '</div></div>'
+
+  $('report-content').innerHTML = html
 }
 
-function updateCascadePreview() {
-    const pid = q('#cl-parent')?.value
-    const cid = q('#cl-cp')?.value
-    const eid = q('#cl-child')?.value
-    const mid = q('#cl-mp')?.value
-    const prev = q('#cl-preview')
-    if (!prev) return
-    if (pid&&cid&&eid&&mid) {
-        const pe = getEmp(pid); const cp = S.cps.find(function(c){return c.id===cid})
-        const ce = getEmp(eid); const mp = S.mps.find(function(m){return m.id===mid})
-        prev.style.display=''
-        prev.innerHTML = `<div style="background:#f8fafc;border:1.5px solid var(--border);border-radius:10px;padding:12px">
-            <p class="text-xxs text-muted font-bold" style="text-transform:uppercase;margin-bottom:8px">Preview</p>
-            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-              <div class="avatar avatar-sm" style="background:${pe?dc(pe.dept):'#475569'}">${pe?av(pe.name):'?'}</div>
-              <span class="text-sm font-bold">${pe?esc(pe.name):''}</span>
-              <span class="text-xxs text-muted">CP:</span>
-              <span class="ref-badge ref-badge-blue">${cp?esc(cp.ref):''}</span>
-              <span class="text-xs">${cp?esc(cp.title.slice(0,40)):''}</span>
-            </div>
-            <div class="cascade-arrow">&#8595; cascades to &#8595;</div>
-            <div style="display:flex;align-items:center;gap:8px">
-              <div class="avatar avatar-sm" style="background:${ce?dc(ce.dept):'#475569'}">${ce?av(ce.name):'?'}</div>
-              <span class="text-sm font-bold">${ce?esc(ce.name):''}</span>
-              <span class="text-xxs text-muted">MP:</span>
-              <span class="ref-badge">${mp?esc(mp.ref):''}</span>
-              <span class="text-xs">${mp?esc(mp.title.slice(0,40)):''}</span>
-            </div>
-        </div>`
-    } else { prev.style.display='none' }
-}
 
 async function delCascadeLink(id) {
     if (!confirm('Remove this cascade link?')) return

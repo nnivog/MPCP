@@ -488,7 +488,23 @@ def _seed(db):
         P("p32","2081-82","Kartik","e2","EMP-002","HODL-1","LM-VEH-1","Vehicle Border Tracking",390,374,100,96,"%",""),
         P("p33","2081-82","Kartik","e11","EMP-011","HODL-9","LM-WH-3-A","Goods SLA Delivery",98,94,2,2.1,"Days","Slight over"),
     ]
-    db.executemany("INSERT OR IGNORE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", perf)
+    # Auto-populate loc from emp_locations before insert
+    enriched = []
+    for row in perf:
+        row = list(row)
+        if len(row) > 19 and not row[19]:
+            emp_code = row[5] if len(row) > 5 else ''
+            loc_name = db.execute(
+                """SELECT l.name FROM employees e
+                   JOIN emp_locations el ON el.emp_id=e.id
+                   JOIN locations l ON l.id=el.loc_id
+                   WHERE e.emp_code=? ORDER BY el.is_primary DESC LIMIT 1""",
+                (emp_code,)
+            ).fetchone()
+            row[19] = loc_name[0] if loc_name else ''
+        enriched.append(tuple(row))
+    perf = enriched
+    db.executemany("INSERT OR IGNORE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", perf)
     for fy in ["2080-81","2081-82"]: _upd_cache(db, fy)
 
 # ── EMPLOYEES ──────────────────────────────────────────────────────────────
@@ -2071,13 +2087,68 @@ def analytics_widget():
 
 @app.route('/api/analytics/by_location')
 def analytics_by_location():
-    return jsonify({})
-
-@app.route('/api/analytics/by_sector')
-def analytics_by_sector():
-    return jsonify({})
+    db = get_db()
+    fy = request.args.get('fy','')
+    params = []
+    sql = """
+        SELECT
+            COALESCE(NULLIF(p.loc,''),
+                (SELECT l.name FROM employees e
+                 JOIN emp_locations el ON el.emp_id = e.id
+                 JOIN locations l ON l.id = el.loc_id
+                 WHERE e.emp_code = p.emp_code
+                 ORDER BY el.is_primary DESC LIMIT 1),
+                'Unassigned') grp,
+            COUNT(*) tot,
+            SUM(CASE WHEN p.status='C' THEN 1 ELSE 0 END) comp
+        FROM perf p WHERE 1=1
+    """
+    if fy:
+        sql += " AND p.fy=?"; params.append(fy)
+    sql += " GROUP BY 1 ORDER BY 1"
+    rows = db.execute(sql, params).fetchall()
+    result = {}
+    for r in rows:
+        tot = r[1] or 0; comp = r[2] or 0
+        loc = r[0] or 'Unassigned'
+        result[loc] = {
+            'total': tot, 'compliant': comp,
+            'non_compliant': tot - comp,
+            'pct': round(comp/tot*100, 1) if tot else 0
+        }
+    return jsonify(result)
 
 # ── DASHBOARD LAYOUTS ──────────────────────────────────────────────────────
+@app.route('/api/analytics/by_sector')
+def analytics_by_sector():
+    db = get_db()
+    fy = request.args.get('fy','')
+    params = []
+    sql = ('SELECT COALESCE(NULLIF(e.dept,\'\'),\'Unassigned\') grp,'
+           ' COUNT(DISTINCT p.emp_code) emp_count,'
+           ' COUNT(*) tot,'
+           ' SUM(CASE WHEN p.status=\'C\' THEN 1 ELSE 0 END) comp'
+           ' FROM perf p'
+           ' LEFT JOIN employees e ON e.emp_code=p.emp_code'
+           ' WHERE 1=1')
+    if fy:
+        sql += ' AND p.fy=?'; params.append(fy)
+    sql += ' GROUP BY 1 ORDER BY 1'
+    rows = db.execute(sql, params).fetchall()
+    result = {}
+    for r in rows:
+        tot = r[2] or 0; comp = r[3] or 0
+        grp = r[0] or 'Unassigned'
+        result[grp] = {
+            'name': grp, 'emp_count': r[1] or 0,
+            'total': tot, 'compliant': comp,
+            'nc': tot - comp,
+            'pct': round(comp/tot*100,1) if tot else 0,
+            'color': '#475569'
+        }
+    return jsonify(result)
+
+
 @app.route('/api/dashboard_layouts', methods=['GET','POST'])
 def dashboard_layouts():
     db = get_db()
@@ -2176,10 +2247,14 @@ def _xl_sheet(cols, rows_data):
     wb_xml = '<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>'
     rels   = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'
     ct     = '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>'
+    rels_root = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
     buf = _io.BytesIO()
     with _zf.ZipFile(buf,'w',_zf.ZIP_DEFLATED) as z:
-        z.writestr('[Content_Types].xml', ct); z.writestr('xl/_rels/workbook.xml.rels', rels)
-        z.writestr('xl/workbook.xml', wb_xml); z.writestr('xl/worksheets/sheet1.xml', ws_xml)
+        z.writestr('[Content_Types].xml', ct)
+        z.writestr('_rels/.rels', rels_root)
+        z.writestr('xl/_rels/workbook.xml.rels', rels)
+        z.writestr('xl/workbook.xml', wb_xml)
+        z.writestr('xl/worksheets/sheet1.xml', ws_xml)
     buf.seek(0); return buf.read()
 
 def _xl_response(data, filename):
@@ -2461,9 +2536,9 @@ LOGIN_HTML = """<!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Roboto',sans-serif;background:#F4F4F4;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}
-.top-bar{width:100%;background:#ED1C24;padding:8px 0;text-align:center;position:fixed;top:0}
-.top-bar span{font-family:'Montserrat',sans-serif;font-size:11px;font-weight:700;color:#fff;letter-spacing:1px;text-transform:uppercase}
-.wrapper{width:420px;margin-top:40px}
+.top-bar{display:none}
+
+.wrapper{width:420px;margin-top:0}
 .brand{text-align:center;margin-bottom:28px}
 .brand-logo{width:64px;height:64px;background:#ED1C24;border-radius:8px;display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:28px}
 .brand h1{font-family:'Montserrat',sans-serif;font-size:22px;font-weight:800;color:#2E2E2E;letter-spacing:-.5px}
@@ -2479,7 +2554,7 @@ input:focus{border-color:#ED1C24;box-shadow:0 0 0 3px rgba(215,25,32,.08)}
 .foot{text-align:center;margin-top:20px;font-size:10px;color:#aaa;font-family:'Montserrat',sans-serif;letter-spacing:.3px}
 .divider{border:none;border-top:1px solid #DDDDDD;margin:16px 0}
 </style></head><body>
-<div class="top-bar"><span>Sipradi Trading Pvt. Ltd. &mdash; Authorized Tata Motors Dealer</span></div>
+
 <div class="wrapper">
   <div class="brand">
     <div class="brand-logo">&#128200;</div>
@@ -2500,7 +2575,7 @@ input:focus{border-color:#ED1C24;box-shadow:0 0 0 3px rgba(215,25,32,.08)}
       <button class="btn" type="submit">Sign In &rarr;</button>
     </form>
   </div>
-  <div class="foot">&copy; {{ year }} Sipradi Trading Pvt. Ltd. &mdash; MPCP v2.0</div>
+  <div class="foot">&copy; Govinda Upadhyay &mdash; MPCP Management V 3.0</div>
 </div>
 </body></html>"""
 @app.route('/login', methods=['GET','POST'])

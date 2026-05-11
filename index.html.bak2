@@ -188,13 +188,11 @@ tbody td{padding:10px 14px;border-bottom:1px solid var(--border-light);color:var
 .search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);pointer-events:none;font-size:13px}
 
 /* ── HOD BANNER ── */
-.hod-banner{background:#fff;border:1px solid #e5e5e5;border-left:5px solid #ED1C24;border-radius:16px;padding:18px 24px;display:flex;flex-wrap:wrap;align-items:center;gap:20px;margin-bottom:20px;box-shadow:0 2px 12px rgba(237,28,36,.06)}
-.hod-stats{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto}
-.hod-stat{background:#f9f9f9;border:0.5px solid #e5e5e5;border-radius:10px;padding:8px 16px;text-align:center}
-.hod-stat .v{font-size:20px;font-weight:900;color:#0f1a2e;font-family:'Syne',sans-serif}
-.hod-stat .l{font-size:10px;color:#6b7a99;margin-top:2px;font-weight:600;letter-spacing:.4px;text-transform:uppercase}
-.hod-stat.hl{border-color:#ED1C24;background:#fff5f5}
-.hod-stat.hl .l{color:#ED1C24}
+.hod-banner{background:linear-gradient(135deg,#0a1628 0%,#0f2540 100%);border-radius:16px;padding:22px 28px;display:flex;flex-wrap:wrap;align-items:center;gap:24px;margin-bottom:20px}
+.hod-stats{display:flex;gap:12px;flex-wrap:wrap;margin-left:auto}
+.hod-stat{background:rgba(255,255,255,.1);border-radius:10px;padding:10px 18px;text-align:center}
+.hod-stat .v{font-size:22px;font-weight:900;color:#fff;font-family:'Syne',sans-serif}
+.hod-stat .l{font-size:10px;color:var(--text);margin-top:2px;font-weight:600;letter-spacing:.4px;text-transform:uppercase}
 
 /* ── PROFILE ── */
 .profile-header{border-left:4px solid;border-radius:12px;padding:16px 20px;display:flex;align-items:center;gap:16px;margin-bottom:16px}
@@ -457,7 +455,6 @@ async function loadAll() {
   ])
   S.employees=e||[]; S.mps=m||[]; S.cps=c||[]; S.roles=r||[]; S.perf=p||[]; S.cache=ca||[];
   S.locations=locs||[]; S.cascade=casc||[]; S.bsToday=bst||{}; S.dashLayouts=layouts||[]; S.sectors=sects||[]
-  S.photos = await safeGet('/api/employees/photos', {})
   // Set currentFY from most recent active cache
   const latest = (ca||[]).sort((a,b)=>b.fy.localeCompare(a.fy))[0]
   if (latest && !(S.cache||[]).find(x=>x.fy===S.currentFY)) S.currentFY = latest.fy
@@ -690,42 +687,6 @@ function toggleMP(id) {
 }
 
 // ── TEAM ─────────────────────────────────────────────────────────────────────
-function empAvatarHtml(emp, size) {
-  const sz = size==='lg' ? 56 : size==='sm' ? 32 : 42
-  const fs = size==='lg' ? 20 : size==='sm' ? 11 : 14
-  const border = size==='lg' ? '3px' : '2px'
-  const photo = emp && S.photos && S.photos[emp.id]
-  if (photo) {
-    return `<img src="${photo}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;border:${border} solid #ED1C24">`
-  }
-  const initials = emp ? emp.name.split(' ').slice(0,2).map(w=>w[0]).join('').toUpperCase() : '?'
-  const bg = emp ? dc(emp.dept) : '#6b7a99'
-  return `<div class="avatar" style="width:${sz}px;height:${sz}px;font-size:${fs}px;background:${bg}">${initials}</div>`
-}
-
-async function uploadEmpPhoto(eid, file) {
-  if (!file) return
-  if (file.size > 500000) { toast('Image too large — max 500 KB', 'error'); return }
-  const reader = new FileReader()
-  reader.onload = async e => {
-    await fetch(`/api/employees/${eid}/photo`, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({photo: e.target.result})
-    })
-    await loadAll()
-    toast('Photo updated ✓')
-  }
-  reader.readAsDataURL(file)
-}
-
-async function deleteEmpPhoto(eid) {
-  if (!confirm('Remove this employee photo? This cannot be undone.')) return
-  await fetch(`/api/employees/${eid}/photo`, {method:'DELETE'})
-  await loadAll()
-  toast('Photo removed')
-}
-
 function renderTeam() {
   q('#team-sub').textContent = `${S.employees.length} members · ${[...new Set(S.employees.map(e=>e.dept))].length} departments`
   // show/reset bulk toggle button
@@ -748,20 +709,9 @@ function renderTeam() {
       const empCardColor = emp.sector_ids&&emp.sector_ids.length
         ? (S.sectors.find(s=>s.id===emp.sector_ids[0])?.color||dc(emp.dept))
         : dc(emp.dept)
-      html += `<div class="card" style="padding:14px;border-left:3px solid #ED1C24">
+      html += `<div class="card" style="padding:14px;border-left:3px solid ${empCardColor}">
         <div class="flex gap-12">
-          <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:5px">
-            ${empAvatarHtml(emp,'md')}
-            <div style="display:flex;gap:3px">
-              <label title="Upload photo" style="width:20px;height:20px;background:#ED1C24;border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer">
-                <span style="color:#fff;font-size:14px;line-height:1;margin-top:-1px">+</span>
-                <input type="file" accept="image/*" style="display:none" onchange="uploadEmpPhoto('${emp.id}',this.files[0])">
-              </label>
-              ${S.photos&&S.photos[emp.id]
-                ? `<button onclick="deleteEmpPhoto('${emp.id}')" title="Remove photo" style="width:20px;height:20px;background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700;padding:0">✕</button>`
-                : ''}
-            </div>
-          </div>
+          <div class="avatar avatar-md" style="background:${dc(emp.dept)}">${av(emp.name)}</div>
           <div class="flex-1" style="min-width:0">
             <p class="font-bold truncate">${esc(emp.name)}</p>
             <p class="text-xs text-muted truncate">${esc(emp.role)}</p>
@@ -4279,16 +4229,16 @@ function renderDefaultDashboard() {
   let html = ''
   if (hod) html += `
   <div class="hod-banner">
-    <div style="flex-shrink:0">${empAvatarHtml(hod,'lg')}</div>
+    <div class="avatar avatar-lg" style="background:${dc(hod.dept)}">${av(hod.name)}</div>
     <div>
-      <p style="font-size:10px;color:#ED1C24;font-weight:700;text-transform:uppercase;letter-spacing:1px">Head of Department</p>
-      <p style="font-size:20px;font-weight:900;color:#0f1a2e;font-family:'Syne',sans-serif">${esc(hod.name)}</p>
-      <p style="font-size:12px;color:#6b7a99">${esc(hod.role)}</p>
+      <p style="font-size:10px;color:var(--text);font-weight:700;text-transform:uppercase;letter-spacing:1px">Head of Department</p>
+      <p style="font-size:22px;font-weight:900;color:#fff;font-family:'Syne',sans-serif">${esc(hod.name)}</p>
+      <p style="font-size:12px;color:var(--text)">${esc(hod.role)}</p>
     </div>
     <div class="hod-stats">
       ${[['MPs',S.mps.length],['CPs',S.cps.length],['Team',S.employees.length-1],['Roles',S.roles.length]].map(([l,v])=>`<div class="hod-stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join('')}
-      <div class="hod-stat hl"><div class="v" style="color:${pc(Number(avgKPI))}">${avgKPI}%</div><div class="l">KPI Rate</div></div>
-      <div class="hod-stat hl"><div class="v" style="color:${pc(pct_c)}">${pct_c}%</div><div class="l">FY ${S.currentFY}</div></div>
+      <div class="hod-stat"><div class="v" style="color:${pc(Number(avgKPI))}">${avgKPI}%</div><div class="l">KPI Rate</div></div>
+      <div class="hod-stat"><div class="v" style="color:${pc(pct_c)}">${pct_c}%</div><div class="l">FY ${S.currentFY}</div></div>
     </div>
   </div>
   <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:8px">

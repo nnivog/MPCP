@@ -690,13 +690,19 @@ function toggleMP(id) {
 }
 
 // ── TEAM ─────────────────────────────────────────────────────────────────────
-function empAvatarHtml(emp, size) {
+function empAvatarHtml(emp, size, showRemove) {
   const sz = size==='lg' ? 56 : size==='sm' ? 32 : 42
   const fs = size==='lg' ? 20 : size==='sm' ? 11 : 14
   const border = size==='lg' ? '3px' : '2px'
   const photo = emp && S.photos && S.photos[emp.id]
+  const removeBtn = (showRemove && photo)
+    ? `<button onclick="deleteEmpPhoto('${emp.id}')" title="Remove photo" `
+      +`style="position:absolute;top:-4px;right:-4px;width:16px;height:16px;background:#dc2626;`
+      +`border-radius:50%;border:2px solid #fff;color:#fff;font-size:9px;line-height:1;`
+      +`cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0">✕</button>`
+    : ''
   if (photo) {
-    return `<img src="${photo}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;border:${border} solid #ED1C24">`
+    return `<img src="${photo}" style="width:${sz}px;height:${sz}px;border-radius:50%;object-fit:cover;border:${border} solid #ED1C24">${removeBtn}`
   }
   const initials = emp ? emp.name.split(' ').slice(0,2).map(w=>w[0]).join('').toUpperCase() : '?'
   const bg = emp ? dc(emp.dept) : '#6b7a99'
@@ -720,7 +726,6 @@ async function uploadEmpPhoto(eid, file) {
 }
 
 async function deleteEmpPhoto(eid) {
-  if (!confirm('Remove this employee photo? This cannot be undone.')) return
   await fetch(`/api/employees/${eid}/photo`, {method:'DELETE'})
   await loadAll()
   toast('Photo removed')
@@ -750,17 +755,12 @@ function renderTeam() {
         : dc(emp.dept)
       html += `<div class="card" style="padding:14px;border-left:3px solid #ED1C24">
         <div class="flex gap-12">
-          <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:5px">
-            ${empAvatarHtml(emp,'md')}
-            <div style="display:flex;gap:3px">
-              <label title="Upload photo" style="width:20px;height:20px;background:#ED1C24;border-radius:5px;display:flex;align-items:center;justify-content:center;cursor:pointer">
-                <span style="color:#fff;font-size:14px;line-height:1;margin-top:-1px">+</span>
-                <input type="file" accept="image/*" style="display:none" onchange="uploadEmpPhoto('${emp.id}',this.files[0])">
-              </label>
-              ${S.photos&&S.photos[emp.id]
-                ? `<button onclick="deleteEmpPhoto('${emp.id}')" title="Remove photo" style="width:20px;height:20px;background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;border-radius:5px;cursor:pointer;font-size:11px;font-weight:700;padding:0">✕</button>`
-                : ''}
-            </div>
+          <div style="position:relative;flex-shrink:0">
+            ${empAvatarHtml(emp,'md',true)}
+            <label title="Upload photo" style="position:absolute;bottom:-2px;right:-2px;width:18px;height:18px;background:#ED1C24;border-radius:50%;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid #fff;z-index:1">
+              <span style="color:#fff;font-size:10px;line-height:1">+</span>
+              <input type="file" accept="image/*" style="display:none" onchange="uploadEmpPhoto('${emp.id}',this.files[0])">
+            </label>
           </div>
           <div class="flex-1" style="min-width:0">
             <p class="font-bold truncate">${esc(emp.name)}</p>
@@ -4279,7 +4279,7 @@ function renderDefaultDashboard() {
   let html = ''
   if (hod) html += `
   <div class="hod-banner">
-    <div style="flex-shrink:0">${empAvatarHtml(hod,'lg')}</div>
+    <div style="position:relative;flex-shrink:0">${empAvatarHtml(hod,'lg',true)}</div>
     <div>
       <p style="font-size:10px;color:#ED1C24;font-weight:700;text-transform:uppercase;letter-spacing:1px">Head of Department</p>
       <p style="font-size:20px;font-weight:900;color:#0f1a2e;font-family:'Syne',sans-serif">${esc(hod.name)}</p>

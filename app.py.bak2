@@ -279,11 +279,6 @@ CREATE TABLE IF NOT EXISTS cascade_links(
 def init_db():
     with get_db() as db:
         db.executescript(SCHEMA)
-        # migrate: add photo column if missing
-        cols = [r[1] for r in db.execute("PRAGMA table_info(employees)")]
-        if 'photo' not in cols:
-            db.execute("ALTER TABLE employees ADD COLUMN photo TEXT DEFAULT ''")
-            db.commit()
         if not db.execute("SELECT 1 FROM employees LIMIT 1").fetchone():
             _seed(db)
 
@@ -561,7 +556,6 @@ def enrich_emp(e, db):
             r['loc_ids'] = [x[0] for x in db.execute("SELECT loc_id FROM loc_emps WHERE emp_id=?", (r['id'],)).fetchall()]
         except Exception:
             r['loc_ids'] = []
-    r.pop('photo', None)  # served via /api/employees/photos to keep list payload small
     return r
 
 @app.route('/api/employees', methods=['GET','POST'])
@@ -597,27 +591,6 @@ def employees_api():
     return jsonify({'id': eid, 'emp_code': code})
 
 @app.route('/api/employees/<eid>', methods=['PUT','DELETE'])
-
-@app.route('/api/employees/photos', methods=['GET'])
-def employees_photos():
-    db = get_db()
-    rows = db.execute("SELECT id, photo FROM employees WHERE photo != '' AND photo IS NOT NULL").fetchall()
-    return jsonify({r['id']: r['photo'] for r in rows})
-
-@app.route('/api/employees/<eid>/photo', methods=['POST','DELETE'])
-def employee_photo(eid):
-    db = get_db()
-    if request.method == 'DELETE':
-        db.execute("UPDATE employees SET photo='' WHERE id=?", (eid,))
-        db.commit()
-        return jsonify({'ok': True})
-    photo = (request.json or {}).get('photo','')
-    if len(photo) > 700000:
-        return jsonify({'error':'Image too large'}), 400
-    db.execute("UPDATE employees SET photo=? WHERE id=?", (photo, eid))
-    db.commit()
-    return jsonify({'ok': True})
-
 def employee_api(eid):
     db = get_db()
     if request.method == 'DELETE':

@@ -124,7 +124,7 @@ PUBLIC_PATHS = {'/login', '/logout', '/static'}
 @app.before_request
 def auth_guard():
     if request.path.startswith('/static'): return
-    if request.path in ('/login','/logout'): return
+    if request.path in ('/login','/logout','/change_password'): return
     if not session.get('mpcp_user'):
         if request.path.startswith('/api/'):
             return jsonify({'error':'Not authenticated','redirect':'/login'}),401
@@ -533,6 +533,7 @@ def _seed(db):
             row[19] = loc_name[0] if loc_name else ''
         enriched.append(tuple(row))
     perf = enriched
+    log_audit("PERF_IMPORT","perf","",str(len(perf))+" records imported")
     db.executemany("INSERT OR IGNORE INTO perf VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", perf)
     for fy in ["2080-81","2081-82"]: _upd_cache(db, fy)
 
@@ -596,6 +597,7 @@ def employee_api(eid):
         for t,c in [('employees','id'),('mp_owners','emp_id'),('cp_owners','emp_id'),
                     ('emp_roles','emp_id'),('emp_mps','emp_id'),('emp_cps','emp_id')]:
             db.execute(f"DELETE FROM {t} WHERE {c}=?", (eid,))
+        log_audit("EMP_DELETE","employee",eid,"Deleted employee "+str(eid))
         db.commit()
         return jsonify({'ok': True})
     d = request.json or {}
@@ -611,6 +613,7 @@ def employee_api(eid):
         db.execute("INSERT OR IGNORE INTO emp_locations(emp_id,loc_id,is_primary) VALUES(?,?,?)", (eid, lid2, 1 if i==0 else 0))
     db.commit()
     return jsonify({'ok': True})
+    log_audit("EMP_UPDATE","employee",eid,"Updated employee "+str(eid))
 
 @app.route('/api/emp_links/<eid>', methods=['GET','POST'])
 def emp_links(eid):
@@ -710,6 +713,7 @@ def mps_api():
     missing = validate_required(d, 'ref', 'title')
     if missing: return json_error(f"Missing: {', '.join(missing)}")
     mid = d.get('id') or uid()
+    log_audit("MP_SAVE","mp",mid,"Saved MP "+str(mid))
     db.execute("INSERT OR REPLACE INTO mps VALUES(?,?,?,?,?,?,?,?)",
                (mid,d['ref'],d['title'],d.get('target',''),d.get('freq','Monthly'),d.get('kpi_c',0),d.get('kpi_nc',0),d.get('kpi_total',0)))
     db.execute("DELETE FROM mp_owners WHERE mp_id=?", (mid,))
@@ -721,12 +725,13 @@ def mps_api():
 def mp_api(mid):
     db = get_db()
     if request.method == 'DELETE':
+        log_audit("MP_DELETE","mp",mid,"Deleted MP "+str(mid))
         db.execute("DELETE FROM mps WHERE id=?", (mid,))
         db.execute("DELETE FROM mp_owners WHERE mp_id=?", (mid,))
-        db.execute("UPDATE cps SET mp_id='' WHERE mp_id=?", (mid,))
         db.commit()
         return jsonify({'ok': True})
     d = request.json or {}
+    log_audit("MP_UPDATE","mp",mid,"Updated MP "+str(mid))
     db.execute("UPDATE mps SET ref=?,title=?,target=?,freq=?,kpi_c=?,kpi_nc=?,kpi_total=? WHERE id=?",
                (d['ref'],d['title'],d.get('target',''),d.get('freq','Monthly'),d.get('kpi_c',0),d.get('kpi_nc',0),d.get('kpi_total',0),mid))
     db.execute("DELETE FROM mp_owners WHERE mp_id=?", (mid,))
@@ -797,6 +802,7 @@ def cps_api():
     missing = validate_required(d, 'ref', 'title')
     if missing: return json_error(f"Missing: {', '.join(missing)}")
     cid = d.get('id') or uid()
+    log_audit("CP_SAVE","cp",cid,"Saved CP "+str(cid))
     db.execute("INSERT OR REPLACE INTO cps VALUES(?,?,?,?,?,?,?)",
                (cid,d['ref'],d['title'],d.get('target',''),d.get('freq','Daily'),d.get('source',''),d.get('mp_id','')))
     db.execute("DELETE FROM cp_owners WHERE cp_id=?", (cid,))
@@ -808,6 +814,7 @@ def cps_api():
 def cp_api(cid):
     db = get_db()
     if request.method == 'DELETE':
+        log_audit("CP_DELETE","cp",cid,"Deleted CP "+str(cid))
         db.execute("DELETE FROM cps WHERE id=?", (cid,))
         db.execute("DELETE FROM cp_owners WHERE cp_id=?", (cid,))
         db.commit()
@@ -1813,6 +1820,7 @@ def locations_api():
     name   = d.get('name','').strip()
     if not code or not name:
         return jsonify({'error':'code and name required'}), 400
+    log_audit("LOC_SAVE","location",lid,"Saved location "+str(lid))
     db.execute(
         "INSERT OR REPLACE INTO locations(id,code,name,address,type,dept,active) VALUES(?,?,?,?,?,?,?)",
         (lid, code, name, d.get('address',''), d.get('type','Branch'), d.get('dept','Ops'), 1 if d.get('active',True) else 0)
@@ -2578,6 +2586,94 @@ thead th:nth-child(3),thead th:nth-child(4){{width:90px;text-align:center}}
 # AUTH ROUTES
 # ══════════════════════════════════════════════════════════════════════════
 
+CHANGE_PW_HTML = """<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Change Password &mdash; MPCP</title>
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Montserrat',sans-serif;background:#F4F4F4;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.wrapper{width:400px;max-width:95vw}
+.brand{text-align:center;margin-bottom:24px}
+.brand h1{font-size:16px;font-weight:800;color:#1A1A1A;margin-bottom:4px}
+.brand p{font-size:11px;color:#999}
+.card{background:#fff;border-radius:4px;border:1px solid #DDDDDD;padding:28px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.fg{margin-bottom:16px}
+.fg label{display:block;font-size:10px;font-weight:700;color:#666;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+.fg input{width:100%;padding:10px 12px;border:1.5px solid #DDDDDD;border-radius:3px;font-size:13px;font-family:'Montserrat',sans-serif}
+.fg input:focus{border-color:#ED1C24;outline:none}
+.btn{width:100%;padding:12px;background:#ED1C24;color:#fff;border:none;border-radius:3px;font-family:'Montserrat',sans-serif;font-size:12px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
+.btn:hover{background:#C1121F}
+.err{background:#FFF0F0;border-left:4px solid #ED1C24;color:#C1121F;padding:10px 14px;border-radius:3px;font-size:12px;margin-bottom:16px}
+.ok{background:#F0FDF4;border-left:4px solid #16A34A;color:#166534;padding:10px 14px;border-radius:3px;font-size:12px;margin-bottom:16px}
+.foot{text-align:center;margin-top:20px;font-size:10px;color:#999}
+.back{display:block;text-align:center;margin-top:14px;font-size:11px;color:#ED1C24;text-decoration:none;font-weight:600}
+</style></head><body>
+<div class="wrapper">
+  <div class="brand">
+    <h1>&#128274; Change Password</h1>
+    <p>MPCP Management System</p>
+  </div>
+  <div class="card">
+    {% if error %}<div class="err">&#9888;&nbsp; {{ error }}</div>{% endif %}
+    {% if success %}<div class="ok">&#10003;&nbsp; {{ success }}</div>{% endif %}
+    {% if not success %}
+    <form method="POST" action="/change_password">
+      <div class="fg">
+        <label>Username</label>
+        <input type="text" name="username" placeholder="Your username" required>
+      </div>
+      <div class="fg">
+        <label>Current Password</label>
+        <input type="password" name="current_password" placeholder="Current password" required>
+      </div>
+      <div class="fg">
+        <label>New Password</label>
+        <input type="password" name="new_password" placeholder="Min 6 characters" required>
+      </div>
+      <div class="fg">
+        <label>Confirm New Password</label>
+        <input type="password" name="confirm_password" placeholder="Repeat new password" required>
+      </div>
+      <button class="btn" type="submit">Change Password &rarr;</button>
+    </form>
+    {% endif %}
+  </div>
+  <a href="/login" class="back">&#8592; Back to Login</a>
+  <div class="foot">&copy; Govinda Upadhyay &mdash; MPCP Management V 3.0</div>
+</div>
+</body></html>"""
+
+@app.route('/change_password', methods=['GET','POST'])
+def change_password_page():
+    error = None
+    success = None
+    if request.method == 'POST':
+        username = request.form.get('username','').strip().lower()
+        cur_pw   = request.form.get('current_password','')
+        new_pw   = request.form.get('new_password','')
+        conf_pw  = request.form.get('confirm_password','')
+        if not username or not cur_pw or not new_pw or not conf_pw:
+            error = 'All fields are required.'
+        elif len(new_pw) < 6:
+            error = 'New password must be at least 6 characters.'
+        elif new_pw != conf_pw:
+            error = 'New passwords do not match.'
+        else:
+            db = get_master_conn()
+            user = db.execute("SELECT * FROM users WHERE username=? AND active=1",(username,)).fetchone()
+            if not user or not verify_password(cur_pw, user['password_hash']):
+                error = 'Invalid username or current password.'
+            else:
+                db.execute("UPDATE users SET password_hash=? WHERE id=?",
+                           (hash_password(new_pw), user['id']))
+                db.commit()
+                log_audit('PASSWORD_CHANGE','user',user['id'],'Self-service password change')
+                success = 'Password changed successfully! You can now login with your new password.'
+            db.close()
+    return render_template_string(CHANGE_PW_HTML, error=error, success=success)
+
+
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MPCP Management System — Sipradi Trading</title>
@@ -2633,6 +2729,9 @@ input:focus{border-color:#ED1C24;box-shadow:0 0 0 3px rgba(215,25,32,.08)}
       </div>
       <button class="btn" type="submit">Sign In &rarr;</button>
     </form>
+    <div style="text-align:center;margin-top:12px">
+      <a href="/change_password" style="font-size:11px;color:#ED1C24;text-decoration:none;font-family:'Montserrat',sans-serif;font-weight:600">🔒 Change Password</a>
+    </div>
   </div>
   <div class="foot">&copy; Govinda Upadhyay &mdash; MPCP Management V 3.0</div>
 </div>
@@ -2662,6 +2761,7 @@ def login():
                 'emp_code':  user['emp_code'] or '',
                 'active_dept': user['dept_code']
             }
+            log_audit('LOGIN','user',user['id'],'Login: '+user['username']+' role='+user['role'])
             return redirect('/')
         error = 'Invalid username or password. Please try again.'
     import datetime as _dt
@@ -2672,6 +2772,7 @@ def login():
 
 @app.route('/logout')
 def logout():
+    log_audit("LOGOUT","user","","User logged out")
     session.clear()
     return redirect('/login')
 
@@ -2745,6 +2846,7 @@ def departments_api():
     if not d.get('code') or not d.get('name'):
         return json_error('code and name required')
     did = uid()
+    log_audit("DEPT_CREATE","department","","Created department")
     db.execute("INSERT INTO departments VALUES(?,?,?,?,?)",
         (did, d['code'].lower().replace(' ','_'), d['name'], 1,
          datetime.datetime.now().isoformat()))
@@ -2760,8 +2862,9 @@ def department_api(did):
     db = get_master_conn()
     if request.method == 'DELETE':
         db.execute("UPDATE departments SET active=0 WHERE id=?", (did,))
-        db.commit(); db.close(); return jsonify({'ok':True})
+        db.commit(); db.close(); return jsonify({"ok":True})
     d = request.json or {}
+    log_audit("DEPT_UPDATE","department",did,"Updated department")
     db.execute("UPDATE departments SET name=?,active=? WHERE id=?",
         (d.get('name'), 1 if d.get('active',True) else 0, did))
     db.commit(); db.close(); return jsonify({'ok':True})
@@ -2805,6 +2908,7 @@ def users_api():
              d['full_name'], d['role'],
              dept_code, d.get('emp_code',''), 1,
              datetime.datetime.now().isoformat()))
+        log_audit('USER_CREATE','user',new_id,'API created: '+d['username'])
         db.commit()
     except sqlite3.IntegrityError:
         return json_error('Username already exists', 409)
@@ -3092,75 +3196,50 @@ function openEdit(id,username,name,role,dept,emp){
 }
 function closeEdit(){document.getElementById('edit-modal').classList.remove('open')}
 document.getElementById('edit-modal').addEventListener('click',function(e){if(e.target===this)closeEdit()})
-  </div>
+</script>
+  </div><!-- end admin-tab-users -->
+
   <div id="admin-tab-audit" class="tab-panel">
     <div class="card">
       <div class="card-head">
         <h2>&#128203; Audit Log</h2>
         <div style="display:flex;gap:8px;align-items:center">
-          <input class="search-box" placeholder="&#128269; Filter..." oninput="filterAudit(this.value)" style="width:200px">
+          <input class="search-box" placeholder="&#128269; Filter log..." oninput="filterAudit(this.value)" style="width:200px">
           <button class="btn btn-ghost" onclick="loadAudit()">&#8635; Refresh</button>
-        </div></div>
+        </div>
+      </div>
       <div style="overflow-x:auto"><table id="audit-table">
         <thead><tr><th>Timestamp</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead>
         <tbody id="audit-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;color:#999">Click Refresh to load</td></tr></tbody>
-      </table></div></div></div>
-<script>
-function switchAdminTab(name,btn){
-  document.querySelectorAll(".tab-panel").forEach(p=>p.classList.remove("active"))
-  document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"))
-  document.getElementById("admin-tab-"+name).classList.add("active")
-  btn.classList.add("active")
-  if(name==="audit")loadAudit()
-}
-function filterAudit(q){
-  q=q.toLowerCase()
-  document.querySelectorAll("#audit-table tbody tr").forEach(tr=>{
-    tr.style.display=tr.textContent.toLowerCase().includes(q)?"":"none"
-  })
-}
-function loadAudit(){
-  fetch("/api/audit_log").then(r=>r.json()).then(rows=>{
-    const ac=a=>{a=(a||"").toLowerCase();if(a.includes("login"))return"login";if(a.includes("delete")||a.includes("disable"))return"delete";if(a.includes("edit"))return"edit";return""}
-    const tb=document.getElementById("audit-tbody")
-    if(!rows.length){tb.innerHTML="<tr><td colspan=6 style=text-align:center;padding:20px;color:#999>No audit records yet</td></tr>";return}
-    tb.innerHTML=rows.map(r=>`<tr><td style=white-space:nowrap;color:#666>${r.ts||""}</td><td style=font-weight:600>${r.actor_name||""}</td><td><span class="audit-action ${ac(r.action)}">${r.action||""}</span></td><td style=color:#666>${r.target_type||""} ${r.target_id||""}</td><td style=max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap title="${r.detail||""}"><small>${r.detail||""}</small></td><td style=color:#999;font-size:10px>${r.ip||""}</td></tr>`).join("")
-  }).catch(e=>document.getElementById("audit-tbody").innerHTML="<tr><td colspan=6 style=color:#ED1C24;padding:12px>Error: "+e.message+"</td></tr>")
-}
+      </table></div>
+    </div>
   </div>
-  <div id="admin-tab-audit" class="tab-panel">
-    <div class="card">
-      <div class="card-head">
-        <h2>&#128203; Audit Log</h2>
-        <div style="display:flex;gap:8px;align-items:center">
-          <input class="search-box" placeholder="&#128269; Filter..." oninput="filterAudit(this.value)" style="width:200px">
-          <button class="btn btn-ghost" onclick="loadAudit()">&#8635; Refresh</button>
-        </div></div>
-      <div style="overflow-x:auto"><table id="audit-table">
-        <thead><tr><th>Timestamp</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead>
-        <tbody id="audit-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;color:#999">Click Refresh to load</td></tr></tbody>
-      </table></div></div></div>
+
 <script>
 function switchAdminTab(name,btn){
-  document.querySelectorAll(".tab-panel").forEach(p=>p.classList.remove("active"))
-  document.querySelectorAll(".tab-btn").forEach(b=>b.classList.remove("active"))
-  document.getElementById("admin-tab-"+name).classList.add("active")
-  btn.classList.add("active")
-  if(name==="audit")loadAudit()
+  document.querySelectorAll(".tab-panel").forEach(function(p){p.classList.remove("active");});
+  document.querySelectorAll(".tab-btn").forEach(function(b){b.classList.remove("active");});
+  document.getElementById("admin-tab-"+name).classList.add("active");
+  btn.classList.add("active");
+  if(name==="audit") loadAudit();
 }
 function filterAudit(q){
-  q=q.toLowerCase()
-  document.querySelectorAll("#audit-table tbody tr").forEach(tr=>{
-    tr.style.display=tr.textContent.toLowerCase().includes(q)?"":"none"
-  })
+  q=q.toLowerCase();
+  document.querySelectorAll("#audit-table tbody tr").forEach(function(tr){
+    tr.style.display=tr.textContent.toLowerCase().includes(q)?"":"none";
+  });
 }
 function loadAudit(){
-  fetch("/api/audit_log").then(r=>r.json()).then(rows=>{
-    const ac=a=>{a=(a||"").toLowerCase();if(a.includes("login"))return"login";if(a.includes("delete")||a.includes("disable"))return"delete";if(a.includes("edit"))return"edit";return""}
-    const tb=document.getElementById("audit-tbody")
-    if(!rows.length){tb.innerHTML="<tr><td colspan=6 style=text-align:center;padding:20px;color:#999>No audit records yet</td></tr>";return}
-    tb.innerHTML=rows.map(r=>`<tr><td style=white-space:nowrap;color:#666>${r.ts||""}</td><td style=font-weight:600>${r.actor_name||""}</td><td><span class="audit-action ${ac(r.action)}">${r.action||""}</span></td><td style=color:#666>${r.target_type||""} ${r.target_id||""}</td><td style=max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap title="${r.detail||""}"><small>${r.detail||""}</small></td><td style=color:#999;font-size:10px>${r.ip||""}</td></tr>`).join("")
-  }).catch(e=>document.getElementById("audit-tbody").innerHTML="<tr><td colspan=6 style=color:#ED1C24;padding:12px>Error: "+e.message+"</td></tr>")
+  var tb=document.getElementById("audit-tbody");
+  tb.innerHTML="<tr><td colspan=6 style='text-align:center;padding:20px;color:#999'>Loading...</td></tr>";
+  fetch("/api/audit_log").then(function(r){return r.json();}).then(function(rows){
+    if(!rows.length){tb.innerHTML="<tr><td colspan=6 style='text-align:center;padding:20px;color:#999'>No records yet</td></tr>";return;}
+    var bg={LOGIN:"#EFF6FF",USER_CREATE:"#F0FDF4",USER_DISABLE:"#FFF0F0",USER_ENABLE:"#F0FDF4",PASSWORD_RESET:"#FFFBEB",EMP_CREATE:"#F0FDF4",EMP_UPDATE:"#FFFBEB",EMP_DELETE:"#FFF0F0",MP_SAVE:"#F0FDF4",MP_DELETE:"#FFF0F0",CP_SAVE:"#F0FDF4",CP_DELETE:"#FFF0F0",PERF_IMPORT:"#F5F3FF",DEPT_CREATE:"#F0FDF4",LOC_SAVE:"#F0FDF4"};
+    tb.innerHTML=rows.map(function(r){
+      var c=bg[r.action]||"#F8F8F8";
+      return "<tr style='background:"+c+"'><td style='white-space:nowrap;color:#666;font-size:11px'>"+(r.ts||"")+"</td><td style='font-weight:700'>"+(r.actor_name||"")+"</td><td><b style='font-size:10px;padding:2px 7px;background:rgba(0,0,0,.07);border-radius:3px'>"+(r.action||"")+"</b></td><td style='color:#666;font-size:11px'>"+(r.target_type||"")+" "+(r.target_id||"")+"</td><td style='font-size:11px' title='"+(r.detail||"")+"'><small>"+(r.detail||"")+"</small></td><td style='color:#999;font-size:10px'>"+(r.ip||"")+"</td></tr>";
+    }).join("");
+  }).catch(function(e){tb.innerHTML="<tr><td colspan=6 style='color:#ED1C24;padding:12px'>Error: "+e.message+"</td></tr>";});
 }
 </script>
 </body></html>"""
@@ -3177,6 +3256,30 @@ def admin_users_data(db, current_role, current_dept):
         ).fetchall())
     depts = R(db.execute("SELECT code,name FROM departments WHERE active=1 ORDER BY name").fetchall())
     return users, depts
+
+
+@app.route('/api/change_password', methods=['POST'])
+def change_password():
+    u = current_user()
+    if not u: return json_error('Not authenticated', 401)
+    d = request.json or {}
+    cur = d.get('current','')
+    new_pw = d.get('new_password','')
+    if not cur or not new_pw:
+        return json_error('All fields required')
+    if len(new_pw) < 6:
+        return json_error('Password must be at least 6 characters')
+    db = get_master_conn()
+    user = db.execute("SELECT * FROM users WHERE id=?", (u['id'],)).fetchone()
+    if not user or not verify_password(cur, user['password_hash']):
+        db.close()
+        return json_error('Current password is incorrect', 403)
+    db.execute("UPDATE users SET password_hash=? WHERE id=?",
+               (hash_password(new_pw), u['id']))
+    db.commit()
+    log_audit('PASSWORD_CHANGE', 'user', u['id'], 'Self-service password change')
+    db.close()
+    return jsonify({'ok': True})
 
 @app.route('/api/audit_log')
 def get_audit_log():
@@ -3231,6 +3334,7 @@ def admin_create_user():
              d['full_name'], role, dept_code, d.get('emp_code',''), 1,
              datetime.datetime.now().isoformat()))
         db.commit()
+        log_audit('USER_CREATE','user',new_id,'Admin created: '+d['username'])
         return _admin_msg(f"User @{d['username']} created successfully", 'ok')
     except sqlite3.IntegrityError:
         return _admin_msg(f"Username @{d['username']} already exists", 'err')

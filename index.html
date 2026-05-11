@@ -729,6 +729,7 @@ function renderTeam() {
           <input type="checkbox" class="emp-bulk-cb" value="${emp.id}" onchange="updateEmpBulkCount()" style="display:none;width:16px;height:16px;margin-right:4px;cursor:pointer">
           <button class="btn btn-ghost btn-sm flex-1" onclick="openEmpForm('${emp.id}')">Edit</button>
           <button class="btn btn-ghost btn-sm flex-1" onclick="openProfile('${emp.id}')">Profile</button>
+          <button class="btn btn-sm" style="background:#EFF6FF;color:#1D4ED8" onclick="openEmpTrendChart('${emp.emp_code}','${emp.name}')">📈 Trend</button>
           <button class="btn btn-sm emp-single-del" style="background:#fee2e2;color:#b91c1c" onclick="delEmp('${emp.id}')">Del</button>
         </div>
       </div>`
@@ -4740,6 +4741,88 @@ async function importEmployees(input) {
     toast(`Imported ${data.imported} employees${data.errors?.length?' · '+data.errors.length+' errors':''}`, 'ok')
     await loadAll(); renderTeam()
   } catch(e) { toast('Import failed: '+e.message, 'err') }
+}
+
+
+async function openEmpTrendChart(empCode, empName) {
+  const fyOpts = (S.cache||[]).map(x=>x.fy).sort((a,b)=>b.localeCompare(a))
+  const fySelHTML = fyOpts.map(f=>`<option value="${f}">${f}</option>`).join('')
+
+  openModal(`📈 KPI Trend — ${esc(empName)}`, `
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:16px">
+      <label style="font-size:11px;font-weight:700;color:#666">Fiscal Year:</label>
+      <select id="trend-fy" class="form-select" style="width:130px" onchange="loadEmpTrend('${empCode}','${empName}')">
+        <option value="">All FYs</option>${fySelHTML}
+      </select>
+    </div>
+    <div style="position:relative;height:280px">
+      <canvas id="trend-chart"></canvas>
+    </div>
+    <div id="trend-stats" style="display:flex;gap:16px;margin-top:14px;flex-wrap:wrap"></div>
+  `, [{label:'Close', cls:'btn-ghost', fn:()=>closeModal()}])
+
+  await loadEmpTrend(empCode, empName)
+}
+
+async function loadEmpTrend(empCode, empName) {
+  const fy = document.getElementById('trend-fy')?.value || ''
+  const url = `/api/analytics/employee_trend/${encodeURIComponent(empCode)}${fy?'?fy='+encodeURIComponent(fy):''}`
+  const res = await api.get(url)
+  const months = res.months
+  const data   = res.data  // {fy: {month: pct}}
+
+  const COLORS = ['#ED1C24','#2563EB','#16A34A','#D97706','#7C3AED','#0891B2']
+  const datasets = Object.entries(data).map(([fy, mdata], i) => ({
+    label: fy,
+    data: months.map(m => mdata[m]),
+    borderColor: COLORS[i % COLORS.length],
+    backgroundColor: COLORS[i % COLORS.length] + '20',
+    tension: 0.4,
+    fill: true,
+    pointRadius: 5,
+    pointHoverRadius: 7,
+    spanGaps: true
+  }))
+
+  // Destroy existing chart
+  if (window._trendChart) { window._trendChart.destroy(); window._trendChart = null }
+
+  const ctx = document.getElementById('trend-chart')
+  if (!ctx) return
+  window._trendChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels: months, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { font: { family: 'Montserrat', size: 11 } } },
+        tooltip: {
+          callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y != null ? ctx.parsed.y+'%' : 'No data'}` }
+        }
+      },
+      scales: {
+        y: { min: 0, max: 100, ticks: { callback: v => v+'%', font: { size: 10 } },
+             title: { display: true, text: 'Compliance %', font: { size: 10 } } },
+        x: { ticks: { font: { size: 10 } } }
+      }
+    }
+  })
+
+  // Stats summary
+  const allVals = Object.values(data).flatMap(m => Object.values(m)).filter(v => v != null)
+  const avg = allVals.length ? (allVals.reduce((s,v)=>s+v,0)/allVals.length).toFixed(1) : '—'
+  const best = allVals.length ? Math.max(...allVals).toFixed(1) : '—'
+  const worst = allVals.length ? Math.min(...allVals).toFixed(1) : '—'
+  const stats = document.getElementById('trend-stats')
+  if (stats) stats.innerHTML = [
+    ['Avg Compliance', avg+'%', '#2563EB'],
+    ['Best Month', best+'%', '#16A34A'],
+    ['Worst Month', worst+'%', '#ED1C24'],
+    ['Data Points', allVals.length, '#475569']
+  ].map(([l,v,col]) => `<div style="background:#F8F8F8;border-radius:4px;padding:10px 16px;border-left:3px solid ${col}">
+    <div style="font-size:10px;color:#666;font-weight:700;text-transform:uppercase">${l}</div>
+    <div style="font-size:18px;font-weight:800;color:${col};font-family:Montserrat">${v}</div>
+  </div>`).join('')
 }
 
 </script>

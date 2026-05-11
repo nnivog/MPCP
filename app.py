@@ -594,13 +594,18 @@ def employees_api():
 def employee_api(eid):
     db = get_db()
     if request.method == 'DELETE':
+        _emp_name = db.execute('SELECT name,emp_code FROM employees WHERE id=?',(eid,)).fetchone()
+        _emp_label = (_emp_name['name']+' ('+_emp_name['emp_code']+')') if _emp_name else eid
         for t,c in [('employees','id'),('mp_owners','emp_id'),('cp_owners','emp_id'),
                     ('emp_roles','emp_id'),('emp_mps','emp_id'),('emp_cps','emp_id')]:
             db.execute(f"DELETE FROM {t} WHERE {c}=?", (eid,))
-        log_audit("EMP_DELETE","employee",eid,"Deleted employee "+str(eid))
+        log_audit('EMP_DELETE','employee',eid,'Deleted: '+_emp_label)
         db.commit()
         return jsonify({'ok': True})
     d = request.json or {}
+    # Read old record for audit diff
+    _old_emp = db.execute('SELECT * FROM employees WHERE id=?',(eid,)).fetchone()
+    _old_emp = dict(_old_emp) if _old_emp else {}
     db.execute("UPDATE employees SET emp_code=?,name=?,role=?,level=?,dept=?,manager_id=?,email=? WHERE id=?",
                (d.get('emp_code'),d['name'],d.get('role',''),d.get('level',3),d.get('dept','Ops'),d.get('manager_id') or None,d.get('email',''),eid))
     # Update sector assignments
@@ -612,8 +617,14 @@ def employee_api(eid):
     for i, lid2 in enumerate(d.get('loc_ids', [])):
         db.execute("INSERT OR IGNORE INTO emp_locations(emp_id,loc_id,is_primary) VALUES(?,?,?)", (eid, lid2, 1 if i==0 else 0))
     db.commit()
+    # Build diff for audit
+    _diffs=[]
+    for _k,_lbl in [('name','Name'),('role','Role'),('level','Level'),('dept','Dept'),('emp_code','Emp Code'),('email','Email')]:
+        _ov=str(_old_emp.get(_k,'')); _nv=str(d.get(_k,''))
+        if _ov!=_nv: _diffs.append(_lbl+': '+_ov+' → '+_nv)
+    _detail='; '.join(_diffs) if _diffs else 'No field changes'
+    log_audit('EMP_UPDATE','employee',eid,_detail)
     return jsonify({'ok': True})
-    log_audit("EMP_UPDATE","employee",eid,"Updated employee "+str(eid))
 
 @app.route('/api/emp_links/<eid>', methods=['GET','POST'])
 def emp_links(eid):
@@ -751,13 +762,21 @@ def mps_api():
 def mp_api(mid):
     db = get_db()
     if request.method == 'DELETE':
-        log_audit("MP_DELETE","mp",mid,"Deleted MP "+str(mid))
+        _mp = db.execute('SELECT ref,title FROM mps WHERE id=?',(mid,)).fetchone()
+        _mp_label = (_mp['ref']+' — '+_mp['title']) if _mp else mid
+        log_audit('MP_DELETE','mp',mid,'Deleted MP: '+_mp_label)
         db.execute("DELETE FROM mps WHERE id=?", (mid,))
         db.execute("DELETE FROM mp_owners WHERE mp_id=?", (mid,))
         db.commit()
         return jsonify({'ok': True})
     d = request.json or {}
-    log_audit("MP_UPDATE","mp",mid,"Updated MP "+str(mid))
+    _old_mp = db.execute('SELECT * FROM mps WHERE id=?',(mid,)).fetchone()
+    _old_mp = dict(_old_mp) if _old_mp else {}
+    _mp_diffs=[]
+    for _k,_lbl in [('ref','Ref'),('title','Title'),('target','Target'),('freq','Frequency')]:
+        _ov=str(_old_mp.get(_k,'')); _nv=str(d.get(_k,''))
+        if _ov!=_nv: _mp_diffs.append(_lbl+': '+_ov+' → '+_nv)
+    log_audit('MP_UPDATE','mp',mid,'; '.join(_mp_diffs) if _mp_diffs else 'MP updated')
     db.execute("UPDATE mps SET ref=?,title=?,target=?,freq=?,kpi_c=?,kpi_nc=?,kpi_total=? WHERE id=?",
                (d['ref'],d['title'],d.get('target',''),d.get('freq','Monthly'),d.get('kpi_c',0),d.get('kpi_nc',0),d.get('kpi_total',0),mid))
     db.execute("DELETE FROM mp_owners WHERE mp_id=?", (mid,))
@@ -2148,6 +2167,30 @@ def analytics_widget():
         return jsonify({'summary':summary,'labels':labels,'values':values})
     return jsonify({'summary':summary,'labels':[],'values':[]})
 
+
+@app.route('/api/analytics/employee_trend/<emp_code>')
+def employee_trend(emp_code):
+    db = get_db()
+    fy = request.args.get('fy', '')
+    BS_MONTHS = ['Shrawan','Bhadra','Ashwin','Kartik','Mangsir','Poush',
+                 'Magh','Falgun','Chaitra','Baisakh','Jestha','Ashadh']
+    params = [emp_code]
+    sql = ("SELECT bs_month, fy, COUNT(*) tot, "
+           "SUM(CASE WHEN status='C' THEN 1 ELSE 0 END) comp "
+           "FROM perf WHERE emp_code=?")
+    if fy: sql += " AND fy=?"; params.append(fy)
+    sql += " GROUP BY fy, bs_month"
+    rows = db.execute(sql, params).fetchall()
+    # Build month-indexed result
+    result = {}
+    for r in rows:
+        key = r['fy']
+        if key not in result: result[key] = {m: None for m in BS_MONTHS}
+        tot = r['tot'] or 0
+        comp = r['comp'] or 0
+        result[key][r['bs_month']] = round(comp/tot*100, 1) if tot else 0
+    return jsonify({'months': BS_MONTHS, 'data': result})
+
 @app.route('/api/analytics/by_location')
 def analytics_by_location():
     db = get_db()
@@ -3235,7 +3278,7 @@ document.getElementById('edit-modal').addEventListener('click',function(e){if(e.
         </div>
       </div>
       <div style="overflow-x:auto"><table id="audit-table">
-        <thead><tr><th>Timestamp</th><th>Actor</th><th>Action</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead>
+        <thead><tr><th style="width:130px">Time</th><th style="width:28px"></th><th>Activity</th><th style="text-align:right">IP</th></tr></thead>
         <tbody id="audit-tbody"><tr><td colspan="6" style="text-align:center;padding:20px;color:#999">Click Refresh to load</td></tr></tbody>
       </table></div>
     </div>
@@ -3257,15 +3300,58 @@ function filterAudit(q){
 }
 function loadAudit(){
   var tb=document.getElementById("audit-tbody");
-  tb.innerHTML="<tr><td colspan=6 style='text-align:center;padding:20px;color:#999'>Loading...</td></tr>";
+  tb.innerHTML="<tr><td colspan=4 style='text-align:center;padding:20px;color:#999'>Loading...</td></tr>";
   fetch("/api/audit_log").then(function(r){return r.json();}).then(function(rows){
-    if(!rows.length){tb.innerHTML="<tr><td colspan=6 style='text-align:center;padding:20px;color:#999'>No records yet</td></tr>";return;}
-    var bg={LOGIN:"#EFF6FF",USER_CREATE:"#F0FDF4",USER_DISABLE:"#FFF0F0",USER_ENABLE:"#F0FDF4",PASSWORD_RESET:"#FFFBEB",EMP_CREATE:"#F0FDF4",EMP_UPDATE:"#FFFBEB",EMP_DELETE:"#FFF0F0",MP_SAVE:"#F0FDF4",MP_DELETE:"#FFF0F0",CP_SAVE:"#F0FDF4",CP_DELETE:"#FFF0F0",PERF_IMPORT:"#F5F3FF",DEPT_CREATE:"#F0FDF4",LOC_SAVE:"#F0FDF4"};
+    if(!rows.length){tb.innerHTML="<tr><td colspan=4 style='text-align:center;padding:20px;color:#999'>No audit records yet. Actions will appear here after logins, edits, and deletions.</td></tr>";return;}
+
+    var icons={LOGIN:"🔑",LOGOUT:"🚪",USER_CREATE:"👤",USER_EDIT:"✏️",USER_ENABLE:"✅",USER_DISABLE:"🚫",PASSWORD_RESET:"🔑",PASSWORD_CHANGE:"🔒",EMP_CREATE:"👷",EMP_UPDATE:"✏️",EMP_DELETE:"🗑️",MP_SAVE:"📋",MP_UPDATE:"✏️",MP_DELETE:"🗑️",CP_SAVE:"📌",CP_UPDATE:"✏️",CP_DELETE:"🗑️",PERF_IMPORT:"📊",DEPT_CREATE:"🏢",DEPT_UPDATE:"✏️",LOC_SAVE:"📍",LOGOUT:"🚪"};
+    var colors={LOGIN:"#EFF6FF",LOGOUT:"#F1F5F9",USER_CREATE:"#F0FDF4",USER_DISABLE:"#FFF0F0",USER_ENABLE:"#F0FDF4",PASSWORD_RESET:"#FFFBEB",PASSWORD_CHANGE:"#FFFBEB",EMP_CREATE:"#F0FDF4",EMP_UPDATE:"#FFFBEB",EMP_DELETE:"#FFF0F0",MP_SAVE:"#F0FDF4",MP_DELETE:"#FFF0F0",CP_SAVE:"#F0FDF4",CP_DELETE:"#FFF0F0",PERF_IMPORT:"#F5F3FF",DEPT_CREATE:"#F0FDF4",LOC_SAVE:"#F0FDF4"};
+    var textColors={LOGIN:"#1D4ED8",LOGOUT:"#475569",USER_CREATE:"#166534",USER_DISABLE:"#991B1B",USER_ENABLE:"#166534",PASSWORD_RESET:"#92400E",PASSWORD_CHANGE:"#92400E",EMP_CREATE:"#166534",EMP_UPDATE:"#92400E",EMP_DELETE:"#991B1B",MP_SAVE:"#166534",MP_DELETE:"#991B1B",CP_SAVE:"#166534",CP_DELETE:"#991B1B",PERF_IMPORT:"#5B21B6",DEPT_CREATE:"#166534",LOC_SAVE:"#166534"};
+
+    function describe(r){
+      var a=r.action, who=r.actor_name||"System", d=r.detail||"";
+      var extract=function(prefix){
+        var m=d.indexOf(prefix);
+        return m>=0?d.slice(m+prefix.length).split(" ")[0]:"";
+      };
+      switch(a){
+        case "LOGIN": return who+" signed in"+(d.includes("master_admin")?" as Master Admin":d.includes("dept_admin")?" as Dept Admin":"");
+        case "LOGOUT": return who+" signed out";
+        case "PASSWORD_CHANGE": return "Password changed via self-service"+(r.actor_name&&r.actor_name!=="system"?" by "+who:"")+(r.target_id?" (User ID: ..."+r.target_id.slice(-4)+")":"");
+        case "PASSWORD_RESET": return who+" reset a user password";
+        case "USER_CREATE": var u=d.replace("Admin created:","").replace("API created:","").trim().split(" ")[0]; return who+" created user account: "+u;
+        case "USER_ENABLE": return who+" re-enabled a user account";
+        case "USER_DISABLE": return who+" disabled a user account";
+        case "EMP_CREATE": return who+" added/updated an employee record";
+        case "EMP_UPDATE": return who+" edited an employee profile";
+        case "EMP_DELETE": return who+" deleted an employee record";
+        case "MP_SAVE": return who+" saved a Managing Point (MP)";
+        case "MP_UPDATE": return who+" updated an MP";
+        case "MP_DELETE": return who+" deleted a Managing Point";
+        case "CP_SAVE": return who+" saved a Checking Point (CP)";
+        case "CP_UPDATE": return who+" updated a CP";
+        case "CP_DELETE": return who+" deleted a Checking Point";
+        case "PERF_IMPORT": var n=d.split(" ")[0]; return who+" imported "+n+" performance records";
+        case "DEPT_CREATE": return who+" created a new department";
+        case "DEPT_UPDATE": return who+" updated department settings";
+        case "LOC_SAVE": return who+" saved a location";
+        default: return who+": "+a.replace(/_/g," ").toLowerCase();
+      }
+    }
+
     tb.innerHTML=rows.map(function(r){
-      var c=bg[r.action]||"#F8F8F8";
-      return "<tr style='background:"+c+"'><td style='white-space:nowrap;color:#666;font-size:11px'>"+(r.ts||"")+"</td><td style='font-weight:700'>"+(r.actor_name||"")+"</td><td><b style='font-size:10px;padding:2px 7px;background:rgba(0,0,0,.07);border-radius:3px'>"+(r.action||"")+"</b></td><td style='color:#666;font-size:11px'>"+(r.target_type||"")+" "+(r.target_id||"")+"</td><td style='font-size:11px' title='"+(r.detail||"")+"'><small>"+(r.detail||"")+"</small></td><td style='color:#999;font-size:10px'>"+(r.ip||"")+"</td></tr>";
+      var bg=colors[r.action]||"#F8F8F8";
+      var tc=textColors[r.action]||"#374151";
+      var ic=icons[r.action]||"📝";
+      var ts=r.ts?r.ts.replace("T"," ").slice(0,16):"";
+      return "<tr style='background:"+bg+";border-bottom:1px solid rgba(0,0,0,.04)'>"
+        +"<td style='padding:10px 12px;white-space:nowrap;color:#9CA3AF;font-size:10px;width:130px'>"+ts+"</td>"
+        +"<td style='padding:10px 12px;font-size:13px;width:28px;text-align:center'>"+ic+"</td>"
+        +"<td style='padding:10px 12px;font-size:12px;color:"+tc+";font-weight:600'>"+describe(r)+"</td>"
+        +"<td style='padding:10px 12px;color:#9CA3AF;font-size:10px;text-align:right'>"+( r.ip||"")+"</td>"
+        +"</tr>";
     }).join("");
-  }).catch(function(e){tb.innerHTML="<tr><td colspan=6 style='color:#ED1C24;padding:12px'>Error: "+e.message+"</td></tr>";});
+  }).catch(function(e){tb.innerHTML="<tr><td colspan=4 style='color:#ED1C24;padding:12px'>Error loading audit log: "+e.message+"</td></tr>";});
 }
 </script>
 </body></html>"""

@@ -639,6 +639,32 @@ def emp_links(eid):
     db.commit()
     return jsonify({'ok': True})
 
+
+@app.route('/api/employees/template')
+def employees_template():
+    if not HAS_OPENPYXL: return json_error('openpyxl not installed')
+    import io
+    wb = openpyxl.Workbook()
+    ws = wb.active; ws.title = 'Employees'
+    headers = ['emp_code','name','role','level','department','manager_code','email']
+    ws.append(headers)
+    ws.append(['EMP000001','John Doe','Manager - Logistics',2,'CVBU','','john@example.com'])
+    ws.append(['EMP000002','Jane Smith','Officer - Logistics',3,'CVBU','EMP000001','jane@example.com'])
+    # Bold header row
+    from openpyxl.styles import Font, PatternFill
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill('solid', fgColor='ED1C24')
+    # Column widths
+    for col, w in zip('ABCDEFG', [15,25,35,8,15,15,30]):
+        ws.column_dimensions[col].width = w
+    buf = io.BytesIO()
+    wb.save(buf); buf.seek(0)
+    from flask import Response
+    return Response(buf.read(),
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition':'attachment;filename=employee_import_template.xlsx'})
+
 @app.route('/api/employees/import', methods=['POST'])
 def import_employees():
     f = request.files.get('file')

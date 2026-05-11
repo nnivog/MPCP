@@ -321,6 +321,9 @@ tbody tr:hover .row-actions{opacity:1}
     <div class="section-head">
       <div><h2>Team & Hierarchy</h2><p id="team-sub"></p></div>
       <div class="flex gap-8">
+        <a href="/api/employees/template" class="btn btn-ghost btn-sm">⬇ Template</a>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('emp-import-file').click()">⬆ Import Excel</button>
+        <input type="file" id="emp-import-file" accept=".xlsx,.csv" style="display:none" onchange="importEmployees(this)">
         <button class="btn btn-ghost btn-sm" onclick="setTeamView('cards')">⊞ Cards</button>
         <button class="btn btn-ghost btn-sm" onclick="setTeamView('org')">⑂ Org Chart</button>
         <button class="btn btn-ghost btn-sm" id="emp-bulk-toggle" onclick="toggleEmpBulk()" style="display:none">☑ Select</button>
@@ -4722,6 +4725,21 @@ async function submitChangePassword() {
   } catch(e) {
     showErr(e.message || 'Incorrect current password.')
   }
+}
+
+
+async function importEmployees(input) {
+  const file = input.files[0]; if (!file) return
+  const fd = new FormData(); fd.append('file', file)
+  input.value = ''
+  toast('Importing employees...', 'info')
+  try {
+    const res = await fetch('/api/employees/import', {method:'POST', body:fd})
+    const data = await res.json()
+    if (data.error) { toast(data.error, 'err'); return }
+    toast(`Imported ${data.imported} employees${data.errors?.length?' · '+data.errors.length+' errors':''}`, 'ok')
+    await loadAll(); renderTeam()
+  } catch(e) { toast('Import failed: '+e.message, 'err') }
 }
 
 </script>

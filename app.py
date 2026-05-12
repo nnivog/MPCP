@@ -1267,10 +1267,12 @@ def perf_quick():
     db.commit()
     return jsonify({
         'id': pid, 'fy': fy, 'bs_month': bsm, 'quarter': bs_q(bsm),
-        'total': total, 'compliant': compliant, 'nc': nc,
-        'pct_compliant': pct_c, 'pct_nc': pct_nc, 'status': status
+        'emp_code': ec, 'emp_id': eid, 'mp_ref': mp_ref, 'cp_ref': d['cp_ref'],
+        'metric': metric, 'total': total, 'compliant': compliant,
+        'non_compliant': nc, 'pct_compliant': pct_c, 'pct_nc': pct_nc,
+        'status': status, 'unit': unit, 'notes': d.get('notes',''),
+        'loc': ''
     })
-
 
 @app.route('/api/perf/exceptions')
 def perf_exceptions():

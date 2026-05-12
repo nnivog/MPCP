@@ -2165,6 +2165,26 @@ async function qeUpdateFY(dateVal) {
   }
 }
 
+function qeFilterMPs() {
+  document.getElementById("qe-cp") && (document.getElementById("qe-cp").value = "");
+  document.getElementById("qe-metric") && (document.getElementById("qe-metric").value = "");
+  window._qPayload = null;
+}
+
+function qeFilterCPs() {
+  const mpRef = document.getElementById("qe-mp")?.value;
+  const cpEl = document.getElementById("qe-cp");
+  if (!cpEl) return;
+  const filtered = mpRef
+    ? (S.cps||[]).filter(cp => { const mp = S.mps.find(m => m.id === cp.mp_id); return mp && mp.ref === mpRef; })
+    : (S.cps||[]);
+  cpEl.innerHTML = '<option value="">— Select CP —</option>' + filtered.map(cp =>
+    '<option value="'+esc(cp.ref)+'">['+esc(cp.ref)+'] '+esc((cp.title||"").slice(0,55))+'</option>'
+  ).join("");
+  document.getElementById("qe-metric") && (document.getElementById("qe-metric").value = "");
+  window._qPayload = null;
+}
+
 function qeLoadTarget() {
   const ref = $('qe-cp').value;
   const cp  = S.cps.find(c => c.ref === ref);
@@ -2221,8 +2241,14 @@ async function qeSave(overwrite = false) {
   const unit            = q('#qe-unit')?.value         || '%';
   const notes           = q('#qe-notes')?.value        || '';
   if (!date || !empCode || !cpRef) { toast('Fill Date, Employee and CP', 'err'); return; }
-  if (!window._qPayload)           { toast('Enter total and compliant/% values', 'err'); return; }
   if (!_qFY)                       { toast('FY not detected — check date', 'err'); return; }
+  // Compute payload from fields directly if not set
+  const _total    = parseInt(document.getElementById('qe-total')?.value || 0)
+  const _compliant= parseInt(document.getElementById('qe-valb')?.value  || 0)
+  if (_total <= 0) { toast('Enter Total count (must be > 0)', 'err'); return; }
+  if (!window._qPayload) {
+    window._qPayload = { total: _total, compliant: _compliant, pct_c: _total > 0 ? +(_compliant/_total*100).toFixed(1) : 0 }
+  }
   const { total, compliant, pct_c } = window._qPayload;
   const body = {
     date, emp_code: empCode, cp_ref: cpRef, mp_ref,

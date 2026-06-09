@@ -17,13 +17,13 @@ jobs:
 
       - name: Push to HuggingFace Space
         env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_TOKEN: ${{ secrets.MPCP_HF_TOKEN }}
         run: |
           python -c "
 import os
 from huggingface_hub import HfApi
 
-token = os.environ.get('HF_TOKEN', '')
+token = os.environ.get('MPCP_HF_TOKEN', '')
 if not token:
     raise ValueError('HF_TOKEN is empty! Check GitHub Secrets.')
 

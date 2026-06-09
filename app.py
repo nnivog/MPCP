@@ -52,7 +52,7 @@ else:
 DATA_DIR   = os.environ.get('MPCP_DATA_DIR', os.path.join(os.path.dirname(__file__), 'data'))
 os.makedirs(DATA_DIR, exist_ok=True)
 MASTER_DB  = os.path.join(DATA_DIR, 'master.db')
-DB         = os.path.join(os.path.dirname(__file__), 'scm.db')  # legacy fallback
+DB         = os.path.join(DATA_DIR, 'scm.db')  # points to data dir
 
 def get_dept_db_path(dept_code):
     return os.path.join(DATA_DIR, f'{dept_code}.db')

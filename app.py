@@ -8,6 +8,30 @@ Patches: cascade_links API, perf/quick entry, FY auto-detect,
 from flask import Flask, jsonify, request, send_file, session, redirect, render_template_string
 import sqlite3, csv, io, os, json, datetime, random, string, hashlib, secrets
 
+# ── HF Spaces Persistent Storage Config ──────────────────────────────────────
+import os as _os
+import shutil as _shutil
+
+_DATA_DIR = "/data" if _os.path.exists("/data") else "."
+
+# All DB paths — edit here if you add more databases
+_DB_MAP = {
+    "master.db":  _os.path.join(_DATA_DIR, "master.db"),
+    "scm.db":     _os.path.join(_DATA_DIR, "scm.db"),
+}
+
+# Seed on first boot: copy bundled .db files into /data if not present
+for _src, _dst in _DB_MAP.items():
+    if not _os.path.exists(_dst) and _os.path.exists(_src):
+        _shutil.copy(_src, _dst)
+        print(f"[BOOT] Seeded {_src} → {_dst}")
+
+def _db(name: str) -> str:
+    """Return the correct DB path for local or HF environment."""
+    return _DB_MAP.get(name, _os.path.join(_DATA_DIR, name))
+# ─────────────────────────────────────────────────────────────────────────────
+
+
 try:
     import openpyxl
     HAS_OPENPYXL = True
@@ -3523,4 +3547,4 @@ def _admin_msg(msg, msg_type):
         msg=msg, msg_type=msg_type)
 
 if __name__ == '__main__':
-    app.run(debug=False, port=5050, host='0.0.0.0')
+    app.run(debug=False, host="0.0.0.0", port=7860)

@@ -1,0 +1,35 @@
+name: Sync MPCP to HuggingFace
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync-to-hf:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GitHub repo
+        uses: actions/checkout@v3
+
+      - name: Push to HuggingFace Space
+        run: |
+          pip install huggingface_hub
+          python -c "
+          from huggingface_hub import HfApi
+          HfApi().upload_folder(
+            folder_path='.',
+            repo_id='Govinn/MPCP',
+            repo_type='space',
+            token='${{ secrets.HF_TOKEN }}',
+            ignore_patterns=[
+              '*.db',
+              '*.bak',
+              '.git*',
+              '__pycache__',
+              '*.pyc',
+              'patch_for_hf.py'
+            ]
+          )
+          print('✅ Synced to HF Space: Govinn/MPCP')
+          "

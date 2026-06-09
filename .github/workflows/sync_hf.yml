@@ -35,12 +35,13 @@ HfApi().upload_folder(
     repo_type='space',
     token=token,
     ignore_patterns=[
-        '*.db',
         '*.bak',
         '.git*',
         '__pycache__',
         '*.pyc',
-        'patch_for_hf.py'
+        'patch_for_hf.py',
+        '*.rar',
+        '*.zip'
     ]
 )
 print('Synced to HF Space: Govinn/MPCP')

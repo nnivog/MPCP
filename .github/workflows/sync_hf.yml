@@ -12,24 +12,36 @@ jobs:
       - name: Checkout GitHub repo
         uses: actions/checkout@v3
 
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
       - name: Push to HuggingFace Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          pip install huggingface_hub
           python -c "
-          from huggingface_hub import HfApi
-          HfApi().upload_folder(
-            folder_path='.',
-            repo_id='Govinn/MPCP',
-            repo_type='space',
-            token='${{ secrets.HF_TOKEN }}',
-            ignore_patterns=[
-              '*.db',
-              '*.bak',
-              '.git*',
-              '__pycache__',
-              '*.pyc',
-              'patch_for_hf.py'
-            ]
-          )
-          print('✅ Synced to HF Space: Govinn/MPCP')
-          "
+import os
+from huggingface_hub import HfApi
+
+token = os.environ.get('HF_TOKEN', '')
+if not token:
+    raise ValueError('HF_TOKEN is empty! Check GitHub Secrets.')
+
+print(f'Token found: {token[:6]}...')
+
+HfApi().upload_folder(
+    folder_path='.',
+    repo_id='Govinn/MPCP',
+    repo_type='space',
+    token=token,
+    ignore_patterns=[
+        '*.db',
+        '*.bak',
+        '.git*',
+        '__pycache__',
+        '*.pyc',
+        'patch_for_hf.py'
+    ]
+)
+print('Synced to HF Space: Govinn/MPCP')
+"

@@ -3025,10 +3025,17 @@ function renderDepartments() {
 
 function deleteDept(did, dname) {
   if (!confirm('Delete department "' + dname + '"?\nThis will deactivate it. This cannot be undone.')) return
-  fetch('/api/departments/' + did, {method:'DELETE'})
-    .then(function(r){return r.json()})
+  fetch('/api/departments/' + did, {
+    method: 'DELETE',
+    headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}
+  })
+    .then(function(r){
+      const ct = r.headers.get('content-type')||''
+      if(ct.includes('application/json')) return r.json()
+      return r.ok ? {ok:true} : {ok:false, error:'Server error '+r.status}
+    })
     .then(function(data){
-      if(data.ok){ toast('Department deleted','ok'); renderDepartments() }
+      if(data.ok){ toast('Department "'+dname+'" deleted','ok'); renderDepartments() }
       else toast('Error: '+(data.error||'Unknown'),'err')
     })
     .catch(function(e){ toast('Error: '+e.message,'err') })
@@ -3099,11 +3106,18 @@ function renderUsers() {
 
 function deleteUser(uid2, uname) {
   if (!confirm('Delete user @' + uname + '?\nThis cannot be undone.')) return
-  fetch('/admin/users/' + uid2 + '/delete', {method:'POST'})
-    .then(function(r){return r.json()})
+  fetch('/admin/users/' + uid2 + '/delete', {
+    method: 'POST',
+    headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}
+  })
+    .then(function(r){
+      const ct = r.headers.get('content-type')||''
+      if(ct.includes('application/json')) return r.json()
+      return r.ok ? {ok:true} : {ok:false, error:'Server error '+r.status}
+    })
     .then(function(data){
-      if(data.ok||data.msg){ toast('User deleted','ok'); renderUsers() }
-      else toast('Error: '+(data.error||data.msg||'Unknown'),'err')
+      if(data.ok){ toast('User @'+uname+' deleted','ok'); renderUsers() }
+      else toast('Error: '+(data.error||'Unknown'),'err')
     })
     .catch(function(e){ toast('Error: '+e.message,'err') })
 }

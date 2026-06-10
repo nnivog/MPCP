@@ -3513,23 +3513,23 @@ def admin_create_user():
 @app.route('/admin/users/<uid2>/delete', methods=['POST'])
 def admin_delete_user(uid2):
     err = require_role('master_admin')
-    if err: return err
+    if err: return jsonify({'ok': False, 'error': 'Access denied'}), 403
     u = current_user()
     if u['id'] == uid2:
-        return _admin_msg('Cannot delete your own account', 'err')
+        return jsonify({'ok': False, 'error': 'Cannot delete your own account'})
     db = get_master_conn()
     try:
         user = db.execute('SELECT username FROM users WHERE id=?', (uid2,)).fetchone()
         if not user:
-            return _admin_msg('User not found', 'err')
+            return jsonify({'ok': False, 'error': 'User not found'})
         if user['username'] == 'admin':
-            return _admin_msg('Cannot delete the master admin account', 'err')
+            return jsonify({'ok': False, 'error': 'Cannot delete master admin account'})
         db.execute('DELETE FROM users WHERE id=?', (uid2,))
         log_audit('USER_DELETE', 'user', uid2, f'Admin deleted user {user["username"]}')
         db.commit()
-        return _admin_msg(f'User {user["username"]} deleted successfully', 'ok')
+        return jsonify({'ok': True, 'msg': f'User {user["username"]} deleted'})
     except Exception as ex:
-        return _admin_msg(str(ex), 'err')
+        return jsonify({'ok': False, 'error': str(ex)})
     finally:
         db.close()
 

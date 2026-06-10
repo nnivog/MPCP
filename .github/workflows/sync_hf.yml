@@ -18,31 +18,4 @@ jobs:
       - name: Push to HuggingFace Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          python -c "
-import os
-from huggingface_hub import HfApi
-
-token = os.environ.get('HF_TOKEN', '')
-if not token:
-    raise ValueError('HF_TOKEN is empty! Check GitHub Secrets.')
-
-print(f'Token found: {token[:6]}...')
-
-HfApi().upload_folder(
-    folder_path='.',
-    repo_id='Govinn/MPCP',
-    repo_type='space',
-    token=token,
-    ignore_patterns=[
-        '*.bak',
-        '.git*',
-        '__pycache__',
-        '*.pyc',
-        'patch_for_hf.py',
-        '*.rar',
-        '*.zip'
-    ]
-)
-print('Synced to HF Space: Govinn/MPCP')
-"
+        run: pip install huggingface_hub && python sync_to_hf.py

@@ -2983,8 +2983,19 @@ def department_api(did):
     if err: return err
     db = get_master_conn()
     if request.method == 'DELETE':
-        db.execute("UPDATE departments SET active=0 WHERE id=?", (did,))
-        db.commit(); db.close(); return jsonify({"ok":True})
+        row = db.execute("SELECT code FROM departments WHERE id=?", (did,)).fetchone()
+        if not row:
+            db.close(); return jsonify({"ok":False, "error":"Not found"}), 404
+        code = row["code"]
+        db.execute("DELETE FROM departments WHERE id=?", (did,))
+        db.execute("DELETE FROM users WHERE dept_code=?", (code,))
+        db.commit(); db.close()
+        # Remove the dept DB file
+        dept_db = os.path.join(DATA_DIR, code + '.db')
+        if os.path.exists(dept_db):
+            os.remove(dept_db)
+        log_audit("DEPT_DELETE", "department", did, f"Deleted department {code}")
+        return jsonify({"ok":True})
     d = request.json or {}
     log_audit("DEPT_UPDATE","department",did,"Updated department")
     db.execute("UPDATE departments SET name=?,active=? WHERE id=?",
@@ -3237,7 +3248,7 @@ tbody tr:nth-child(even){background:#FAFAFA}
           </td>
           <td style="text-align:center">
             <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
-              <button class="btn btn-ghost" onclick="openEdit('{{ u.id }}','{{ u.username }}','{{ u.full_name }}','{{ u.role }}','{{ u.dept_code or '' }}','{{ u.emp_code or '' }}')" style="font-size:10px">&#9998; Edit</button>
+              <button type="button" class="btn btn-ghost" onclick="openEdit('{{ u.id }}','{{ u.username }}','{{ u.full_name }}','{{ u.role }}','{{ u.dept_code or '' }}','{{ u.emp_code or '' }}')" style="font-size:10px">&#9998; Edit</button>
               <form method="POST" action="/admin/users/{{ u.id }}/reset" style="display:flex;gap:4px;align-items:center">
                 <input name="new_password" placeholder="New password" style="padding:5px 8px;border:1.5px solid #DDDDDD;border-radius:3px;font-size:11px;width:120px;font-family:'Open Sans',sans-serif;outline:none" onfocus="this.style.borderColor='#ED1C24'" onblur="this.style.borderColor='#DDDDDD'">
                 <button class="btn btn-warn" type="submit" style="white-space:nowrap">Reset PW</button>
@@ -3269,8 +3280,8 @@ tbody tr:nth-child(even){background:#FAFAFA}
     <form method="POST" id="edit-form">
       <div class="modal-body">
         <div class="grid2">
-          <div class="mfg"><label>Full Name *</label><input name="full_name" id="e-name" required></div>
-          <div class="mfg"><label>Username (locked)</label><input id="e-username" disabled style="background:#F5F5F5;color:#777"></div>
+          <div class="mfg"><label>Full Name *</label><input name="name" id="e-name" required></div>
+          <div class="mfg"><label>Username (locked)</label><input name="username" id="e-username" style="background:#F5F5F5;color:#777;cursor:not-allowed" readonly></div>
         </div>
         <div class="grid2">
           <div class="mfg"><label>New Password (blank = keep)</label><input name="password" type="password" placeholder="Leave blank to keep"></div>
@@ -3555,7 +3566,7 @@ def admin_edit_user(uid2):
     username = request.form.get('username','').strip()
     role     = request.form.get('role','').strip()
     dept     = request.form.get('dept','').strip()
-    emp      = request.form.get('emp_id','').strip()
+    emp      = request.form.get('emp_code','').strip()
     if not name or not username or not role:
         return _admin_msg('Name, username and role are required', 'err')
     db = get_master_conn()
@@ -3563,7 +3574,7 @@ def admin_edit_user(uid2):
         existing = db.execute('SELECT id FROM users WHERE username=? AND id!=?', (username, uid2)).fetchone()
         if existing:
             return _admin_msg(f'Username @{username} already exists', 'err')
-        db.execute('UPDATE users SET full_name=?, username=?, role=?, dept_code=?, emp_id=? WHERE id=?',
+        db.execute('UPDATE users SET full_name=?, username=?, role=?, dept_code=?, emp_code=? WHERE id=?',
                    (name, username, role, dept, emp, uid2))
         log_audit('USER_EDIT', 'user', uid2, f'Admin edited user {username}')
         db.commit()

@@ -3518,6 +3518,32 @@ def admin_reset_pw(uid2):
     db.commit(); db.close()
     return _admin_msg('Password reset successfully', 'ok')
 
+
+@app.route('/admin/users/<uid2>/edit', methods=['POST'])
+def admin_edit_user(uid2):
+    err = require_role('master_admin','dept_admin')
+    if err: return err
+    name     = request.form.get('name','').strip()
+    username = request.form.get('username','').strip()
+    role     = request.form.get('role','').strip()
+    dept     = request.form.get('dept','').strip()
+    emp      = request.form.get('emp_id','').strip()
+    if not name or not username or not role:
+        return _admin_msg('Name, username and role are required', 'err')
+    db = get_master_conn()
+    try:
+        existing = db.execute('SELECT id FROM users WHERE username=? AND id!=?', (username, uid2)).fetchone()
+        if existing:
+            return _admin_msg(f'Username @{username} already exists', 'err')
+        db.execute('UPDATE users SET full_name=?, username=?, role=?, dept_code=?, emp_id=? WHERE id=?',
+                   (name, username, role, dept, emp, uid2))
+        log_audit('USER_EDIT', 'user', uid2, f'Admin edited user {username}')
+        db.commit()
+        return _admin_msg('User updated successfully', 'ok')
+    except Exception as ex:
+        return _admin_msg(str(ex), 'err')
+    finally:
+        db.close()
 @app.route('/admin/users/<uid2>/toggle', methods=['POST'])
 def admin_toggle_user(uid2):
     err = require_role('master_admin','dept_admin')

@@ -306,7 +306,7 @@ tbody tr:hover .row-actions{opacity:1}
   </div>
   <div style="display:flex;align-items:center;justify-content:space-between;background:#FFFFFF">
   <div id="nav">
-    <button class="nav-tab active" onclick="switchTab('dashboard')">&#128202; Dashboard</button>
+    <button class="nav-tab active" onclick="switchTab(\"dashboard\")">&#128202; Dashboard</button>
     <button class="nav-tab" onclick="switchTab('team')">&#128101; Team</button>
     <button class="nav-tab tab-master-setup" onclick="switchTab('master')">&#128295; Master Setup</button>
     <button class="nav-tab" onclick="switchTab('data')">&#128193; Data Manager</button>
@@ -2995,7 +2995,7 @@ function renderDepartments() {
         html+='<div style="font-size:10px;color:var(--muted);font-style:italic">No performance data yet</div>'
       }
       html+='<div style="display:flex;gap:6px;margin-top:12px">'
-      html+='<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="switchDept('+JSON.stringify(d.code)+').then(function(){switchTab('dashboard')})">&#128065; View</button>'
+      html+='<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="switchDept('+JSON.stringify(d.code)+').then(function(){switchTab(\"dashboard\")})">&#128065; View</button>'
       html+='<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="openDeptForm('+JSON.stringify(d.id)+','+JSON.stringify(d.name)+','+JSON.stringify(d.active)+')">&#9998; Edit</button>'
       html+='<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#dc2626;border-color:#fca5a5" onclick="deleteDept('+JSON.stringify(d.id)+','+JSON.stringify(d.name)+')">&#128465; Delete</button>'
       html+='</div>'
@@ -4783,8 +4783,8 @@ async function applyBuilderLayout() {
   await saveBuilderLayout()
   // Set as active layout
   const layout = S.dashLayouts.find(l=>l.id===builderLayoutId)
-  if (layout) { activeDashLayout=layout; switchTab('dashboard') }
-  else { switchTab('dashboard') }
+  if (layout) { activeDashLayout=layout; switchTab(\"dashboard\") }
+  else { switchTab(\"dashboard\") }
 }
 
 async function deleteBuilderLayout() {

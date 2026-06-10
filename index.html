@@ -2995,7 +2995,7 @@ function renderDepartments() {
         html+='<div style="font-size:10px;color:var(--muted);font-style:italic">No performance data yet</div>'
       }
       html+='<div style="display:flex;gap:6px;margin-top:12px">'
-      html+='<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="switchDept('+JSON.stringify(d.code)+').then(function(){switchTab(\"dashboard\")})">&#128065; View</button>'
+      html+='<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="switchDept('+JSON.stringify(d.code)+').then(function(){switchTab('dashboard')})">&#128065; View</button>'
       html+='<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="openDeptForm('+JSON.stringify(d.id)+','+JSON.stringify(d.name)+','+JSON.stringify(d.active)+')">&#9998; Edit</button>'
       html+='<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#dc2626;border-color:#fca5a5" onclick="deleteDept('+JSON.stringify(d.id)+','+JSON.stringify(d.name)+')">&#128465; Delete</button>'
       html+='</div>'

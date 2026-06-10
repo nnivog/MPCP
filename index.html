@@ -2995,9 +2995,8 @@ function renderDepartments() {
         html+='<div style="font-size:10px;color:var(--muted);font-style:italic">No performance data yet</div>'
       }
       html+='<div style="display:flex;gap:6px;margin-top:12px">'
-      html+='<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="switchDept('+JSON.stringify(d.code)+').then(function(){switchTab(\"dashboard\")})">&#128065; View</button>'
-      html+='<button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="openDeptForm('+JSON.stringify(d.id)+','+JSON.stringify(d.name)+','+JSON.stringify(d.active)+')">&#9998; Edit</button>'
-      html+='<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#dc2626;border-color:#fca5a5" onclick="deleteDept('+JSON.stringify(d.id)+','+JSON.stringify(d.name)+')">&#128465; Delete</button>'
+      html+='<button class="btn btn-ghost btn-sm" style="font-size:10px" data-action="edit" data-id="'+d.id+'" data-name="'+encodeURIComponent(d.name)+'" data-active="'+d.active+'">&#9998; Edit</button>'
+      html+='<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#dc2626;border-color:#fca5a5" data-action="delete" data-id="'+d.id+'" data-name="'+encodeURIComponent(d.name)+'">&#128465; Delete</button>'
       html+='</div>'
       html+='</div>'
     })
@@ -3020,11 +3019,25 @@ function renderDepartments() {
         +'</div>'
       q('#master-content').innerHTML=statsHtml+html
     }).catch(function(){q('#master-content').innerHTML=html})
+    // Event delegation for dept buttons
+    setTimeout(function(){
+      var mc = q('#master-content')
+      if(mc) mc.addEventListener('click', function handler(e){
+        var btn = e.target.closest('[data-action]')
+        if(!btn) return
+        var action = btn.dataset.action
+        var id = btn.dataset.id
+        var name = decodeURIComponent(btn.dataset.name)
+        var active = btn.dataset.active
+        if(action==='delete') deleteDept(id, name)
+        if(action==='edit') openDeptForm(id, name, active==='1')
+        mc.removeEventListener('click', handler)
+      },{ once: false })
+    }, 100)
   })
 }
 
 function deleteDept(did, dname) {
-  if (!confirm('Delete department "' + dname + '"?\nThis will deactivate it. This cannot be undone.')) return
   fetch('/api/departments/' + did, {
     method: 'DELETE',
     headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}

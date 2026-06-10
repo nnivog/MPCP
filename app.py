@@ -3245,6 +3245,11 @@ tbody tr:nth-child(even){background:#FAFAFA}
               <form method="POST" action="/admin/users/{{ u.id }}/toggle">
                 <button class="btn {{ 'btn-danger' if u.active else 'btn-success' }}" type="submit">{{ 'Disable' if u.active else 'Enable' }}</button>
               </form>
+              {% if current_user_role == 'master_admin' and u.username != 'admin' %}
+              <form method="POST" action="/admin/users/{{ u.id }}/delete" onsubmit="return confirm('Delete user {{ u.username }}? This cannot be undone.')">
+                <button class="btn btn-danger" type="submit" style="background:#dc2626;color:#fff;font-size:10px">&#128465; Delete</button>
+              </form>
+              {% endif %}
             </div>
           </td>
         </tr>
@@ -3504,6 +3509,29 @@ def admin_create_user():
     except sqlite3.IntegrityError:
         return _admin_msg(f"Username @{d['username']} already exists", 'err')
     finally: db.close()
+
+@app.route('/admin/users/<uid2>/delete', methods=['POST'])
+def admin_delete_user(uid2):
+    err = require_role('master_admin')
+    if err: return err
+    u = current_user()
+    if u['id'] == uid2:
+        return _admin_msg('Cannot delete your own account', 'err')
+    db = get_master_conn()
+    try:
+        user = db.execute('SELECT username FROM users WHERE id=?', (uid2,)).fetchone()
+        if not user:
+            return _admin_msg('User not found', 'err')
+        if user['username'] == 'admin':
+            return _admin_msg('Cannot delete the master admin account', 'err')
+        db.execute('DELETE FROM users WHERE id=?', (uid2,))
+        log_audit('USER_DELETE', 'user', uid2, f'Admin deleted user {user["username"]}')
+        db.commit()
+        return _admin_msg(f'User {user["username"]} deleted successfully', 'ok')
+    except Exception as ex:
+        return _admin_msg(str(ex), 'err')
+    finally:
+        db.close()
 
 @app.route('/admin/users/<uid2>/reset', methods=['POST'])
 def admin_reset_pw(uid2):

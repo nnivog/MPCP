@@ -3038,7 +3038,10 @@ function renderDepartments() {
 }
 
 function deleteDept(did, dname) {
-  fetch('/api/departments/' + did, {
+  openModal('Delete Department', '<p style="margin:0 0 8px">Are you sure you want to delete <strong>' + esc(dname) + '</strong>?</p><p style="color:#dc2626;font-size:12px">This will permanently delete the department and all its data.</p>', [
+    {label: 'Delete', cls: 'btn-danger', fn: function() {
+      closeModal()
+      fetch('/api/departments/' + did, {
     method: 'DELETE',
     headers: {'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest'}
   })
@@ -3052,6 +3055,9 @@ function deleteDept(did, dname) {
       else toast('Error: '+(data.error||'Unknown'),'err')
     })
     .catch(function(e){ toast('Error: '+e.message,'err') })
+    }},
+    {label: 'Cancel', cls: 'btn-ghost', fn: function(){ closeModal() }}
+  ], true)
 }
 
 function openDeptForm(did, dname, dactive) {

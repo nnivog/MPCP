@@ -1,0 +1,21 @@
+name: Sync MPCP to HuggingFace
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync-to-hf:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GitHub repo
+        uses: actions/checkout@v3
+
+      - name: Install huggingface_hub
+        run: pip install huggingface_hub
+
+      - name: Push to HuggingFace Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: pip install huggingface_hub && python sync_to_hf.py

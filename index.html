@@ -3322,7 +3322,7 @@ function renderDepartments() {
       html+='</div>'
       html+='<div style="display:flex;gap:16px;font-size:11px;color:var(--muted);margin-bottom:10px">'
       html+='<span>&#128100; '+d.user_count+' users</span>'
-      html+='<span class="emp-count">&#128106; '+(d.employees||'?')+' employees</span>'
+      html+='<span id="emp-count-'+d.id+'">&#128106; '+(d.employees||'?')+' employees</span>'
       html+='</div>'
       if(pct!==null){
         html+='<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px">'
@@ -3344,6 +3344,14 @@ function renderDepartments() {
 
     // Also show master summary stats at top
     fetch('/api/master/summary').then(function(r){return r.json()}).then(function(summary){
+      // Update emp count spans by matching dept id in edit buttons
+      summary.forEach(function(s){
+        var editBtn=document.querySelector('.stat-box [data-id="'+s.id+'"]');
+        if(editBtn){
+          var sp=editBtn.closest('.stat-box').querySelector('.emp-count');
+          if(sp) sp.textContent='\u{1F465} '+s.employees+' employees';
+        }
+      });
       const totalEmps=summary.reduce(function(s,d){return s+(d.employees||0)},0)
       const totalMPs=summary.reduce(function(s,d){return s+(d.mps||0)},0)
       const totalCPs=summary.reduce(function(s,d){return s+(d.cps||0)},0)
@@ -3356,7 +3364,28 @@ function renderDepartments() {
         +'<div class="stat-box" style="padding:10px 16px;flex:1;min-width:100px"><div class="val" style="color:#d97706">'+totalCPs+'</div><div class="lbl">Total CPs</div></div>'
         +(avgComp!==null?'<div class="stat-box" style="padding:10px 16px;flex:1;min-width:100px"><div class="val" style="color:'+(avgComp>=95?'#16a34a':avgComp>=80?'#d97706':'#dc2626')+'">'+avgComp+'%</div><div class="lbl">Avg Compliance</div></div>':'')
         +'</div>'
-      q('#master-content').innerHTML=statsHtml+html
+      // Rebuild dept cards with real employee counts from summary
+      var summaryMap={};summary.forEach(function(s){summaryMap[s.id]=s});
+      var html2='<div class="grid-3">';
+      depts.forEach(function(d){
+        var s=summaryMap[d.id]||{};
+        var empCount=s.employees||0;
+        var pct2=s.compliance!==null&&s.compliance!==undefined?s.compliance:null;
+        var bc=pct2===null?'#94a3b8':pct2>=95?'#16a34a':pct2>=80?'#d97706':'#dc2626';
+        html2+='<div class="stat-box" style="border-top:4px solid '+bc+';text-align:left;padding:14px">';
+        html2+='<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-family:monospace">'+esc(d.code)+'</div>';
+        html2+='<div style="font-size:14px;font-weight:700;color:var(--text);margin-top:2px">'+esc(d.name)+'</div>';
+        html2+='<div style="display:flex;gap:16px;font-size:11px;color:var(--muted);margin:8px 0">';
+        html2+='<span>&#128100; '+d.user_count+' users</span>';
+        html2+='<span>&#128106; '+empCount+' employees</span></div>';
+        html2+=(pct2!==null?'<div style="font-size:10px;color:'+bc+';font-weight:700">'+pct2+'% compliance</div>':'<div style="font-size:10px;color:var(--muted);font-style:italic">No performance data yet</div>');
+        html2+='<div style="display:flex;gap:6px;margin-top:12px">';
+        html2+='<button class="btn btn-ghost btn-sm" style="font-size:10px" data-action="edit" data-id="'+d.id+'" data-name="'+encodeURIComponent(d.name)+'" data-active="'+d.active+'">&#9998; Edit</button>';
+        html2+='<button class="btn btn-ghost btn-sm" style="font-size:10px;color:#dc2626;border-color:#fca5a5" data-action="delete" data-id="'+d.id+'" data-name="'+encodeURIComponent(d.name)+'">&#128465; Delete</button>';
+        html2+='</div></div>';
+      });
+      html2+='</div>';
+      q('#master-content').innerHTML=statsHtml+'<div class="card"><div class="card-head"><p>Departments ('+depts.length+' / 15)</p><button class="btn btn-primary btn-sm" onclick="openDeptForm()">+ New Department</button></div><div class="card-body"><p style="font-size:11px;color:var(--muted);margin-bottom:16px">Each department has its own isolated database. Create a department, then assign a Dept Admin in the Users tab.</p>'+html2+'</div></div>';
     }).catch(function(){q('#master-content').innerHTML=html})
     // Event delegation for dept buttons
     setTimeout(function(){

@@ -4408,7 +4408,7 @@ function openAddEmpToOrg(){
 function renderCascadeBuilder(){
   const byParent={}
   S.cascade.forEach(function(lnk){if(!byParent[lnk.superior_emp_id])byParent[lnk.superior_emp_id]=[];byParent[lnk.superior_emp_id].push(lnk)})
-  let html='<div class="info-box mb-16"><p><strong>Cascade rule:</strong> Superior\'s <strong>CP</strong> becomes subordinate\'s <strong>MP</strong>. Click <strong>+ New Link</strong> to map the chain.</p></div>'
+  let html='<div class="info-box mb-16" style="border-left:4px solid #ED1C24"><p><strong>Cascade rule:</strong> Superior\'s <span style="background:#1d4ed8;color:#fff;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">CP</span> becomes subordinate\'s <span style="background:#15803d;color:#fff;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">MP</span>. Click <strong>+ New Link</strong> to map the chain.</p></div>'
   html+='<div class="section-head"><div><h2>Cascade Links</h2><p>'+S.cascade.length+' links configured</p></div>'
   html+='<button class="btn btn-primary btn-sm" onclick="openCascadeForm()">+ New Link</button></div>'
   if(!S.cascade.length){
@@ -4431,18 +4431,20 @@ function renderCascadeBuilder(){
         const child=getEmp(lnk.subordinate_emp_id)
         html+='<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--border)">'
         html+='<div style="flex:1">'
-        html+='<div style="display:flex;gap:6px;align-items:center;padding:8px;background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;margin-bottom:4px">'
-        html+='<span class="ref-badge ref-badge-blue">'+esc(lnk.cp_ref||'CP')+'</span>'
-        html+='<span class="text-xs font-bold flex-1">'+esc(lnk.cp_title||'')+'</span>'
-        html+='<span class="badge" style="background:#dbeafe;color:#1e40af;font-size:9px">CP</span></div>'
-        html+='<div style="text-align:center;font-size:11px;color:#94a3b8;padding:2px">&#8595; becomes MP for &#8595;</div>'
-        html+='<div style="display:flex;gap:6px;align-items:center;padding:8px;background:#f0fdf4;border:1px solid #86efac;border-radius:8px">'
+        html+='<div style="display:flex;gap:8px;align-items:center;padding:10px 12px;background:#fff;border:1.5px solid #3b82f6;border-left:5px solid #1d4ed8;border-radius:8px;margin-bottom:4px">'
+        html+='<span style="font-size:9px;font-weight:800;letter-spacing:.6px;background:#1d4ed8;color:#fff;padding:2px 7px;border-radius:4px;flex-shrink:0">CP</span>'
+        html+='<span style="font-family:monospace;font-size:11px;font-weight:700;color:#1d4ed8;flex-shrink:0">'+esc(lnk.cp_ref||'—')+'</span>'
+        html+='<span style="font-size:12px;font-weight:600;color:#0f172a;flex:1">'+esc(lnk.cp_title||'')+'</span>'
+        html+='<span style="font-size:10px;color:#3b82f6;font-weight:700">Superior\'s CP</span></div>'
+        html+='<div style="text-align:center;font-size:12px;font-weight:700;color:#ED1C24;padding:3px 0;letter-spacing:1px">&#8595; becomes MP for &#8595;</div>'
+        html+='<div style="display:flex;gap:8px;align-items:center;padding:10px 12px;background:#f0fdf4;border:1.5px solid #16a34a;border-left:5px solid #15803d;border-radius:8px">'
         if(child)html+='<div class="avatar avatar-sm" style="background:'+dc(child.dept)+'">'+av(child.name)+'</div>'
-          +'<div style="flex-shrink:0"><p class="text-xs font-bold">'+esc(child.name)+'</p>'
-          +'<p class="text-xxs text-muted">'+esc(child.emp_code||'')+' L'+child.level+'</p></div>'
-        html+='<span class="ref-badge" style="margin-left:4px">'+esc(lnk.mp_ref||'MP')+'</span>'
-        html+='<span class="text-xs flex-1">'+esc(lnk.mp_title||'')+'</span>'
-        html+='<span class="badge badge-c" style="font-size:9px">MP</span></div></div>'
+          +'<div style="flex-shrink:0;margin-right:4px"><p style="font-size:11px;font-weight:700;color:#0f172a">'+esc(child.name)+'</p>'
+          +'<p style="font-size:9px;color:#6b7a99">'+esc(child.emp_code||'')+' · L'+child.level+'</p></div>'
+        html+='<span style="font-size:9px;font-weight:800;letter-spacing:.6px;background:#15803d;color:#fff;padding:2px 7px;border-radius:4px;flex-shrink:0">MP</span>'
+        html+='<span style="font-family:monospace;font-size:11px;font-weight:700;color:#15803d;flex-shrink:0">'+esc(lnk.mp_ref||'—')+'</span>'
+        html+='<span style="font-size:12px;font-weight:600;color:#0f172a;flex:1">'+esc(lnk.mp_title||'')+'</span>'
+        html+='<span style="font-size:10px;color:#16a34a;font-weight:700">Subordinate\'s MP</span></div></div>'
         html+='<button class="btn-icon" style="color:var(--blue);flex-shrink:0;margin-right:4px" onclick="openEditCascadeLink(\''+lnk.id+'\',\''+lnk.superior_emp_id+'\',\''+lnk.superior_cp_id+'\'\',\''+lnk.subordinate_emp_id+'\'\',\''+lnk.subordinate_mp_id+'\')" title="Edit">&#9998;</button>'
         html+='<button class="btn-icon" style="color:var(--red);flex-shrink:0" onclick="delCascadeLink(\''+lnk.id+'\')">' + '&#128465;</button></div>'
       })

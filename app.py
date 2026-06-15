@@ -338,6 +338,7 @@ def init_db():
         ])
         _migrate("employees", [
             ("email", "ALTER TABLE employees ADD COLUMN email TEXT DEFAULT ''"),
+            ("photo", "ALTER TABLE employees ADD COLUMN photo TEXT DEFAULT ''"),
         ])
         _migrate("cps", [
             ("source", "ALTER TABLE cps ADD COLUMN source TEXT DEFAULT ''"),
@@ -603,8 +604,8 @@ def employees_api():
         try: num = int(last['emp_code'].split('-')[1])+1 if last else 1
         except: num = 1
         code = f"EMP-{num:03d}"
-    db.execute("INSERT OR REPLACE INTO employees VALUES(?,?,?,?,?,?,?,?)",
-               (eid,code,d['name'],d.get('role',''),d.get('level',3),d.get('dept','Ops'),d.get('manager_id') or None,d.get('email','')))
+    db.execute("INSERT OR REPLACE INTO employees VALUES(?,?,?,?,?,?,?,?,?)",
+               (eid,code,d['name'],d.get('role',''),d.get('level',3),d.get('dept','Ops'),d.get('manager_id') or None,d.get('email',''),d.get('photo','')))
     # Save sector assignments
     try:
         db.execute("DELETE FROM emp_sectors WHERE emp_id=?", (eid,))
@@ -619,8 +620,6 @@ def employees_api():
     except Exception: pass
     db.commit()
     return jsonify({'id': eid, 'emp_code': code})
-
-@app.route('/api/employees/<eid>', methods=['PUT','DELETE'])
 
 @app.route('/api/employees/photos', methods=['GET'])
 def employees_photos():
@@ -642,6 +641,7 @@ def employee_photo(eid):
     db.commit()
     return jsonify({'ok': True})
 
+@app.route('/api/employees/<eid>', methods=['PUT','DELETE'])
 def employee_api(eid):
     db = get_db()
     if request.method == 'DELETE':
@@ -657,8 +657,8 @@ def employee_api(eid):
     # Read old record for audit diff
     _old_emp = db.execute('SELECT * FROM employees WHERE id=?',(eid,)).fetchone()
     _old_emp = dict(_old_emp) if _old_emp else {}
-    db.execute("UPDATE employees SET emp_code=?,name=?,role=?,level=?,dept=?,manager_id=?,email=? WHERE id=?",
-               (d.get('emp_code'),d['name'],d.get('role',''),d.get('level',3),d.get('dept','Ops'),d.get('manager_id') or None,d.get('email',''),eid))
+    db.execute("UPDATE employees SET emp_code=?,name=?,role=?,level=?,dept=?,manager_id=?,email=?,photo=? WHERE id=?",
+               (d.get('emp_code'),d['name'],d.get('role',''),d.get('level',3),d.get('dept','Ops'),d.get('manager_id') or None,d.get('email',''),d.get('photo',''),eid))
     # Update sector assignments
     db.execute("DELETE FROM emp_sectors WHERE emp_id=?", (eid,))
     for i, sid in enumerate(d.get('sector_ids', [])):
@@ -773,8 +773,8 @@ def import_employees():
             except: num = 1
             code = f"EMP-{num:03d}"
         eid = uid()
-        db.execute("INSERT OR REPLACE INTO employees VALUES(?,?,?,?,?,?,?,?)",
-                   (eid,code,r['name'],r['role'],r['level'],r['dept'],None,r['email']))
+        db.execute("INSERT OR REPLACE INTO employees VALUES(?,?,?,?,?,?,?,?,?)",
+                   (eid,code,r['name'],r['role'],r['level'],r['dept'],None,r['email'],''))
         id_map[code] = eid; imported += 1
     for r in rows:
         mc = r['manager_code']

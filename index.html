@@ -3312,7 +3312,7 @@ function renderDepartments() {
     depts.forEach(function(d){
       const pct=d.compliance!==null&&d.compliance!==undefined?d.compliance:null
       const barCol=pct===null?'#94a3b8':pct>=95?'#16a34a':pct>=80?'#d97706':'#dc2626'
-      html+='<div class="stat-box" style="border-top:4px solid '+barCol+';text-align:left;padding:14px">'
+      html+='<div class="stat-box" data-id="'+d.id+'" style="border-top:4px solid '+barCol+';text-align:left;padding:14px">'
       html+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">'
       html+='<div>'
       html+='<div style="font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-family:monospace">'+esc(d.code)+'</div>'
@@ -3322,7 +3322,7 @@ function renderDepartments() {
       html+='</div>'
       html+='<div style="display:flex;gap:16px;font-size:11px;color:var(--muted);margin-bottom:10px">'
       html+='<span>&#128100; '+d.user_count+' users</span>'
-      html+='<span>&#128106; '+(d.employees||'?')+' employees</span>'
+      html+='<span class="emp-count">&#128106; '+(d.employees||'?')+' employees</span>'
       html+='</div>'
       if(pct!==null){
         html+='<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px">'

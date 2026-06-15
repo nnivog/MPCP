@@ -649,7 +649,7 @@ tbody tr:hover .row-actions{opacity:1}
     <button class="nav-tab tab-master-setup" onclick="switchTab('master')">&#128295; Master Setup</button>
     <button class="nav-tab" onclick="switchTab('data')">&#128193; Data Manager</button>
     <button class="nav-tab" onclick="switchTab('reports')">&#128200; Reports</button>
-    <button class="nav-tab tab-admin-only" onclick="switchTab('org')">&#127970; Org &amp; Cascade</button>
+    <button class="nav-tab tab-admin-only" onclick="switchTab('org')">&#127970; Org Chart</button>
   </div>
   <div id="user-badge" style="flex-shrink:0;padding:4px 12px"></div>
   </div>
@@ -682,6 +682,7 @@ tbody tr:hover .row-actions{opacity:1}
 			<button class="sub-tab" onclick="switchMaster('locations')">&#128205; Locations</button>
       <button class="sub-tab master-admin-only" onclick="switchMaster('departments')">&#127970; Departments</button>
       <button class="sub-tab" onclick="switchMaster('dashboard_builder')">&#128196; Dashboard Builder</button>
+      <button class="sub-tab" onclick="switchMaster('cascade')">&#128279; Cascade Links</button>
     </div>
     <div id="master-content"><div class="spinner"></div></div>
   </div>
@@ -708,7 +709,6 @@ tbody tr:hover .row-actions{opacity:1}
   <div id="tab-org" class="tab-panel">
     <div class="sub-tabs" id="org-tabs">
       <button class="sub-tab active" onclick="switchOrg('tree')">Live Org Tree</button>
-      <button class="sub-tab" onclick="switchOrg('builder')">Cascade Builder</button>
       <button class="sub-tab" onclick="switchOrg('assign')">Assign MP/CP</button>
     </div>
     <div id="org-content"><div class="spinner"></div></div>
@@ -898,6 +898,7 @@ function renderCurrent() {
   else if(S.currentTab==='locations') renderLocations()
 }
 function switchMaster(s) { S.masterSub=s; qq('#master-tabs .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderMaster() }
+
 function switchData(s) { S.dataSub=s; qq('#tab-data .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderData() }
 function addReportExportBar(fy){
   const bar=document.getElementById('report-export-bar')
@@ -1306,6 +1307,7 @@ function renderMaster() {
   else if(S.masterSub==='levels') renderLevels()
   else if(S.masterSub==='users') renderUsers()
   else if(S.masterSub==='departments') renderDepartments()
+  else if(S.masterSub==='cascade') { q('#master-content').innerHTML=''; renderCascadeBuilder() }
   else if(S.masterSub==='sectors') renderSectors()
   else if(S.masterSub==='dashboard_builder') renderDashboardBuilder()
   else renderLinks()
@@ -4448,7 +4450,8 @@ function renderCascadeBuilder(){
     })
     html+='</div>'
   }
-  q('#org-content').innerHTML=html
+  var target=S.masterSub==='cascade'?q('#master-content'):q('#org-content');
+  if(target)target.innerHTML=html
 }
 
 function openCascadeForm(){

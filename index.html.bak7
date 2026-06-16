@@ -4,8 +4,6 @@
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Sipradi MPCP Management System</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.min.css">
-<script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 <script>
 // ── FY AUTO-DETECT ───────────────────────────────────────────────────────
 async function fyFromDate(dateStr) {
@@ -621,8 +619,6 @@ tbody tr:hover .row-actions{opacity:1}
 #header-meta span{font-family:var(--font-head);font-size:11px;font-weight:600;color:var(--text-2);white-space:nowrap}
 .fy-pill{background:rgba(255,140,66,.12);color:#FF8C42!important;padding:2px 8px;border-radius:4px;border:1px solid rgba(255,140,66,.25);font-family:var(--font-mono)!important}
 #header-meta .dot{color:var(--green)!important;font-weight:700}
-
-/* Tom Select theme overrides to match MPCP dark UI */
 </style>
 </head>
 <body>
@@ -810,7 +806,7 @@ async function loadAll() {
   // Set currentFY from most recent active cache
   const latest = (ca||[]).sort((a,b)=>b.fy.localeCompare(a.fy))[0]
   if (latest && !(S.cache||[]).find(x=>x.fy===S.currentFY)) S.currentFY = latest.fy
-  updateHeader(); renderCurrent(); setTimeout(initSearchSelects, 100)
+  updateHeader(); renderCurrent()
 }
 
 function updateHeader() {
@@ -915,94 +911,30 @@ function switchMaster(s) { S.masterSub=s; qq('#master-tabs .sub-tab').forEach(t=
 function switchMPCP(s) {
   S.mpcpSub = s;
   qq('#mpcp-tabs .sub-tab').forEach(t => t.classList.remove('active'));
-  const idx = ['mps','cps','links','cascade','cascade_mps','assign'].indexOf(s);
+  const idx = ['mps','cps','links','cascade','assign'].indexOf(s);
   const btns = qq('#mpcp-tabs .sub-tab');
   if(idx >= 0 && btns[idx]) btns[idx].classList.add('active');
   renderMPCP();
 }
 
-function renderCascadeMPCP() {
-  const c = document.getElementById('mpcp-content');
-  if(!c) return;
-  c.innerHTML = '<div class="spinner"></div>';
-  fetch('/api/cascade_mpcp').then(r=>r.json()).then(mps => {
-    if(!mps.length) {
-      c.innerHTML = '<div class="card"><div class="card-body" style="text-align:center;padding:32px"><p style="font-size:28px">&#128279;</p><p class="font-bold mt-8">No cascade-generated MPs yet</p><p class="text-sm text-muted mt-8">Create cascade links first — subordinate MPs will appear here automatically.</p></div></div>';
-      return;
-    }
-    let html = '<div style="display:flex;flex-direction:column;gap:16px">';
-    mps.forEach(mp => {
-      const owner = mp.owners && mp.owners[0];
-      const src = mp.source_link;
-      html += '<div class="card">';
-      html += '<div class="card-head" style="background:linear-gradient(135deg,#1d4ed808,#15803d08);border-left:4px solid #15803d">';
-      html += '<div style="display:flex;align-items:center;gap:10px;flex:1">';
-      html += '<span style="background:#15803d;color:#fff;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700">AUTO MP</span>';
-      html += '<span style="font-family:monospace;font-size:12px;font-weight:700;color:#15803d">' + esc(mp.ref) + '</span>';
-      html += '<span style="font-weight:700;flex:1">' + esc(mp.title) + '</span>';
-      if(owner) html += '<div class="avatar avatar-sm" style="background:' + dc(owner.dept) + '">' + av(owner.name) + '</div>'
-        + '<div><p style="font-size:11px;font-weight:700">' + esc(owner.name) + '</p>'
-        + '<p class="text-xxs text-muted">' + esc(owner.emp_code||'') + ' · L' + owner.level + '</p></div>';
-      html += '</div></div>';
-      if(src) {
-        html += '<div style="padding:8px 16px;background:#f0f9ff;border-bottom:1px solid var(--border);font-size:11px;color:#1d4ed8">';
-        html += '&#128279; Cascaded from <strong>' + esc(src.superior_name||'') + '</strong> (' + esc(src.superior_code||'') + ')';
-        html += '</div>';
-      }
-      html += '<div class="card-body">';
-      if(mp.cps && mp.cps.length) {
-        html += '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-        html += '<thead><tr style="background:#0a1628;color:#fff"><th style="padding:6px 10px;text-align:left">CP Ref</th><th style="padding:6px 10px;text-align:left">Checking Point</th><th style="padding:6px 10px">Target</th><th style="padding:6px 10px">Freq</th></tr></thead><tbody>';
-        mp.cps.forEach((cp,i) => {
-          html += '<tr style="background:' + (i%2?'#f8fafc':'#fff') + '">';
-          html += '<td style="padding:6px 10px;font-family:monospace;color:#1d4ed8;font-weight:700">' + esc(cp.ref) + '</td>';
-          html += '<td style="padding:6px 10px">' + esc(cp.title) + '</td>';
-          html += '<td style="padding:6px 10px;text-align:center">' + esc(cp.target||'—') + '</td>';
-          html += '<td style="padding:6px 10px;text-align:center">' + esc(cp.freq||'Monthly') + '</td>';
-          html += '</tr>';
-        });
-        html += '</tbody></table>';
-      } else {
-        html += '<p class="text-sm text-muted italic">No CPs under this cascade MP yet.</p>';
-      }
-      html += '</div></div>';
-    });
-    html += '</div>';
-    c.innerHTML = html;
-  }).catch(e => { c.innerHTML = '<div class="info-box">Error loading cascade MPs: ' + e + '</div>'; });
-}
-
-
 function renderMPCP() {
   const s = S.mpcpSub || 'mps';
-  const c = document.getElementById('mpcp-content');
+  const c = q('#mpcp-content');
   if(!c) return;
-  c.innerHTML = '<div class="spinner"></div>';
-  if      (s === 'mps')     renderMPs()
-  else if (s === 'cps')     renderCPs()
-  else if (s === 'links')   renderLinks()
-  else if (s === 'cascade') renderCascadeBuilder()
-  else if (s === 'cascade_mps') renderCascadeMPCP()
-  else if (s === 'assign')  renderAssignPanel()
-}
-
-function initSearchSelects() {
-  // Enhance all plain selects with Tom Select search
-  // Skip ones already enhanced or inside modal templates (strings)
-  document.querySelectorAll('select.form-select:not(.tomselected):not([data-no-search])').forEach(el => {
-    // Skip if inside a hidden tab panel
-    try {
-      new TomSelect(el, {
-        create: false,
-        sortField: { field: 'text', direction: 'asc' },
-        plugins: [],
-        maxOptions: 300,
-        render: {
-          no_results: function() { return '<div class="no-results">No results</div>'; }
-        }
-      })
-    } catch(e) {}
-  })
+  // Call the existing render fn (it writes to #master-content or #org-content),
+  // then immediately move that content into #mpcp-content.
+  function callThenMove(srcId, fn) {
+    const src = q('#' + srcId);
+    if(!src) return;
+    fn();
+    c.innerHTML = src.innerHTML;
+    src.innerHTML = '<div class="spinner"></div>';
+  }
+  if      (s === 'mps')     callThenMove('master-content', renderMPs)
+  else if (s === 'cps')     callThenMove('master-content', renderCPs)
+  else if (s === 'links')   callThenMove('master-content', renderLinks)
+  else if (s === 'cascade') callThenMove('master-content', renderCascadeBuilder)
+  else if (s === 'assign')  callThenMove('org-content',    renderAssignPanel)
 }
 
 function switchData(s) { S.dataSub=s; qq('#tab-data .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderData() }
@@ -1036,7 +968,6 @@ function switchFY() {
 function openModal(title, body, actions=[], wide=false) {
   q('#modal-title').textContent = title
   q('#modal-body').innerHTML = body
-  setTimeout(initSearchSelects, 50)
   q('#modal-box').className = 'modal'+(wide?' wide':'')
   const ft = q('#modal-foot'); ft.innerHTML = '<button class="btn btn-ghost" onclick="closeModal()">Cancel</button>'
   actions.forEach(a=>{
@@ -1482,7 +1413,7 @@ function renderMPs() {
     </div>`
   })
   html += '</div>'
-  const _tMPs=S.currentTab==='mpcp'?document.getElementById('mpcp-content'):document.getElementById('master-content'); if(_tMPs)_tMPs.innerHTML=html
+  q('#master-content').innerHTML = html
 }
 
 function exportOpen(url){ window.open(url,'_blank') }
@@ -1737,7 +1668,7 @@ function renderCPs() {
     </tr>`
   })
   html += '</tbody></table></div>'
-  const _tCPs=S.currentTab==='mpcp'?document.getElementById('mpcp-content'):document.getElementById('master-content'); if(_tCPs)_tCPs.innerHTML=html
+  q('#master-content').innerHTML = html
 }
 function filterCPs(){const s=(q('#cp-search')?.value||'').toLowerCase(),mp=q('#cp-mp-filter')?.value||'';qq('#cp-tbody tr').forEach(tr=>tr.style.display=((tr.dataset.cs+' '+(tr.dataset.cr||'')).toLowerCase().includes(s)&&(!mp||tr.dataset.cm===mp))?'':'none')}
 function openCPForm(id){
@@ -1802,7 +1733,7 @@ function renderRoles(){
     </div>`
   })
   html+='</div>'
-  const _tRoles=S.currentTab==='mpcp'?document.getElementById('mpcp-content'):document.getElementById('master-content'); if(_tRoles)_tRoles.innerHTML=html
+  q('#master-content').innerHTML=html
 }
 function openRoleForm(id){
   const role=id?getRole(id):null
@@ -1867,7 +1798,7 @@ function renderLinks(){
       </div>
     </div>`
   })
-  const _tLinks=S.currentTab==='mpcp'?document.getElementById('mpcp-content'):document.getElementById('master-content'); if(_tLinks)_tLinks.innerHTML=html
+  q('#master-content').innerHTML=html
 }
 function openLinkForm(eid){
   const emp=eid?getEmp(eid):null
@@ -2715,20 +2646,18 @@ async function qeSave(overwrite = false) {
   });
   const data = await r.json();
 
-
-  console.log("qeSave response:", data);
-  const _msg = data.accumulated
-    ? `✓ Accumulated — ${data.bs_month} ${data.fy} | Total: ${data.total} | ${data.compliant} compliant (${data.pct_compliant}%)`
-    : `✓ Saved — ${data.bs_month} ${data.fy} | ${data.pct_compliant}% compliant`
-  toast(_msg, 'ok');
-  closeModal();
-  if (data.accumulated) {
-    const idx = S.perf.findIndex(p => p.id === data.id);
-    if (idx !== -1) S.perf[idx] = data; else S.perf.push(data);
-  } else {
-    S.perf.push(data);
+  if (r.status === 409 && data.warning === 'duplicate') {
+    if (confirm(`⚠ ${data.message}\n\nOverwrite existing record?`)) {
+      return qeSave(true);
+    }
+    return;
   }
-  await loadAll();
+  if (!r.ok) { toast(data.error || 'Save failed', 'err'); return; }
+
+  toast(`✓ Saved — ${data.bs_month} ${data.fy} | ${data.pct_compliant}% compliant`, 'ok');
+  closeModal();
+  S.perf.push(data);
+  updateHeader();
 }
 
 function qeUpdateTarget() {
@@ -3362,7 +3291,7 @@ function renderSectors() {
         </div>`).join('')}
       </div></div></div>`
   }
-  const _tAsgn=S.currentTab==='mpcp'?document.getElementById('mpcp-content'):document.getElementById('master-content'); if(_tAsgn)_tAsgn.innerHTML=html
+  q('#master-content').innerHTML = html
 }
 
 function openSectorForm(id) {
@@ -4564,8 +4493,8 @@ function renderCascadeBuilder(){
     })
     html+='</div>'
   }
-  var target = (S.currentTab==='mpcp') ? q('#mpcp-content') : (S.masterSub==='cascade' ? q('#master-content') : q('#org-content'));
-  if(target) target.innerHTML = html
+  var target=S.mpcpSub==='cascade'?q('#master-content'):(S.masterSub==='cascade'?q('#master-content'):q('#org-content'));
+  if(target)target.innerHTML=html
 }
 
 function openCascadeForm(){
@@ -5154,7 +5083,7 @@ function renderDashboardBuilder() {
       const wt = WIDGET_TYPES.find(t=>t.id===w.type)||{icon:'📊',label:w.type}
       canvas += `<div class="bldr-widget-row" id="bwr-${i}" draggable="true"
         ondragstart="bldrDragStart(${i})" ondragover="bldrDragOver(event,${i})" ondrop="bldrDrop(event,${i})"
-        style="border:1.5px solid #ED1C24;border-left:4px solid #ED1C24;border-radius:10px;padding:12px;background:var(--surface);cursor:grab">
+        style="border:1.5px solid var(--border);border-radius:10px;padding:12px;background:#fff;cursor:grab">
         <div style="display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap">
           <span style="font-size:22px;flex-shrink:0">${wt.icon}</span>
           <div style="flex:1;min-width:200px">
@@ -5244,7 +5173,7 @@ function removeBuilderWidget(idx) {
 
 // Drag & drop reorder
 function bldrDragStart(idx) { dragSrcIdx=idx }
-function bldrDragOver(e,idx) { e.preventDefault(); qq('.bldr-widget-row').forEach(r=>r.style.background='var(--surface)'); const el=q(`#bwr-${idx}`); if(el)el.style.background='rgba(237,28,36,.08)' }
+function bldrDragOver(e,idx) { e.preventDefault(); qq('.bldr-widget-row').forEach(r=>r.style.background='#fff'); const el=q(`#bwr-${idx}`); if(el)el.style.background='#eff6ff' }
 function bldrDrop(e,idx) {
   e.preventDefault()
   if(dragSrcIdx===null||dragSrcIdx===idx)return

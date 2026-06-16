@@ -1266,18 +1266,17 @@ def perf_quick():
 
     # DUPLICATE CHECK
     existing = db.execute(
-        'SELECT * FROM perf WHERE fy=? AND bs_month=? AND emp_id=? AND cp_ref=?',
+        'SELECT id FROM perf WHERE fy=? AND bs_month=? AND emp_id=? AND cp_ref=?',
         (fy, bsm, eid, d['cp_ref'])
     ).fetchone()
 
-    if existing:
-        total     = (existing['total'] or 0) + total
-        compliant = (existing['compliant'] or 0) + compliant
-        nc        = total - compliant
-        pct_c     = round(compliant / total * 100, 2) if total else 0
-        pct_nc    = round(nc / total * 100, 2) if total else 0
-        actual_val = max(actual_val, existing['actual_val'] or 0)
-        status    = 'C' if pct_c >= 95 else 'NC'
+    if existing and not d.get('overwrite'):
+        return jsonify({
+            'warning':     'duplicate',
+            'message':     f'Record already exists for {ec} / {d["cp_ref"]} / {bsm} {fy}',
+            'existing_id': existing['id'],
+            'hint':        'Send overwrite=true to replace'
+        }), 409
 
     pid = existing['id'] if existing else uid()
     entry_date = d.get('date', '')
@@ -1300,39 +1299,6 @@ def perf_quick():
         'loc': '',
         'accumulated': existing is not None and not d.get('overwrite')
     })
-
-
-@app.route('/api/cascade_mpcp', methods=['GET'])
-def cascade_mpcp():
-    """Return all AUTO- generated MPs and their CPs for the cascade MP/CP tab."""
-    db = get_db()
-    mps = R(db.execute(
-        "SELECT * FROM mps WHERE ref LIKE 'AUTO-%' ORDER BY ref"
-    ).fetchall())
-    result = []
-    for mp in mps:
-        cps = R(db.execute(
-            "SELECT * FROM cps WHERE mp_id=? ORDER BY ref", (mp['id'],)
-        ).fetchall())
-        # find which employee owns this mp
-        owners = R(db.execute(
-            "SELECT e.id,e.name,e.emp_code,e.level,e.dept FROM employees e "
-            "JOIN mp_owners o ON o.emp_id=e.id WHERE o.mp_id=?", (mp['id'],)
-        ).fetchall())
-        # find the cascade link that created it
-        link = db.execute(
-            "SELECT cl.*,e2.name as superior_name,e2.emp_code as superior_code "
-            "FROM cascade_links cl "
-            "JOIN employees e2 ON e2.id=cl.superior_emp_id "
-            "WHERE cl.subordinate_mp_id=?", (mp['id'],)
-        ).fetchone()
-        result.append({
-            **mp,
-            'cps': cps,
-            'owners': owners,
-            'source_link': dict(link) if link else None
-        })
-    return jsonify(result)
 
 @app.route('/api/perf/exceptions')
 def perf_exceptions():

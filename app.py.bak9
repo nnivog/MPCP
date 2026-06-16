@@ -1301,39 +1301,6 @@ def perf_quick():
         'accumulated': existing is not None and not d.get('overwrite')
     })
 
-
-@app.route('/api/cascade_mpcp', methods=['GET'])
-def cascade_mpcp():
-    """Return all AUTO- generated MPs and their CPs for the cascade MP/CP tab."""
-    db = get_db()
-    mps = R(db.execute(
-        "SELECT * FROM mps WHERE ref LIKE 'AUTO-%' ORDER BY ref"
-    ).fetchall())
-    result = []
-    for mp in mps:
-        cps = R(db.execute(
-            "SELECT * FROM cps WHERE mp_id=? ORDER BY ref", (mp['id'],)
-        ).fetchall())
-        # find which employee owns this mp
-        owners = R(db.execute(
-            "SELECT e.id,e.name,e.emp_code,e.level,e.dept FROM employees e "
-            "JOIN mp_owners o ON o.emp_id=e.id WHERE o.mp_id=?", (mp['id'],)
-        ).fetchall())
-        # find the cascade link that created it
-        link = db.execute(
-            "SELECT cl.*,e2.name as superior_name,e2.emp_code as superior_code "
-            "FROM cascade_links cl "
-            "JOIN employees e2 ON e2.id=cl.superior_emp_id "
-            "WHERE cl.subordinate_mp_id=?", (mp['id'],)
-        ).fetchone()
-        result.append({
-            **mp,
-            'cps': cps,
-            'owners': owners,
-            'source_link': dict(link) if link else None
-        })
-    return jsonify(result)
-
 @app.route('/api/perf/exceptions')
 def perf_exceptions():
     db  = get_db()

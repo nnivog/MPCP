@@ -2301,7 +2301,10 @@ def analytics_by_location():
     if fy:
         sql += " AND p.fy=?"; params.append(fy)
     sql += " GROUP BY 1 ORDER BY 1"
-    rows = db.execute(sql, params).fetchall()
+    try:
+        rows = db.execute(sql, params).fetchall()
+    except Exception:
+        rows = []
     result = {}
     for r in rows:
         tot = r[1] or 0; comp = r[2] or 0

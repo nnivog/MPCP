@@ -649,7 +649,8 @@ tbody tr:hover .row-actions{opacity:1}
     <button class="nav-tab tab-master-setup" onclick="switchTab('master')">&#128295; Master Setup</button>
     <button class="nav-tab" onclick="switchTab('data')">&#128193; Data Manager</button>
     <button class="nav-tab" onclick="switchTab('reports')">&#128200; Reports</button>
-    <button class="nav-tab tab-admin-only" onclick="switchTab('org')">&#127970; Org Chart</button>
+    <button class="nav-tab" onclick="switchTab('mpcp')">&#127919; MPCP Management</button>
+    <button class="nav-tab tab-admin-only" onclick="switchTab('org')">&#127970; Org Tree</button>
   </div>
   <div id="user-badge" style="flex-shrink:0;padding:4px 12px"></div>
   </div>
@@ -675,14 +676,10 @@ tbody tr:hover .row-actions{opacity:1}
   </div>
   <div id="tab-master" class="tab-panel">
     <div class="sub-tabs" id="master-tabs">
-      <button class="sub-tab active" onclick="switchMaster('mps')">Managing Points</button>
-      <button class="sub-tab" onclick="switchMaster('cps')">Checking Points</button>
-      <button class="sub-tab" onclick="switchMaster('roles')">Role Templates</button>
-      <button class="sub-tab" onclick="switchMaster('links')">Role Assignments</button>
-			<button class="sub-tab" onclick="switchMaster('locations')">&#128205; Locations</button>
+      <button class="sub-tab active" onclick="switchMaster('roles')">Role Templates</button>
+      <button class="sub-tab" onclick="switchMaster('locations')">&#128205; Locations</button>
       <button class="sub-tab master-admin-only" onclick="switchMaster('departments')">&#127970; Departments</button>
       <button class="sub-tab" onclick="switchMaster('dashboard_builder')">&#128196; Dashboard Builder</button>
-      <button class="sub-tab" onclick="switchMaster('cascade')">&#128279; Cascade Links</button>
     </div>
     <div id="master-content"><div class="spinner"></div></div>
   </div>
@@ -706,10 +703,20 @@ tbody tr:hover .row-actions{opacity:1}
     </div>
     <div id="report-content"><div class="spinner"></div></div>
   </div>
+  <div id="tab-mpcp" class="tab-panel">
+    <div class="sub-tabs" id="mpcp-tabs">
+      <button class="sub-tab active" onclick="switchMPCP('mps')">&#127919; Managing Points</button>
+      <button class="sub-tab" onclick="switchMPCP('cps')">&#9989; Checking Points</button>
+      <button class="sub-tab" onclick="switchMPCP('links')">&#128203; Role Assignments</button>
+      <button class="sub-tab" onclick="switchMPCP('cascade')">&#128279; Cascade Links</button>
+      <button class="sub-tab" onclick="switchMPCP('assign')">&#128101; Assign MP/CP</button>
+    </div>
+    <div id="mpcp-content"><div class="spinner"></div></div>
+  </div>
+
   <div id="tab-org" class="tab-panel">
     <div class="sub-tabs" id="org-tabs">
       <button class="sub-tab active" onclick="switchOrg('tree')">Live Org Tree</button>
-      <button class="sub-tab" onclick="switchOrg('assign')">Assign MP/CP</button>
     </div>
     <div id="org-content"><div class="spinner"></div></div>
   </div>
@@ -731,7 +738,7 @@ tbody tr:hover .row-actions{opacity:1}
 // ── STATE ────────────────────────────────────────────────────────────────────
 const S = {
   employees:[], mps:[], cps:[], roles:[], perf:[], cache:[], cascade:[], bsToday:{}, dashLayouts:[], sectors:[],
-  locations:[], currentTab:'dashboard', teamView:'cards', masterSub:'mps', authUser:null, activeDept:null, authUser:null, activeDept:null,
+  locations:[], currentTab:'dashboard', teamView:'cards', masterSub:'roles', mpcpSub:'mps', authUser:null, activeDept:null,
   dataSub:'perf', reportSub:'overview', currentFY:'2081-82'
 }
 const DC = { HOD:'#0f2540',Vehicle:'#ED1C24',Registration:'#6d28d9',Warehouse:'#047857',Stock:'#b45309',Ops:'#475569',Finance:'#0e7490',HR:'#be185d' }
@@ -885,7 +892,8 @@ function switchTab(t) {
   qq('.tab-panel').forEach(el=>el.classList.remove('active'))
   qq('.nav-tab').forEach(el=>el.classList.remove('active'))
   q(`#tab-${t}`).classList.add('active')
-  qq('.nav-tab').find(el=>el.textContent.toLowerCase().includes(t.slice(0,4)))?.classList.add('active')
+  // highlight the nav button whose onclick contains the tab name
+  qq('.nav-tab').find(el=>el.getAttribute('onclick')?.includes("'" + t + "'"))?.classList.add('active')
   renderCurrent()
 }
 function renderCurrent() {
@@ -894,10 +902,40 @@ function renderCurrent() {
   else if(S.currentTab==='master') renderMaster()
   else if(S.currentTab==='data') renderData()
   else if(S.currentTab==='reports') renderReport()
+  else if(S.currentTab==='mpcp') renderMPCP()
   else if(S.currentTab==='org') renderOrgTab()
   else if(S.currentTab==='locations') renderLocations()
 }
 function switchMaster(s) { S.masterSub=s; qq('#master-tabs .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderMaster() }
+
+function switchMPCP(s) {
+  S.mpcpSub = s;
+  qq('#mpcp-tabs .sub-tab').forEach(t => t.classList.remove('active'));
+  const idx = ['mps','cps','links','cascade','assign'].indexOf(s);
+  const btns = qq('#mpcp-tabs .sub-tab');
+  if(idx >= 0 && btns[idx]) btns[idx].classList.add('active');
+  renderMPCP();
+}
+
+function renderMPCP() {
+  const s = S.mpcpSub || 'mps';
+  const c = q('#mpcp-content');
+  if(!c) return;
+  // Each branch calls the existing render function but targets #mpcp-content
+  // by temporarily aliasing the content div id
+  function withContent(realId, fn) {
+    const real = q('#' + realId);
+    if(!real) { fn(); return; }
+    real.id = '__hidden_' + realId;
+    c.id = realId;
+    try { fn(); } finally { c.id = 'mpcp-content'; real.id = realId; }
+  }
+  if      (s === 'mps')     withContent('master-content', renderMPs)
+  else if (s === 'cps')     withContent('master-content', renderCPs)
+  else if (s === 'links')   withContent('master-content', renderLinks)
+  else if (s === 'cascade') withContent('master-content', () => { q('#master-content').innerHTML=''; renderCascadeBuilder(); })
+  else if (s === 'assign')  withContent('org-content',    renderAssignPanel)
+}
 
 function switchData(s) { S.dataSub=s; qq('#tab-data .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderData() }
 function addReportExportBar(fy){
@@ -1300,17 +1338,19 @@ function openProfile(id, e) {
 
 // ── MASTER SETUP ─────────────────────────────────────────────────────────────
 function renderMaster() {
-  if(S.masterSub==='mps') renderMPs()
-  else if(S.masterSub==='cps') renderCPs()
-  else if(S.masterSub==='roles') renderRoles()
+  // MP/CP/Cascade/Links live in MPCP Management tab now
+  if(['mps','cps','cascade','links'].includes(S.masterSub)) {
+    S.mpcpSub = S.masterSub; S.masterSub = 'roles';
+    switchTab('mpcp'); return;
+  }
+  if(S.masterSub==='roles') renderRoles()
   else if(S.masterSub==='locations') renderLocations()
   else if(S.masterSub==='levels') renderLevels()
   else if(S.masterSub==='users') renderUsers()
   else if(S.masterSub==='departments') renderDepartments()
-  else if(S.masterSub==='cascade') { q('#master-content').innerHTML=''; renderCascadeBuilder() }
   else if(S.masterSub==='sectors') renderSectors()
   else if(S.masterSub==='dashboard_builder') renderDashboardBuilder()
-  else renderLinks()
+  else renderRoles()
 }
 
 function renderMPs() {
@@ -4076,6 +4116,7 @@ function getBsVal(id){
 // â”€â”€ ORG & CASCADE TAB â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 let orgSub='tree', orgTreeData=null
 function switchOrg(s){
+  if(s==='assign'){ switchTab('mpcp'); switchMPCP('assign'); return; }
   orgSub=s
   qq('#org-tabs .sub-tab').forEach(t=>t.classList.remove('active'))
   event.target.classList.add('active')

@@ -95,6 +95,43 @@ def verify_password(pw, stored):
     except: return False
 
 # ── MASTER DB INIT ─────────────────────────────────────────────────────────
+def seed_masters(db):
+    import random as _r, string as _s
+    def _uid(): return ''.join(_r.choices(_s.ascii_lowercase+_s.digits, k=8))
+    defaults = [
+        ('frequency','Daily','Daily',1),
+        ('frequency','Weekly','Weekly',2),
+        ('frequency','Fortnightly','Fortnightly',3),
+        ('frequency','Monthly','Monthly',4),
+        ('frequency','Quarterly','Quarterly',5),
+        ('unit','%','Percentage',1),
+        ('unit','Days','Days',2),
+        ('unit','Hours','Hours',3),
+        ('unit','Nos','Numbers',4),
+        ('unit','Amt','Amount',5),
+        ('unit','Units','Units',6),
+        ('unit','Visits','Visits',7),
+        ('emp_level','1','Head of Department',1),
+        ('emp_level','2','Team Lead / Manager',2),
+        ('emp_level','3','Operations Staff',3),
+        ('cp_source','','General',1),
+        ('cp_source','System','System',2),
+        ('cp_source','Manual','Manual',3),
+        ('cp_source','Check/System','Check/System',4),
+        ('location_type','Branch','Branch',1),
+        ('location_type','Office','Office',2),
+        ('location_type','Warehouse','Warehouse',3),
+        ('location_type','Workshop','Workshop',4),
+    ]
+    existing = db.execute("SELECT COUNT(*) FROM masters").fetchone()[0]
+    if existing > 0: return
+    for cat,val,lbl,srt in defaults:
+        try:
+            db.execute("INSERT OR IGNORE INTO masters(id,category,value,label,sort_order) VALUES(?,?,?,?,?)",
+                      (_uid(),cat,val,lbl,srt))
+        except: pass
+    db.commit()
+
 def init_master_db():
     db = get_master_conn()
     db.executescript("""
@@ -115,6 +152,15 @@ CREATE TABLE IF NOT EXISTS users(
   emp_code TEXT DEFAULT '',
   active INTEGER DEFAULT 1,
   created_at TEXT DEFAULT '');
+CREATE TABLE IF NOT EXISTS masters(
+  id TEXT PRIMARY KEY,
+  category TEXT NOT NULL,
+  value TEXT NOT NULL,
+  label TEXT DEFAULT '',
+  sort_order INTEGER DEFAULT 0,
+  active INTEGER DEFAULT 1,
+  UNIQUE(category, value)
+);
 CREATE TABLE IF NOT EXISTS audit_log(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts TEXT NOT NULL,
@@ -2489,7 +2535,8 @@ td{{padding:6px 10px;border-bottom:1px solid #e8eaf0;font-size:11px;vertical-ali
 </style></head><body>
 <div class="no-print"><button onclick="window.print()" style="padding:6px 16px;background:#1d4ed8;color:#fff;border:none;border-radius:6px;cursor:pointer;margin-right:8px">🖨 Print / Save PDF</button><button onclick="window.close()" style="padding:6px 16px;background:#f1f5f9;color:#0f1a2e;border:1px solid #e2e8f0;border-radius:6px;cursor:pointer">Close</button></div>
 <h1>{title}</h1><div class="sub">{subtitle}</div>
-{body}</body></html>"""
+{body}
+</body></html>"""
 
 # ── ORG TREE HTML/PDF ──────────────────────────────────────────────────────
 @app.route('/api/export/org_tree_html')
@@ -2896,6 +2943,22 @@ input:focus{border-color:#ED1C24;box-shadow:0 0 0 3px rgba(215,25,32,.08)}
   </div>
   <div class="foot">&copy; Govinda Upadhyay &mdash; MPCP Management V 3.0</div>
 </div>
+<!-- Masters Modal -->
+<div class="modal-overlay" id="master-modal">
+  <div class="modal">
+    <div class="modal-head"><h3 id="master-modal-title">Add Item</h3><button onclick="closeMasterModal()" style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer">&times;</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="master-id">
+      <div class="mfg"><label>Value *</label><input type="text" id="master-value" placeholder="e.g. Weekly"></div>
+      <div class="mfg"><label>Display Label</label><input type="text" id="master-label" placeholder="e.g. Every Week"></div>
+      <div class="mfg"><label>Sort Order</label><input type="number" id="master-sort" value="0" min="0"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeMasterModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMaster()">Save</button>
+    </div>
+  </div>
+</div>
 </body></html>"""
 @app.route('/login', methods=['GET','POST'])
 def login():
@@ -3141,6 +3204,66 @@ def master_summary():
     return jsonify(summary)
 
 
+# ── MASTERS DEFAULT SEED ───────────────────────────────────────────────────
+
+# ── MASTERS API ─────────────────────────────────────────────────────────────
+@app.route('/api/masters', methods=['GET'])
+def masters_api_get():
+    db = get_master_conn()
+    rows = R(db.execute("SELECT * FROM masters WHERE active=1 ORDER BY category,sort_order,value").fetchall())
+    db.close()
+    return jsonify(rows)
+
+@app.route('/api/masters/<category>', methods=['GET'])
+def masters_by_category(category):
+    if not current_user(): return jsonify({'error':'Not authenticated'}), 401
+    db = get_master_conn()
+    rows = R(db.execute("SELECT * FROM masters WHERE category=? AND active=1 ORDER BY sort_order,value",(category,)).fetchall())
+    db.close()
+    return jsonify(rows)
+
+@app.route('/api/masters', methods=['POST'])
+def masters_api_create():
+    err = require_role('master_admin')
+    if err: return err
+    d = request.json or {}
+    if not d.get('category') or not d.get('value'):
+        return json_error('category and value required')
+    db = get_master_conn()
+    mid = uid()
+    try:
+        db.execute("INSERT INTO masters(id,category,value,label,sort_order) VALUES(?,?,?,?,?)",
+                  (mid,d['category'],d['value'],d.get('label',d['value']),d.get('sort_order',0)))
+        db.commit()
+    except Exception as e:
+        db.close()
+        return json_error('Value already exists in this category')
+    db.close()
+    log_audit('MASTER_CREATE','masters',mid,f"{d['category']}: {d['value']}")
+    return jsonify({'ok':True,'id':mid})
+
+@app.route('/api/masters/<mid>', methods=['PUT'])
+def masters_api_update(mid):
+    err = require_role('master_admin')
+    if err: return err
+    d = request.json or {}
+    db = get_master_conn()
+    db.execute("UPDATE masters SET value=?,label=?,sort_order=? WHERE id=?",
+              (d.get('value'),d.get('label',''),d.get('sort_order',0),mid))
+    db.commit(); db.close()
+    log_audit('MASTER_UPDATE','masters',mid,f"Updated: {d.get('value')}")
+    return jsonify({'ok':True})
+
+@app.route('/api/masters/<mid>', methods=['DELETE'])
+def masters_api_delete(mid):
+    err = require_role('master_admin')
+    if err: return err
+    db = get_master_conn()
+    db.execute("DELETE FROM masters WHERE id=?", (mid,))
+    db.commit(); db.close()
+    log_audit('MASTER_DELETE','masters',mid,'Deleted master item')
+    return jsonify({'ok':True})
+
 # ── ADMIN PANEL ────────────────────────────────────────────────────────────
 ADMIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -3222,6 +3345,7 @@ tbody tr:nth-child(even){background:#FAFAFA}
   <div class="tab-bar">
     <button class="tab-btn active" onclick="switchAdminTab('users',this)">&#128100; Users</button>
     <button class="tab-btn" onclick="switchAdminTab('audit',this)">&#128203; Audit Log</button>
+    <button class="tab-btn" onclick="switchAdminTab('masters',this)">&#9881; Masters</button>
   </div>
   <div id="admin-tab-users" class="tab-panel active">
   <div class="card">
@@ -3376,6 +3500,21 @@ document.getElementById('edit-modal').addEventListener('click',function(e){if(e.
 </script>
   </div><!-- end admin-tab-users -->
 
+  <div id="admin-tab-masters" class="tab-panel">
+    <div class="card">
+      <div class="card-head"><h2>&#9881; Masters Management</h2><span style="font-size:11px;color:#777">Manage dropdown values used across the system</span></div>
+      <div style="padding:16px 20px">
+        <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+          <button class="btn btn-primary" onclick="loadMasters('frequency')">Frequencies</button>
+          <button class="btn btn-ghost" onclick="loadMasters('unit')">Units</button>
+          <button class="btn btn-ghost" onclick="loadMasters('emp_level')">Employee Levels</button>
+          <button class="btn btn-ghost" onclick="loadMasters('cp_source')">CP Sources</button>
+          <button class="btn btn-ghost" onclick="loadMasters('location_type')">Location Types</button>
+        </div>
+        <div id="masters-content"><p style="color:#999;font-size:12px">Select a category above to manage its values.</p></div>
+      </div>
+    </div>
+  </div>
   <div id="admin-tab-audit" class="tab-panel">
     <div class="card">
       <div class="card-head">

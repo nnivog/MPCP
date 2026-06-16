@@ -921,20 +921,20 @@ function renderMPCP() {
   const s = S.mpcpSub || 'mps';
   const c = q('#mpcp-content');
   if(!c) return;
-  // Each branch calls the existing render function but targets #mpcp-content
-  // by temporarily aliasing the content div id
-  function withContent(realId, fn) {
-    const real = q('#' + realId);
-    if(!real) { fn(); return; }
-    real.id = '__hidden_' + realId;
-    c.id = realId;
-    try { fn(); } finally { c.id = 'mpcp-content'; real.id = realId; }
+  // Call the existing render fn (it writes to #master-content or #org-content),
+  // then immediately move that content into #mpcp-content.
+  function callThenMove(srcId, fn) {
+    const src = q('#' + srcId);
+    if(!src) return;
+    fn();
+    c.innerHTML = src.innerHTML;
+    src.innerHTML = '<div class="spinner"></div>';
   }
-  if      (s === 'mps')     withContent('master-content', renderMPs)
-  else if (s === 'cps')     withContent('master-content', renderCPs)
-  else if (s === 'links')   withContent('master-content', renderLinks)
-  else if (s === 'cascade') withContent('master-content', () => { q('#master-content').innerHTML=''; renderCascadeBuilder(); })
-  else if (s === 'assign')  withContent('org-content',    renderAssignPanel)
+  if      (s === 'mps')     callThenMove('master-content', renderMPs)
+  else if (s === 'cps')     callThenMove('master-content', renderCPs)
+  else if (s === 'links')   callThenMove('master-content', renderLinks)
+  else if (s === 'cascade') callThenMove('master-content', renderCascadeBuilder)
+  else if (s === 'assign')  callThenMove('org-content',    renderAssignPanel)
 }
 
 function switchData(s) { S.dataSub=s; qq('#tab-data .sub-tab').forEach(t=>t.classList.remove('active')); event.target.classList.add('active'); renderData() }
@@ -4493,7 +4493,7 @@ function renderCascadeBuilder(){
     })
     html+='</div>'
   }
-  var target=S.masterSub==='cascade'?q('#master-content'):q('#org-content');
+  var target=S.mpcpSub==='cascade'?q('#master-content'):(S.masterSub==='cascade'?q('#master-content'):q('#org-content'));
   if(target)target.innerHTML=html
 }
 

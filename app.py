@@ -2943,22 +2943,6 @@ input:focus{border-color:#ED1C24;box-shadow:0 0 0 3px rgba(215,25,32,.08)}
   </div>
   <div class="foot">&copy; Govinda Upadhyay &mdash; MPCP Management V 3.0</div>
 </div>
-<!-- Masters Modal -->
-<div class="modal-overlay" id="master-modal">
-  <div class="modal">
-    <div class="modal-head"><h3 id="master-modal-title">Add Item</h3><button onclick="closeMasterModal()" style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer">&times;</button></div>
-    <div class="modal-body">
-      <input type="hidden" id="master-id">
-      <div class="mfg"><label>Value *</label><input type="text" id="master-value" placeholder="e.g. Weekly"></div>
-      <div class="mfg"><label>Display Label</label><input type="text" id="master-label" placeholder="e.g. Every Week"></div>
-      <div class="mfg"><label>Sort Order</label><input type="number" id="master-sort" value="0" min="0"></div>
-    </div>
-    <div class="modal-foot">
-      <button class="btn btn-ghost" onclick="closeMasterModal()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveMaster()">Save</button>
-    </div>
-  </div>
-</div>
 </body></html>"""
 @app.route('/login', methods=['GET','POST'])
 def login():
@@ -3532,6 +3516,94 @@ document.getElementById('edit-modal').addEventListener('click',function(e){if(e.
   </div>
 
 <script>
+// ── MASTERS MANAGEMENT JS ──────────────────────────────────────────────────
+let _mastersCat = 'frequency';
+function loadMasters(cat) {
+  _mastersCat = cat;
+  document.querySelectorAll('#admin-tab-masters .btn').forEach(function(b){
+    const t = b.textContent.toUpperCase();
+    let match = false;
+    if(cat==='frequency' && t.includes('FREQ')) match=true;
+    if(cat==='unit' && t.includes('UNIT')) match=true;
+    if(cat==='emp_level' && t.includes('LEVEL')) match=true;
+    if(cat==='cp_source' && t.includes('CP SOURCE')) match=true;
+    if(cat==='location_type' && t.includes('LOCATION')) match=true;
+    b.className = match ? 'btn btn-primary' : 'btn btn-ghost';
+  });
+  fetch('/api/masters/'+cat,{credentials:'include'}).then(function(r){return r.json()}).then(function(rows){
+    const catLabels = {frequency:'Frequencies',unit:'Units',emp_level:'Employee Levels',cp_source:'CP Sources',location_type:'Location Types'};
+    let html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+    html += '<h3 style="font-family:Montserrat,sans-serif;font-size:12px;font-weight:700;text-transform:uppercase;color:#444">'+catLabels[cat]+'</h3>';
+    html += '<button class="btn btn-primary" style="padding:6px 14px" onclick="openAddMaster()">+ Add New</button></div>';
+    if(!rows.length){ html += '<p style="color:#999;font-size:12px;padding:20px 0">No items yet. Add one above.</p>'; }
+    else {
+      html += '<table><thead><tr><th>Value</th><th>Label</th><th>Sort Order</th><th>Actions</th></tr></thead><tbody>';
+      rows.forEach(function(r){
+        html += '<tr>';
+        html += '<td><strong style="font-family:monospace">'+escH(r.value)+'</strong></td>';
+        html += '<td>'+escH(r.label||r.value)+'</td>';
+        html += '<td>'+r.sort_order+'</td>';
+        html += '<td style="display:flex;gap:6px">';
+        html += '<button class="btn btn-ghost" style="padding:3px 10px;font-size:10px" data-mid="'+escH(r.id)+'" data-mval="'+escH(r.value)+'" data-mlbl="'+escH(r.label||r.value)+'" data-msort="'+r.sort_order+'" onclick="openEditMasterFromBtn(this)">&#9998; Edit</button>';
+        html += '<button class="btn btn-danger" style="padding:3px 10px;font-size:10px" data-mid="'+escH(r.id)+'" data-mval="'+escH(r.value)+'" onclick="deleteMasterFromBtn(this)">&#128465; Delete</button>';
+        html += '</td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+    document.getElementById('masters-content').innerHTML = html;
+  }).catch(function(e){
+    document.getElementById('masters-content').innerHTML = '<p style="color:#ED1C24;font-size:12px">Error loading: '+e.message+'</p>';
+  });
+}
+function escH(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function openAddMaster(){
+  document.getElementById('master-modal-title').textContent = 'Add New Item';
+  document.getElementById('master-id').value = '';
+  document.getElementById('master-value').value = '';
+  document.getElementById('master-label').value = '';
+  document.getElementById('master-sort').value = '0';
+  document.getElementById('master-modal').classList.add('open');
+  document.getElementById('master-value').focus();
+}
+function openEditMasterFromBtn(btn){
+  openEditMaster({id:btn.dataset.mid, value:btn.dataset.mval, label:btn.dataset.mlbl, sort_order:btn.dataset.msort});
+}
+function deleteMasterFromBtn(btn){
+  deleteMaster(btn.dataset.mid, btn.dataset.mval);
+}
+function openEditMaster(r){
+  document.getElementById('master-modal-title').textContent = 'Edit Item';
+  document.getElementById('master-id').value = r.id;
+  document.getElementById('master-value').value = r.value;
+  document.getElementById('master-label').value = r.label||r.value;
+  document.getElementById('master-sort').value = r.sort_order||0;
+  document.getElementById('master-modal').classList.add('open');
+}
+function closeMasterModal(){ document.getElementById('master-modal').classList.remove('open'); }
+function saveMaster(){
+  const mid = document.getElementById('master-id').value;
+  const val = document.getElementById('master-value').value.trim();
+  const lbl = document.getElementById('master-label').value.trim();
+  const srt = parseInt(document.getElementById('master-sort').value)||0;
+  if(!val){ alert('Value is required'); return; }
+  const isEdit = !!mid;
+  const url = isEdit ? '/api/masters/'+mid : '/api/masters';
+  const method = isEdit ? 'PUT' : 'POST';
+  const body = isEdit ? {value:val,label:lbl,sort_order:srt} : {category:_mastersCat,value:val,label:lbl,sort_order:srt};
+  fetch(url,{method:method,credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.json()}).then(function(d){
+      if(d.ok||d.id){ closeMasterModal(); loadMasters(_mastersCat); }
+      else alert(d.error||'Error saving');
+    });
+}
+function deleteMaster(id, val){
+  if(!confirm('Delete "'+val+'"? This cannot be undone.')) return;
+  fetch('/api/masters/'+id,{method:'DELETE',credentials:'include'}).then(function(r){return r.json()}).then(function(d){
+    if(d.ok) loadMasters(_mastersCat);
+    else alert(d.error||'Error deleting');
+  });
+}
+
 function switchAdminTab(name,btn){
   document.querySelectorAll(".tab-panel").forEach(function(p){p.classList.remove("active");});
   document.querySelectorAll(".tab-btn").forEach(function(b){b.classList.remove("active");});
@@ -3601,6 +3673,22 @@ function loadAudit(){
   }).catch(function(e){tb.innerHTML="<tr><td colspan=4 style='color:#ED1C24;padding:12px'>Error loading audit log: "+e.message+"</td></tr>";});
 }
 </script>
+<!-- Masters Modal -->
+<div class="modal-overlay" id="master-modal">
+  <div class="modal">
+    <div class="modal-head"><h3 id="master-modal-title">Add Item</h3><button onclick="closeMasterModal()" style="background:none;border:none;color:#fff;font-size:18px;cursor:pointer">&times;</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="master-id">
+      <div class="mfg"><label>Value *</label><input type="text" id="master-value" placeholder="e.g. Weekly"></div>
+      <div class="mfg"><label>Display Label</label><input type="text" id="master-label" placeholder="e.g. Every Week"></div>
+      <div class="mfg"><label>Sort Order</label><input type="number" id="master-sort" value="0" min="0"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" onclick="closeMasterModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMaster()">Save</button>
+    </div>
+  </div>
+</div>
 </body></html>"""
 
 def admin_users_data(db, current_role, current_dept):

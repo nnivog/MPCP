@@ -625,6 +625,12 @@ tbody tr:hover .row-actions{opacity:1}
 /* Tom Select theme overrides to match MPCP dark UI */
 .ts-wrapper{padding:0}
 .ts-wrapper.form-select{padding:0}
+.ts-control{background:var(--bg-3)!important;color:var(--text)!important;border:1px solid var(--border)!important}
+.ts-control input{color:var(--text)!important}
+.ts-control .item{color:var(--text)!important}
+.ts-control::placeholder{color:var(--muted)!important}
+.ts-wrapper.single .ts-control{background:var(--bg-3)!important;color:var(--text)!important}
+.ts-wrapper.focus .ts-control{background:var(--surface-2)!important;border-color:var(--blue)!important}
 .ts-control{background:#0f1a2e;border:1px solid #1e3a5f;color:#e2e8f0;border-radius:6px;font-size:12px;min-height:32px;padding:4px 8px;box-shadow:none}
 .ts-control input{color:#e2e8f0;background:transparent;font-size:12px}
 .ts-control input::placeholder{color:#64748b}
@@ -785,6 +791,15 @@ async function safeGet(url, fallback=[]) {
   catch(e) { return fallback }
 }
 
+function levelLabel(lvl){
+  const m = (S.empLevels||[]).find(function(x){return String(x.value)===String(lvl)})
+  return m ? m.label : 'Level '+lvl
+}
+function levelOptionsHtml(selected){
+  return (S.empLevels||[]).map(function(x){
+    return '<option value="'+x.value+'"'+(String(selected)===String(x.value)?' selected':'')+'>'+x.value+' — '+esc(x.label)+'</option>'
+  }).join('')
+}
 async function loadAll() {
   try {
     const _meRes = await fetch('/api/auth/me')
@@ -807,17 +822,19 @@ async function loadAll() {
       }
     }
   } catch(e) { console.warn('Auth check skipped:', e) }
-  const [e,m,c,r,p,ca,locs,casc,bst,layouts,sects] = await Promise.all([
+  const [e,m,c,r,p,ca,locs,casc,bst,layouts,sects,emplevels] = await Promise.all([
     safeGet('/api/employees',[]), safeGet('/api/mps',[]), safeGet('/api/cps',[]),
     safeGet('/api/roles',[]), safeGet('/api/perf',[]), safeGet('/api/cache',[]),
     safeGet('/api/locations',[]),
     safeGet('/api/cascade',[]),
     safeGet('/api/bs_today',{}),
     safeGet('/api/dashboard_layouts?user=default',[]),
-    safeGet('/api/sectors',[])
+    safeGet('/api/sectors',[]),
+    safeGet('/api/masters/emp_level',[])
   ])
   S.employees=e||[]; S.mps=m||[]; S.cps=c||[]; S.roles=r||[]; S.perf=p||[]; S.cache=ca||[];
   S.locations=locs||[]; S.cascade=casc||[]; S.bsToday=bst||{}; S.dashLayouts=layouts||[]; S.sectors=sects||[]
+  S.empLevels=(emplevels&&emplevels.length)?emplevels:[{value:'1',label:'Head of Department'},{value:'2',label:'Team Lead / Manager'},{value:'3',label:'Operations Staff'}]
   S.photos = await safeGet('/api/employees/photos', {})
   // Set currentFY from most recent active cache
   const latest = (ca||[]).sort((a,b)=>b.fy.localeCompare(a.fy))[0]
@@ -1195,7 +1212,7 @@ function renderTeam() {
   for (let lvl=1;lvl<=3;lvl++) {
     const emps = S.employees.filter(e=>e.level===lvl)
     if (!emps.length) continue
-    const label = ['','Level 1 — Head of Department','Level 2 — Team Leads & Supervisors','Level 3 — Operations & Execution'][lvl]
+    const label = 'Level '+lvl+' — '+levelLabel(lvl)
     html += `<p class="text-xxs text-muted font-bold" style="text-transform:uppercase;letter-spacing:.8px;margin-bottom:10px;${lvl>1?'margin-top:18px;':''}padding-bottom:6px;border-bottom:1px solid var(--border)">${label}</p>`
     html += '<div class="grid-auto">'
     emps.forEach(emp=>{
@@ -1285,11 +1302,7 @@ function openEmpForm(id) {
         <input class="form-input" id="ef-code" value="${esc(emp?.emp_code||'')}" placeholder="Auto-generated">
       </div>
       <div class="form-group"><label class="form-label">Level</label>
-        <select class="form-select" id="ef-level">
-          <option value="1" ${emp?.level===1?'selected':''}>1 — Head of Department</option>
-          <option value="2" ${emp?.level===2?'selected':''}>2 — Team Lead</option>
-          <option value="3" ${!emp||emp.level===3?'selected':''}>3 — Operations</option>
-        </select>
+        <select class="form-select" id="ef-level">${levelOptionsHtml(emp?.level||3)}</select>
       </div>
     </div>
     <div class="form-group"><label class="form-label">Full Name *</label>
@@ -3690,7 +3703,7 @@ async function resetUserPw(uid2,username){
 }
 
 function renderLevels(){
-  const defs=[{l:1,label:'Head of Department',col:'#0f2540'},{l:2,label:'Team Lead / Manager',col:'#ED1C24'},{l:3,label:'Operations Staff',col:'#047857'}]
+  const _lvlCols=['#0f2540','#ED1C24','#047857']; const defs=(S.empLevels||[]).map(function(x,i){return{l:parseInt(x.value),label:x.label,col:_lvlCols[i%3]}})
   let html='<div class="card"><div class="card-head"><p>Employee Levels</p></div><div class="card-body">'
   html+='<p style="font-size:12px;color:var(--muted);margin-bottom:16px">Levels control hierarchy, rollup scores and org tree depth. Assign via Employee edit form.</p>'
   html+='<div class="grid-3">'
@@ -4506,10 +4519,7 @@ function openAddEmpToOrg(){
     '<div class="form-grid-2">'
     +'<div class="form-group"><label class="form-label">Code (optional)</label><input class="form-input" id="ae-code" placeholder="Auto"></div>'
     +'<div class="form-group"><label class="form-label">Level</label>'
-    +'<select class="form-select" id="ae-level">'
-    +'<option value="1">1 - Dept Head</option><option value="2">2 - Team Lead</option>'
-    +'<option value="3" selected>3 - Senior Exec</option><option value="4">4 - Executive</option>'
-    +'<option value="5">5 - Assistant</option></select></div></div>'
+    +'<select class="form-select" id="ae-level">'+levelOptionsHtml('3')+'</select></div></div>'
     +'<div class="form-group"><label class="form-label">Full Name</label><input class="form-input" id="ae-name"></div>'
     +'<div class="form-group"><label class="form-label">Designation</label><input class="form-input" id="ae-role"></div>'
     +'<div class="form-grid-2">'

@@ -389,13 +389,6 @@ def init_db():
         _migrate("cps", [
             ("source", "ALTER TABLE cps ADD COLUMN source TEXT DEFAULT ''"),
             ("mp_id",  "ALTER TABLE cps ADD COLUMN mp_id TEXT DEFAULT ''"),
-            ("status", "ALTER TABLE cps ADD COLUMN status TEXT DEFAULT 'active'"),
-        ])
-        _migrate("mps", [
-            ("status", "ALTER TABLE mps ADD COLUMN status TEXT DEFAULT 'active'"),
-        ])
-        _migrate("roles", [
-            ("status", "ALTER TABLE roles ADD COLUMN status TEXT DEFAULT 'active'"),
         ])
 
         # cascade_links: old DB may use parent_/child_ naming instead of superior_/subordinate_
@@ -855,7 +848,7 @@ def mps_api():
     if missing: return json_error(f"Missing: {', '.join(missing)}")
     mid = d.get('id') or uid()
     log_audit("MP_SAVE","mp",mid,"Saved MP "+str(mid))
-    db.execute("INSERT OR REPLACE INTO mps(id,ref,title,target,freq,kpi_c,kpi_nc,kpi_total) VALUES(?,?,?,?,?,?,?,?)",
+    db.execute("INSERT OR REPLACE INTO mps VALUES(?,?,?,?,?,?,?,?)",
                (mid,d['ref'],d['title'],d.get('target',''),d.get('freq','Monthly'),d.get('kpi_c',0),d.get('kpi_nc',0),d.get('kpi_total',0)))
     db.execute("DELETE FROM mp_owners WHERE mp_id=?", (mid,))
     for eid in d.get('owner_ids',[]): db.execute("INSERT OR IGNORE INTO mp_owners VALUES(?,?)", (mid, eid))
@@ -914,7 +907,7 @@ def import_mps_excel():
             nv=int(row[cnc] or 0) if cnc is not None else 0
             ex = db.execute("SELECT id FROM mps WHERE ref=?", (ref,)).fetchone()
             mid = ex['id'] if ex else uid()
-            db.execute("INSERT OR REPLACE INTO mps(id,ref,title,target,freq,kpi_c,kpi_nc,kpi_total) VALUES(?,?,?,?,?,?,?,?)", (mid,ref,title,tgt,freq,cv,nv,tot))
+            db.execute("INSERT OR REPLACE INTO mps VALUES(?,?,?,?,?,?,?,?)", (mid,ref,title,tgt,freq,cv,nv,tot))
             if co is not None and row[co]:
                 codes = [x.strip() for x in str(row[co]).split(',') if x.strip()]
                 db.execute("DELETE FROM mp_owners WHERE mp_id=?", (mid,))
@@ -952,7 +945,7 @@ def cps_api():
     if missing: return json_error(f"Missing: {', '.join(missing)}")
     cid = d.get('id') or uid()
     log_audit("CP_SAVE","cp",cid,"Saved CP "+str(cid))
-    db.execute("INSERT OR REPLACE INTO cps(id,ref,title,target,freq,source,mp_id) VALUES(?,?,?,?,?,?,?)",
+    db.execute("INSERT OR REPLACE INTO cps VALUES(?,?,?,?,?,?,?)",
                (cid,d['ref'],d['title'],d.get('target',''),d.get('freq','Daily'),d.get('source',''),d.get('mp_id','')))
     db.execute("DELETE FROM cp_owners WHERE cp_id=?", (cid,))
     for eid in d.get('owner_ids',[]): db.execute("INSERT OR IGNORE INTO cp_owners VALUES(?,?)", (cid, eid))
@@ -1002,7 +995,7 @@ def import_cps_excel():
             mp_id=mp_map.get(mpref,'')
             ex = db.execute("SELECT id FROM cps WHERE ref=?", (ref,)).fetchone()
             cid = ex['id'] if ex else uid()
-            db.execute("INSERT OR REPLACE INTO cps(id,ref,title,target,freq,source,mp_id) VALUES(?,?,?,?,?,?,?)", (cid,ref,title,tgt,freq,src,mp_id))
+            db.execute("INSERT OR REPLACE INTO cps VALUES(?,?,?,?,?,?,?)", (cid,ref,title,tgt,freq,src,mp_id))
             if co is not None and row[co]:
                 codes = [x.strip() for x in str(row[co]).split(',') if x.strip()]
                 db.execute("DELETE FROM cp_owners WHERE cp_id=?", (cid,))
@@ -1040,7 +1033,7 @@ def roles_api():
     missing = validate_required(d, 'code', 'name')
     if missing: return json_error(f"Missing: {', '.join(missing)}")
     rid = d.get('id') or uid()
-    db.execute("INSERT OR REPLACE INTO roles(id,code,name,description,color) VALUES(?,?,?,?,?)",
+    db.execute("INSERT OR REPLACE INTO roles VALUES(?,?,?,?,?)",
                (rid,d['code'],d['name'],d.get('description',''),d.get('color','#1d4ed8')))
     db.execute("DELETE FROM role_mps WHERE role_id=?", (rid,))
     db.execute("DELETE FROM role_cps WHERE role_id=?", (rid,))
@@ -1112,7 +1105,7 @@ def cascade_links_api():
                 sub_mp_id = ex_mp['id']
             else:
                 sub_mp_id = uid()
-                db.execute('INSERT INTO mps(id,ref,title,target,freq,kpi_c,kpi_nc,kpi_total) VALUES(?,?,?,?,?,?,?,?)',
+                db.execute('INSERT INTO mps VALUES(?,?,?,?,?,?,?,?)',
                            (sub_mp_id,new_ref,new_title,(cp['target'] or ''),(cp['freq'] or 'Monthly'),0,0,0))
                 db.execute('INSERT OR IGNORE INTO mp_owners VALUES(?,?)',
                            (sub_mp_id, d['subordinate_emp_id']))
@@ -1402,123 +1395,13 @@ def perf_exceptions():
     return jsonify({'total_nc': len(rows), 'exceptions': rows[:50],
                     'repeat_failures': {k:v for k,v in repeat.items() if v>1}})
 
-# ── MPCP CREATOR (outline-builder publish) ──────────────────────────────────
-def _ensure_mpcp_status_columns(db):
-    """
-    init_db()/_migrate() exist elsewhere in this file but are never actually
-    invoked (no call site found — confirmed by audit). CREATE TABLE IF NOT
-    EXISTS in SCHEMA only affects brand-new DB files, so existing master.db
-    and per-department .db files never get new columns automatically.
-    This runs the same additive ALTER TABLE pattern directly against
-    whichever DB this request's get_db() resolves to, so it self-heals
-    both master and department databases the first time Publish touches them.
-    """
-    for table in ('mps', 'cps', 'roles'):
-        cols = {row[1] for row in db.execute(f"PRAGMA table_info({table})").fetchall()}
-        if 'status' not in cols:
-            db.execute(f"ALTER TABLE {table} ADD COLUMN status TEXT DEFAULT 'active'")
-    db.commit()
-
-@app.route('/api/mpcp/publish', methods=['POST'])
-def mpcp_publish():
-    """
-    Accepts a flattened outline (roles -> mps -> cps) built in the MPCP Creator
-    canvas and writes it into the SAME mps/cps/roles/cascade_links tables used
-    everywhere else in the app. Reuses the existing ref-keyed upsert pattern
-    (INSERT OR REPLACE keyed by ref) already used by /api/mps/import_excel and
-    /api/cps/import_excel, so re-publishing the same outline is idempotent.
-    Nothing here is a new data model — it's the same rows, created a different way.
-    """
-    db = get_db()
-    _ensure_mpcp_status_columns(db)
-    d = request.json or {}
-    nodes = d.get('nodes', [])
-    if not nodes:
-        return json_error('No nodes to publish')
-
-    created = {'roles': 0, 'mps': 0, 'cps': 0, 'cascade_links': 0}
-    errors = []
-    mp_ref_to_id = {}
-
-    # Pass 1: roles + MPs (CPs may reference an MP created in this same batch)
-    for n in nodes:
-        try:
-            if n.get('kind') == 'role':
-                rid = n.get('id') or uid()
-                code = (n.get('ref') or n.get('text','ROLE'))[:40]
-                db.execute("INSERT OR REPLACE INTO roles VALUES(?,?,?,?,?,?)",
-                           (rid, code, n.get('text',''), n.get('description',''), n.get('color','#1d4ed8'),
-                            n.get('status','active')))
-                created['roles'] += 1
-            elif n.get('kind') == 'mp':
-                ref = n.get('ref','').strip()
-                if not ref: continue
-                ex = db.execute("SELECT id FROM mps WHERE ref=?", (ref,)).fetchone()
-                mid = ex['id'] if ex else uid()
-                db.execute("INSERT OR REPLACE INTO mps VALUES(?,?,?,?,?,?,?,?,?)",
-                           (mid, ref, n.get('text',''), n.get('target',''), n.get('freq','Monthly'),
-                            n.get('kpi_c',0), n.get('kpi_nc',0), n.get('kpi_total',0), n.get('status','active')))
-                mp_ref_to_id[ref] = mid
-                if n.get('role_id'):
-                    db.execute("INSERT OR IGNORE INTO role_mps VALUES(?,?)", (n['role_id'], mid))
-                created['mps'] += 1
-        except Exception as e:
-            errors.append(f"{n.get('kind')} '{n.get('text','')}': {e}")
-
-    # Pass 2: CPs (now mp_ref_to_id is fully populated for this batch)
-    code_map = {r['emp_code']: r['id'] for r in db.execute(
-        "SELECT id, emp_code FROM employees WHERE emp_code IS NOT NULL")}
-    for n in nodes:
-        if n.get('kind') != 'cp': continue
-        try:
-            ref = n.get('ref','').strip()
-            if not ref: continue
-            mp_ref = n.get('parent_mp_ref','')
-            mp_id = mp_ref_to_id.get(mp_ref) or (
-                db.execute("SELECT id FROM mps WHERE ref=?", (mp_ref,)).fetchone() or {}).get('id', '')
-            ex = db.execute("SELECT id FROM cps WHERE ref=?", (ref,)).fetchone()
-            cid = ex['id'] if ex else uid()
-            db.execute("INSERT OR REPLACE INTO cps VALUES(?,?,?,?,?,?,?,?)",
-                       (cid, ref, n.get('text',''), n.get('target',''), n.get('freq','Daily'),
-                        n.get('source',''), mp_id, n.get('status','active')))
-            db.execute("DELETE FROM cp_owners WHERE cp_id=?", (cid,))
-            owner_code = n.get('owner_code','')
-            owner_eid = code_map.get(owner_code)
-            if owner_eid:
-                db.execute("INSERT OR IGNORE INTO cp_owners VALUES(?,?)", (cid, owner_eid))
-            created['cps'] += 1
-        except Exception as e:
-            errors.append(f"cp '{n.get('text','')}': {e}")
-
-    db.commit()
-    log_audit("MPCP_PUBLISH", "mpcp", "batch",
-               f"Published {created['mps']} MP(s), {created['cps']} CP(s) via MPCP Creator")
-    return jsonify({'ok': True, 'created': created, 'errors': errors})
-
-@app.route('/api/mpcp/set_status', methods=['POST'])
-def mpcp_set_status():
-    """Close/reopen a Role, MP, or CP. Status only filters entry/dashboard views —
-    never touches perf or cascade_links rows, per the 'always editable' requirement."""
-    db = get_db()
-    _ensure_mpcp_status_columns(db)
-    d = request.json or {}
-    kind, rid, status = d.get('kind'), d.get('id'), d.get('status')
-    if kind not in ('role', 'mp', 'cp') or not rid or status not in ('active', 'closed'):
-        return json_error('kind must be role/mp/cp, status must be active/closed')
-    table = {'role': 'roles', 'mp': 'mps', 'cp': 'cps'}[kind]
-    db.execute(f"UPDATE {table} SET status=? WHERE id=?", (status, rid))
-    db.commit()
-    log_audit("MPCP_STATUS", kind, rid, f"Set status={status}")
-    return jsonify({'ok': True})
-
 # ── ORG TREE ──────────────────────────────────────────────────────────────
 @app.route('/api/perf/simple_template')
 def perf_simple_template():
     """Generate a rich Excel template pre-filled with real employees & CPs from DB."""
     db   = get_db()
-    _ensure_mpcp_status_columns(db)
     emps = db.execute("SELECT emp_code, name FROM employees ORDER BY emp_code").fetchall()
-    cps  = db.execute("SELECT ref, title, target FROM cps WHERE status='active' OR status IS NULL ORDER BY ref").fetchall()
+    cps  = db.execute("SELECT ref, title, target FROM cps ORDER BY ref").fetchall()
 
     if not HAS_OPENPYXL:
         # Fallback to CSV if openpyxl not installed
@@ -1897,7 +1780,7 @@ def cascade_api():
                 sub_mp = ex_mp['id']
             else:
                 sub_mp = uid()
-                db.execute('INSERT INTO mps(id,ref,title,target,freq,kpi_c,kpi_nc,kpi_total) VALUES(?,?,?,?,?,?,?,?)',
+                db.execute('INSERT INTO mps VALUES(?,?,?,?,?,?,?,?)',
                            (sub_mp, new_ref, new_title, (cp['target'] or ''), (cp['freq'] or 'Monthly'), 0, 0, 0))
                 db.execute('INSERT OR IGNORE INTO mp_owners VALUES(?,?)', (sub_mp, sub_emp))
             auto_created = 1
@@ -2024,7 +1907,7 @@ def cascade_assign():
                 sub_mp = ex_mp['id']
             else:
                 sub_mp = uid()
-                db.execute('INSERT INTO mps(id,ref,title,target,freq,kpi_c,kpi_nc,kpi_total) VALUES(?,?,?,?,?,?,?,?)',
+                db.execute('INSERT INTO mps VALUES(?,?,?,?,?,?,?,?)',
                            (sub_mp, new_ref, new_title,
                             (cp['target'] or ''), (cp['freq'] or 'Monthly'), 0, 0, 0))
                 db.execute('INSERT OR IGNORE INTO mp_owners VALUES(?,?)', (sub_mp, sub_emp))
@@ -3151,8 +3034,6 @@ def get_master_conn():
 def _init_dept_db(path):
     conn = sqlite3.connect(path)
     conn.executescript(SCHEMA)
-    conn.row_factory = sqlite3.Row
-    _ensure_mpcp_status_columns(conn)
     conn.commit(); conn.close()
 
 

@@ -732,7 +732,6 @@ tbody tr:hover .row-actions{opacity:1}
       <button class="sub-tab" onclick="switchMPCP('links')">&#128203; Role Assignments</button>
       <button class="sub-tab" onclick="switchMPCP('cascade')">&#128279; Cascade Links</button>
       <button class="sub-tab" onclick="switchMPCP('assign')">&#128101; Assign MP/CP</button>
-      <button class="sub-tab" onclick="switchMPCP('creator')">&#10024; MPCP Creator</button>
     </div>
     <div id="mpcp-content"><div class="spinner"></div></div>
   </div>
@@ -945,7 +944,7 @@ function switchMaster(s) { S.masterSub=s; qq('#master-tabs .sub-tab').forEach(t=
 function switchMPCP(s) {
   S.mpcpSub = s;
   qq('#mpcp-tabs .sub-tab').forEach(t => t.classList.remove('active'));
-  const idx = ['mps','cps','links','cascade','assign','creator'].indexOf(s);
+  const idx = ['mps','cps','links','cascade','cascade_mps','assign'].indexOf(s);
   const btns = qq('#mpcp-tabs .sub-tab');
   if(idx >= 0 && btns[idx]) btns[idx].classList.add('active');
   renderMPCP();
@@ -1014,7 +1013,6 @@ function renderMPCP() {
   else if (s === 'cascade') renderCascadeBuilder()
   else if (s === 'cascade_mps') renderCascadeMPCP()
   else if (s === 'assign')  renderAssignPanel()
-  else if (s === 'creator') renderMpcpCreator()
 }
 
 function initSearchSelects() {
@@ -4775,135 +4773,6 @@ function renderAssignPanel(){
   html+='<div class="card-body"><p class="text-sm text-muted italic">Select an employee on the left.</p></div></div>'
   html+='</div>'
   const _ta=S.currentTab==='mpcp'?document.getElementById('mpcp-content'):document.getElementById('org-content'); if(_ta)_ta.innerHTML=html
-}
-
-// ── MPCP CREATOR ─────────────────────────────────────────────────────────
-// Outline-builder canvas: Role -> MP -> CP -> Owner. Draft state lives only in
-// S.creatorTree (client-side) until "Publish" calls /api/mpcp/publish, which
-// writes into the SAME mps/cps/roles tables the rest of the app already reads —
-// so published items appear in the MPs/CPs/Cascade tabs automatically, no sync step.
-function _newCreatorNode(kind){
-  return {id:'tmp-'+Math.random().toString(36).slice(2,10), kind:kind, text:'', target:'', freq:(kind==='cp'?'Daily':'Monthly'), ownerCode:'', status:'active', children:[]}
-}
-function _ensureCreatorTree(){
-  if(!S.creatorTree) S.creatorTree = [Object.assign(_newCreatorNode('role'), {text:'New Role'})]
-}
-function _creatorRef(kind, path){
-  const seq = path.map(function(p){return p+1}).join('.')
-  if(kind==='role') return 'ROLE-'+seq
-  if(kind==='mp')   return (path.length===1?'HOD-MP-':'MGR-MP-')+seq
-  return (path.length===2?'HOD-CP-':'MGR-CP-')+seq
-}
-function renderMpcpCreator(){
-  _ensureCreatorTree()
-  let html = `
-  <div class="sample-banner">
-    <h4>&#10024; MPCP Creator</h4>
-    <p>Build a Role &rarr; Managing Point &rarr; Checking Point outline directly. Refs are computed automatically from
-    position in the tree. Nothing is saved until you click <strong>Publish</strong> — at that point it becomes a normal
-    MP/CP, visible in the Managing Points / Checking Points / Cascade Links tabs just like any imported or manually
-    created one.</p>
-  </div>
-  <div class="section-head">
-    <div><h2>FY${esc(S.currentFY||'')} — Outline Builder</h2><p>Draft, client-side only, until published</p></div>
-    <div class="flex gap-8">
-      <button class="btn btn-ghost btn-sm" onclick="creatorAddRole()">+ Add Role</button>
-      <button class="btn btn-primary btn-sm" onclick="publishCreatorTree()">&#9729; Publish to Live Tables</button>
-    </div>
-  </div>
-  <div id="creator-tree">`
-  html += _renderCreatorNodes(S.creatorTree, [], 0)
-  html += '</div>'
-  const _tc = document.getElementById('mpcp-content'); if(_tc) _tc.innerHTML = html
-}
-function _renderCreatorNodes(nodes, path, depth){
-  let html = ''
-  nodes.forEach(function(n, i){
-    const p = path.concat([i])
-    const ref = _creatorRef(n.kind, p)
-    const kindLabel = n.kind.toUpperCase()
-    const kindColor = n.kind==='role' ? '#5b21b6' : (n.kind==='mp' ? '#1d4ed8' : '#15803d')
-    const closed = n.status==='closed'
-    html += `<div style="margin-left:${depth*22}px;${closed?'opacity:.5':''}" class="creator-row" data-id="${n.id}">
-      <div class="flex gap-8 items-center" style="padding:6px 4px;border-bottom:1px solid var(--border)">
-        <span class="badge" style="background:${kindColor}1a;color:${kindColor};font-size:9px">${kindLabel}</span>
-        <span style="font-family:monospace;font-size:10px;color:var(--muted);width:90px;display:inline-block">${esc(ref)}</span>
-        <input class="form-input" style="flex:1;height:30px;font-size:12px" value="${esc(n.text)}"
-          placeholder="Untitled ${kindLabel.toLowerCase()}…" onchange="creatorSetText('${n.id}', this.value)">
-        ${n.kind==='cp' ? `<input class="form-input" style="width:160px;height:30px;font-size:12px" value="${esc(n.ownerCode)}"
-          placeholder="Owner emp code…" onchange="creatorSetOwner('${n.id}', this.value)">` : ''}
-        ${n.kind!=='cp' ? `<button class="btn btn-ghost btn-sm" onclick="creatorAddChild('${n.id}')">+ ${n.kind==='role'?'MP':'CP'}</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="creatorToggleStatus('${n.id}')">${closed?'&#128275; Reopen':'&#128274; Close'}</button>
-        <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="creatorDelete('${n.id}')">Del</button>
-      </div>
-    </div>`
-    html += _renderCreatorNodes(n.children, p, depth+1)
-  })
-  return html
-}
-function _findCreatorNode(id, nodes){
-  nodes = nodes || S.creatorTree
-  for (let i=0;i<nodes.length;i++){
-    if(nodes[i].id===id) return nodes[i]
-    const found = _findCreatorNode(id, nodes[i].children)
-    if(found) return found
-  }
-  return null
-}
-function creatorAddRole(){
-  _ensureCreatorTree()
-  S.creatorTree.push(_newCreatorNode('role'))
-  renderMpcpCreator()
-}
-function creatorAddChild(parentId){
-  const parent = _findCreatorNode(parentId)
-  if(!parent) return
-  const childKind = parent.kind==='role' ? 'mp' : 'cp'
-  parent.children.push(_newCreatorNode(childKind))
-  renderMpcpCreator()
-}
-function creatorSetText(id, val){ const n=_findCreatorNode(id); if(n){ n.text = val } }
-function creatorSetOwner(id, val){ const n=_findCreatorNode(id); if(n){ n.ownerCode = val.trim() } }
-function creatorToggleStatus(id){
-  const n=_findCreatorNode(id); if(!n) return
-  n.status = n.status==='closed' ? 'active' : 'closed'
-  renderMpcpCreator()
-}
-function creatorDelete(id){
-  function rec(nodes){ return nodes.filter(function(n){return n.id!==id}).map(function(n){ n.children = rec(n.children); return n }) }
-  S.creatorTree = rec(S.creatorTree)
-  renderMpcpCreator()
-}
-function publishCreatorTree(){
-  const flat = []
-  function walk(nodes, path, roleId, parentMpRef){
-    nodes.forEach(function(n, i){
-      const p = path.concat([i])
-      const ref = _creatorRef(n.kind, p)
-      if(!n.text || !n.text.trim()){ return } // skip blank/untitled nodes
-      if(n.kind==='role'){
-        flat.push({kind:'role', id:n.id, ref:ref, text:n.text, status:n.status})
-        walk(n.children, p, n.id, null)
-      } else if(n.kind==='mp'){
-        flat.push({kind:'mp', ref:ref, text:n.text, target:n.target, freq:n.freq, status:n.status, role_id:roleId})
-        walk(n.children, p, roleId, ref)
-      } else if(n.kind==='cp'){
-        flat.push({kind:'cp', ref:ref, text:n.text, target:n.target, freq:n.freq, status:n.status,
-                   parent_mp_ref:parentMpRef, owner_code:n.ownerCode})
-      }
-    })
-  }
-  walk(S.creatorTree, [], null, null)
-  if(!flat.length){ toast('Nothing to publish — add a title to at least one node', 'err'); return }
-  api.post('/api/mpcp/publish', {nodes: flat}).then(function(res){
-    const c = res.created || {}
-    toast('Published '+(c.mps||0)+' MP(s), '+(c.cps||0)+' CP(s) — check Managing Points / Checking Points tabs', 'ok')
-    if(res.errors && res.errors.length) console.warn('Publish warnings:', res.errors)
-    // Refresh shared state so MPs/CPs/Cascade tabs reflect the new rows immediately
-    Promise.all([safeGet('/api/mps',[]), safeGet('/api/cps',[])]).then(function(r){
-      S.mps = r[0]||[]; S.cps = r[1]||[]
-    })
-  }).catch(function(e){ toast('Publish failed: '+e.message, 'err') })
 }
 
 let assignEmp=null

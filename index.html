@@ -4779,11 +4779,23 @@ function renderAssignPanel(){
 
 // ── MPCP CREATOR ─────────────────────────────────────────────────────────
 // Outline-builder canvas: Role -> MP -> CP -> Owner. Draft state lives only in
-// S.creatorTree (client-side) until "Publish" calls /api/mpcp/publish, which
-// writes into the SAME mps/cps/roles tables the rest of the app already reads —
-// so published items appear in the MPs/CPs/Cascade tabs automatically, no sync step.
+// ═══════════════════════════════════════════════════════════════════════════
+// MPCP CREATOR  — outline builder with searchable dropdowns, target/unit
+// split, and export.  Draft stays client-side (S.creatorTree) until Publish
+// writes to the same mps/cps/roles tables everything else reads.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const CREATOR_UNITS = ['Days','Hours','%','Nos','Units','Rs','Km','MT','Trips','Calls']
+const CREATOR_FREQS = ['Daily','Weekly','Monthly','Quarterly','Yearly','As Required']
+
+// ── Node factory ──────────────────────────────────────────────────────────
 function _newCreatorNode(kind){
-  return {id:'tmp-'+Math.random().toString(36).slice(2,10), kind:kind, text:'', target:'', freq:(kind==='cp'?'Daily':'Monthly'), ownerCode:'', status:'active', children:[]}
+  return {
+    id: 'tmp-'+Math.random().toString(36).slice(2,10),
+    kind: kind, text: '', uom: '', targetVal: '', unit: '%',
+    freq: kind==='cp' ? 'Daily' : 'Monthly',
+    ownerCode: '', ownerName: '', source: '', status: 'active', children: []
+  }
 }
 function _ensureCreatorTree(){
   if(!S.creatorTree) S.creatorTree = [Object.assign(_newCreatorNode('role'), {text:'New Role'})]
@@ -4791,65 +4803,233 @@ function _ensureCreatorTree(){
 function _creatorRef(kind, path){
   const seq = path.map(function(p){return p+1}).join('.')
   if(kind==='role') return 'ROLE-'+seq
-  if(kind==='mp')   return (path.length===1?'HOD-MP-':'MGR-MP-')+seq
-  return (path.length===2?'HOD-CP-':'MGR-CP-')+seq
+  if(kind==='mp')   return (path.length===1 ? 'HOD-MP-' : 'MGR-MP-')+seq
+  return (path.length===2 ? 'HOD-CP-' : 'MGR-CP-')+seq
 }
+function _findCreatorNode(id, nodes){
+  nodes = nodes || S.creatorTree
+  for(let i=0;i<nodes.length;i++){
+    if(nodes[i].id===id) return nodes[i]
+    const f = _findCreatorNode(id, nodes[i].children)
+    if(f) return f
+  }
+  return null
+}
+
+// ── Searchable combobox ───────────────────────────────────────────────────
+// Renders a text input + dropdown list. Items = [{label, value, sub}].
+// onSelect(value, item) is called when user picks one.
+// A "+ Create: …" option appears when nothing matches.
+function _comboHtml(nid, field, placeholder, currentVal, currentLabel){
+  const inputId = 'cb-'+nid+'-'+field
+  const listId  = 'cbl-'+nid+'-'+field
+  return `<div class="creator-combo" style="position:relative;flex:1;min-width:0">
+    <input class="form-input" id="${inputId}" autocomplete="off"
+      style="font-size:11px;height:28px;width:100%;box-sizing:border-box"
+      placeholder="${esc(placeholder)}" value="${esc(currentLabel||currentVal)}"
+      onfocus="creatorComboOpen('${nid}','${field}')"
+      oninput="creatorComboFilter('${nid}','${field}',this.value)"
+      onblur="setTimeout(function(){creatorComboClose('${nid}','${field}')},180)">
+    <div id="${listId}" class="creator-combo-list" style="display:none;position:absolute;left:0;right:0;top:30px;
+      background:var(--bg-2);border:1.5px solid var(--accent);border-radius:6px;z-index:999;
+      max-height:180px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.18)">
+    </div>
+  </div>`
+}
+function _comboItems(nid, field){
+  return (S._comboCache && S._comboCache[nid+'-'+field]) || []
+}
+function creatorComboOpen(nid, field){
+  creatorComboFilter(nid, field, document.getElementById('cb-'+nid+'-'+field)?.value || '')
+}
+function creatorComboFilter(nid, field, q){
+  const listEl = document.getElementById('cbl-'+nid+'-'+field)
+  const inEl   = document.getElementById('cb-'+nid+'-'+field)
+  if(!listEl || !inEl) return
+  const items = _comboItems(nid, field)
+  const ql = q.trim().toLowerCase()
+  const matched = ql ? items.filter(function(it){ return it.label.toLowerCase().includes(ql) || (it.sub||'').toLowerCase().includes(ql) }) : items
+  let html = matched.slice(0,40).map(function(it){
+    return `<div class="creator-combo-item" style="padding:6px 10px;cursor:pointer;font-size:11px;
+      border-bottom:1px solid var(--border)"
+      onmousedown="creatorComboPick('${nid}','${field}',${JSON.stringify(it.value)},${JSON.stringify(it.label)},${JSON.stringify(it.meta||null)})">
+      <span style="color:var(--text)">${esc(it.label)}</span>
+      ${it.sub ? '<span style="color:var(--muted);font-size:9px;margin-left:4px">'+esc(it.sub)+'</span>' : ''}
+    </div>`
+  }).join('')
+  if(ql){
+    html += `<div class="creator-combo-item" style="padding:6px 10px;cursor:pointer;font-size:11px;color:var(--accent)"
+      onmousedown="creatorComboPick('${nid}','${field}',${JSON.stringify(q)},${JSON.stringify(q)},null)">
+      + Create new: <strong>${esc(q)}</strong>
+    </div>`
+  }
+  listEl.innerHTML = html || '<div style="padding:8px 10px;font-size:11px;color:var(--muted)">No matches</div>'
+  listEl.style.display = 'block'
+}
+function creatorComboClose(nid, field){
+  const listEl = document.getElementById('cbl-'+nid+'-'+field)
+  if(listEl) listEl.style.display = 'none'
+}
+function creatorComboPick(nid, field, value, label, meta){
+  const inEl = document.getElementById('cb-'+nid+'-'+field)
+  if(inEl) inEl.value = label
+  creatorComboClose(nid, field)
+  const n = _findCreatorNode(nid)
+  if(!n) return
+  if(field==='text'){
+    n.text = label
+    // Prefill target/freq from existing MP/CP if selected from lookup
+    if(meta && meta.target){
+      const parts = String(meta.target).split(' ')
+      n.targetVal = parts[0] || ''
+      n.unit = parts.length>1 ? parts[parts.length-1] : n.unit
+    }
+    if(meta && meta.freq) n.freq = meta.freq
+  } else if(field==='owner'){
+    n.ownerCode = meta && meta.emp_code ? meta.emp_code : value
+    n.ownerName = label
+  }
+}
+function _loadComboItems(nid, field, kind){
+  if(!S._comboCache) S._comboCache = {}
+  const key = nid+'-'+field
+  if(S._comboCache[key]) return
+  // Load from lookup endpoint or use existing S.mps/S.cps/S.employees
+  if(field==='owner'){
+    S._comboCache[key] = (S.employees||[]).map(function(e){
+      return {label:e.name||e.emp_code, value:e.emp_code, sub:e.emp_code, meta:{emp_code:e.emp_code}}
+    })
+  } else if(kind==='role'){
+    S._comboCache[key] = (S.roles||[]).map(function(r){ return {label:r.name||r.code, value:r.code, sub:r.code, meta:r} })
+  } else if(kind==='mp'){
+    S._comboCache[key] = (S.mps||[]).map(function(m){ return {label:m.title||m.ref, value:m.ref, sub:m.ref, meta:m} })
+  } else if(kind==='cp'){
+    S._comboCache[key] = (S.cps||[]).map(function(c){ return {label:c.title||c.ref, value:c.ref, sub:c.ref, meta:c} })
+  }
+}
+
+// ── Render ────────────────────────────────────────────────────────────────
 function renderMpcpCreator(){
   _ensureCreatorTree()
+  S._comboCache = {} // reset cache on re-render so items refresh
+  const unitOpts = CREATOR_UNITS.map(function(u){ return '<option>'+u+'</option>' }).join('')
+  const freqOpts = CREATOR_FREQS.map(function(f){ return '<option>'+f+'</option>' }).join('')
   let html = `
-  <div class="sample-banner">
-    <h4>&#10024; MPCP Creator</h4>
-    <p>Build a Role &rarr; Managing Point &rarr; Checking Point outline directly. Refs are computed automatically from
-    position in the tree. Nothing is saved until you click <strong>Publish</strong> — at that point it becomes a normal
-    MP/CP, visible in the Managing Points / Checking Points / Cascade Links tabs just like any imported or manually
-    created one.</p>
-  </div>
-  <div class="section-head">
-    <div><h2>FY${esc(S.currentFY||'')} — Outline Builder</h2><p>Draft, client-side only, until published</p></div>
-    <div class="flex gap-8">
-      <button class="btn btn-ghost btn-sm" onclick="creatorAddRole()">+ Add Role</button>
-      <button class="btn btn-primary btn-sm" onclick="publishCreatorTree()">&#9729; Publish to Live Tables</button>
+  <div class="sample-banner" style="margin-bottom:0">
+    <div class="flex" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div>
+        <h4 style="margin:0">&#10024; MPCP Creator</h4>
+        <p style="margin:4px 0 0;font-size:11px">Build Role &rarr; MP &rarr; CP outline. Refs auto-computed. Draft stays local until <strong>Publish</strong>.</p>
+      </div>
+      <div class="flex gap-8" style="flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="creatorAddRole()">+ Add Role</button>
+        <button class="btn btn-ghost btn-sm" onclick="creatorShowUpload()" style="border-color:rgba(16,223,138,.3);color:var(--green)">&#8679; Upload Excel</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportCreatorDraft()">&#8595; Export Draft</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportCreatorPublished()">&#8595; Published</button>
+        <button class="btn btn-primary btn-sm" onclick="publishCreatorTree()">&#9729; Publish</button>
+      </div>
     </div>
   </div>
-  <div id="creator-tree">`
+  <div style="padding:8px 12px;background:var(--bg-2);border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:center;font-size:10px;color:var(--muted)">
+    <span style="display:inline-flex;align-items:center;gap:4px"><span class="badge" style="background:#5b21b61a;color:#5b21b6;font-size:8px">ROLE</span> → Role grouping</span>
+    <span style="display:inline-flex;align-items:center;gap:4px"><span class="badge" style="background:#1d4ed81a;color:#1d4ed8;font-size:8px">MP</span> → Managing Point</span>
+    <span style="display:inline-flex;align-items:center;gap:4px"><span class="badge" style="background:#15803d1a;color:#15803d;font-size:8px">CP</span> → Checking Point (assign owner + target)</span>
+    <span style="margin-left:auto;font-size:9px">FY ${esc(S.currentFY||'—')}</span>
+  </div>
+  <div id="creator-tree" style="padding:8px 0">`
   html += _renderCreatorNodes(S.creatorTree, [], 0)
-  html += '</div>'
-  const _tc = document.getElementById('mpcp-content'); if(_tc) _tc.innerHTML = html
+  html += `</div>
+  <div style="padding:10px 16px;border-top:1px solid var(--border);background:var(--bg-2);display:flex;gap:8px;align-items:center">
+    <button class="btn btn-ghost btn-sm" onclick="creatorAddRole()">+ Add Role</button>
+    <span class="text-xs text-muted">Total nodes: ${(function(){ let c=0; (function cnt(ns){ ns.forEach(function(n){ c++; cnt(n.children) }) })(S.creatorTree); return c })()} &nbsp;|&nbsp; CPs: ${(function(){ let c=0; (function cnt(ns){ ns.forEach(function(n){ if(n.kind==='cp')c++; cnt(n.children) }) })(S.creatorTree); return c })()}</span>
+    <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="publishCreatorTree()">&#9729; Publish to Live Tables</button>
+  </div>`
+  const tc = document.getElementById('mpcp-content')
+  if(tc) tc.innerHTML = html
+  // Pre-load combo items for all nodes
+  ;(function preload(nodes){ nodes.forEach(function(n){
+    _loadComboItems(n.id, 'text', n.kind)
+    if(n.kind==='cp') _loadComboItems(n.id, 'owner', 'emp')
+    preload(n.children)
+  }) })(S.creatorTree)
 }
+
 function _renderCreatorNodes(nodes, path, depth){
   let html = ''
   nodes.forEach(function(n, i){
     const p = path.concat([i])
     const ref = _creatorRef(n.kind, p)
-    const kindLabel = n.kind.toUpperCase()
     const kindColor = n.kind==='role' ? '#5b21b6' : (n.kind==='mp' ? '#1d4ed8' : '#15803d')
     const closed = n.status==='closed'
-    html += `<div style="margin-left:${depth*22}px;${closed?'opacity:.5':''}" class="creator-row" data-id="${n.id}">
-      <div class="flex gap-8 items-center" style="padding:6px 4px;border-bottom:1px solid var(--border)">
-        <span class="badge" style="background:${kindColor}1a;color:${kindColor};font-size:9px">${kindLabel}</span>
-        <span style="font-family:monospace;font-size:10px;color:var(--muted);width:90px;display:inline-block">${esc(ref)}</span>
-        <input class="form-input" style="flex:1;height:30px;font-size:12px" value="${esc(n.text)}"
-          placeholder="Untitled ${kindLabel.toLowerCase()}…" onchange="creatorSetText('${n.id}', this.value)">
-        ${n.kind==='cp' ? `<input class="form-input" style="width:160px;height:30px;font-size:12px" value="${esc(n.ownerCode)}"
-          placeholder="Owner emp code…" onchange="creatorSetOwner('${n.id}', this.value)">` : ''}
-        ${n.kind!=='cp' ? `<button class="btn btn-ghost btn-sm" onclick="creatorAddChild('${n.id}')">+ ${n.kind==='role'?'MP':'CP'}</button>` : ''}
-        <button class="btn btn-ghost btn-sm" onclick="creatorToggleStatus('${n.id}')">${closed?'&#128275; Reopen':'&#128274; Close'}</button>
-        <button class="btn btn-sm" style="background:#fee2e2;color:#b91c1c" onclick="creatorDelete('${n.id}')">Del</button>
-      </div>
-    </div>`
+    const bgColor = n.kind==='role' ? 'var(--bg-2)' : 'var(--bg-1)'
+    const indent = depth * 24
+
+    // Perf-readiness badge for CPs
+    let perfBadge = ''
+    if(n.kind==='cp'){
+      const hasTarget = n.targetVal && String(n.targetVal).trim()
+      const hasOwner  = n.ownerCode && n.ownerCode.trim()
+      const ready = hasTarget && hasOwner
+      perfBadge = `<span title="Perf ready: target + owner set" style="font-size:9px;padding:1px 5px;border-radius:4px;
+        background:${ready?'#dcfce7':'#fef9c3'};color:${ready?'#15803d':'#854d0e'}">
+        ${ready ? '✓ Perf Ready' : '⚠ Incomplete'}</span>`
+    }
+
+    html += `<div style="margin-left:${indent}px;border-left:2px solid ${kindColor}22;${closed?'opacity:.5':''}background:${bgColor}" class="creator-row" data-id="${n.id}">`
+    html += `<div style="display:flex;gap:6px;align-items:center;padding:5px 8px;border-bottom:1px solid var(--border);flex-wrap:wrap">`
+    html += `<span class="badge" style="background:${kindColor}1a;color:${kindColor};font-size:8px;flex-shrink:0">${n.kind.toUpperCase()}</span>`
+    html += `<span style="font-family:monospace;font-size:9px;color:var(--muted);flex-shrink:0;width:80px">${esc(ref)}</span>`
+
+    // Title combobox
+    html += _comboHtml(n.id, 'text', 'Title / description…', n.text, n.text)
+
+    if(n.kind !== 'role'){
+      // UoM
+      html += `<input class="form-input" style="width:60px;height:28px;font-size:11px" placeholder="UoM"
+        value="${esc(n.uom||'')}" onchange="creatorSet('${n.id}','uom',this.value)">`
+      // Target (numeric)
+      html += `<input class="form-input" style="width:65px;height:28px;font-size:11px" type="number" step="any"
+        placeholder="Target" value="${esc(n.targetVal||'')}" onchange="creatorSet('${n.id}','targetVal',this.value)">`
+      // Unit dropdown
+      html += `<select class="form-select" style="width:75px;height:28px;font-size:11px" onchange="creatorSet('${n.id}','unit',this.value)">`
+      html += CREATOR_UNITS.map(function(u){ return '<option'+(u===n.unit?' selected':'')+'>'+u+'</option>' }).join('')
+      html += `</select>`
+      // Freq dropdown
+      html += `<select class="form-select" style="width:95px;height:28px;font-size:11px" onchange="creatorSet('${n.id}','freq',this.value)">`
+      html += CREATOR_FREQS.map(function(f){ return '<option'+(f===n.freq?' selected':'')+'>'+f+'</option>' }).join('')
+      html += `</select>`
+    }
+
+    if(n.kind==='cp'){
+      // Owner combobox
+      html += `<div style="font-size:9px;color:var(--muted);flex-shrink:0">Owner:</div>`
+      html += _comboHtml(n.id, 'owner', 'Employee name / code…', n.ownerCode, n.ownerName||n.ownerCode)
+      // Report source
+      html += `<input class="form-input" style="width:90px;height:28px;font-size:11px" placeholder="Report source"
+        value="${esc(n.source||'')}" onchange="creatorSet('${n.id}','source',this.value)">`
+      html += perfBadge
+    }
+
+    // Action buttons
+    if(n.kind!=='cp'){
+      html += `<button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="creatorAddChild('${n.id}')">+ ${n.kind==='role'?'MP':'CP'}</button>`
+    }
+    html += `<button class="btn btn-ghost btn-sm" style="flex-shrink:0" onclick="creatorToggleStatus('${n.id}')">${closed?'&#128275;':'&#128274;'}</button>`
+    html += `<button class="btn btn-sm" style="flex-shrink:0;background:#fee2e2;color:#b91c1c;padding:2px 8px;font-size:11px" onclick="creatorDelete('${n.id}')">&#10005;</button>`
+
+    html += '</div></div>'
     html += _renderCreatorNodes(n.children, p, depth+1)
   })
   return html
 }
-function _findCreatorNode(id, nodes){
-  nodes = nodes || S.creatorTree
-  for (let i=0;i<nodes.length;i++){
-    if(nodes[i].id===id) return nodes[i]
-    const found = _findCreatorNode(id, nodes[i].children)
-    if(found) return found
-  }
-  return null
+
+// ── Setters ───────────────────────────────────────────────────────────────
+function creatorSet(id, field, val){
+  const n = _findCreatorNode(id)
+  if(n) n[field] = val
 }
+function creatorSetText(id, val){ creatorSet(id,'text',val) }
+function creatorSetOwner(id, val){ creatorSet(id,'ownerCode',val.trim()) }
 function creatorAddRole(){
   _ensureCreatorTree()
   S.creatorTree.push(_newCreatorNode('role'))
@@ -4858,52 +5038,391 @@ function creatorAddRole(){
 function creatorAddChild(parentId){
   const parent = _findCreatorNode(parentId)
   if(!parent) return
-  const childKind = parent.kind==='role' ? 'mp' : 'cp'
-  parent.children.push(_newCreatorNode(childKind))
+  parent.children.push(_newCreatorNode(parent.kind==='role' ? 'mp' : 'cp'))
   renderMpcpCreator()
 }
-function creatorSetText(id, val){ const n=_findCreatorNode(id); if(n){ n.text = val } }
-function creatorSetOwner(id, val){ const n=_findCreatorNode(id); if(n){ n.ownerCode = val.trim() } }
 function creatorToggleStatus(id){
-  const n=_findCreatorNode(id); if(!n) return
+  const n = _findCreatorNode(id); if(!n) return
   n.status = n.status==='closed' ? 'active' : 'closed'
   renderMpcpCreator()
 }
 function creatorDelete(id){
-  function rec(nodes){ return nodes.filter(function(n){return n.id!==id}).map(function(n){ n.children = rec(n.children); return n }) }
+  function rec(nodes){ return nodes.filter(function(n){ return n.id!==id }).map(function(n){ n.children=rec(n.children); return n }) }
   S.creatorTree = rec(S.creatorTree)
   renderMpcpCreator()
 }
-function publishCreatorTree(){
+
+// ── Flatten tree for publish/export ──────────────────────────────────────
+function _flattenCreatorTree(){
   const flat = []
   function walk(nodes, path, roleId, parentMpRef){
     nodes.forEach(function(n, i){
       const p = path.concat([i])
       const ref = _creatorRef(n.kind, p)
-      if(!n.text || !n.text.trim()){ return } // skip blank/untitled nodes
+      if(!n.text || !n.text.trim()) return
+      const target = n.targetVal ? (n.targetVal+' '+n.unit) : ''
       if(n.kind==='role'){
         flat.push({kind:'role', id:n.id, ref:ref, text:n.text, status:n.status})
         walk(n.children, p, n.id, null)
       } else if(n.kind==='mp'){
-        flat.push({kind:'mp', ref:ref, text:n.text, target:n.target, freq:n.freq, status:n.status, role_id:roleId})
+        flat.push({kind:'mp', ref:ref, text:n.text, uom:n.uom||'', target:target, freq:n.freq, status:n.status, role_id:roleId,
+                   children:n.children})
         walk(n.children, p, roleId, ref)
       } else if(n.kind==='cp'){
-        flat.push({kind:'cp', ref:ref, text:n.text, target:n.target, freq:n.freq, status:n.status,
-                   parent_mp_ref:parentMpRef, owner_code:n.ownerCode})
+        flat.push({kind:'cp', ref:ref, text:n.text, uom:n.uom||'', target:target, freq:n.freq, status:n.status,
+                   parent_mp_ref:parentMpRef, owner_code:n.ownerCode, owner_name:n.ownerName, source:n.source||''})
       }
     })
   }
   walk(S.creatorTree, [], null, null)
-  if(!flat.length){ toast('Nothing to publish — add a title to at least one node', 'err'); return }
+  return flat
+}
+
+function _treeForExport(){
+  // Build nested structure suitable for _compiled_mpcp_workbook
+  function convert(nodes, path){
+    return nodes.map(function(n, i){
+      const p = path.concat([i])
+      const ref = _creatorRef(n.kind, p)
+      const target = n.targetVal ? (n.targetVal+' '+n.unit) : ''
+      return Object.assign({}, n, {ref:ref, target:target, children: convert(n.children, p)})
+    })
+  }
+  return convert(S.creatorTree, [])
+}
+
+// ── Publish ───────────────────────────────────────────────────────────────
+function publishCreatorTree(){
+  const flat = _flattenCreatorTree()
+  if(!flat.length){ toast('Nothing to publish — fill in at least one title', 'err'); return }
   api.post('/api/mpcp/publish', {nodes: flat}).then(function(res){
     const c = res.created || {}
-    toast('Published '+(c.mps||0)+' MP(s), '+(c.cps||0)+' CP(s) — check Managing Points / Checking Points tabs', 'ok')
+    toast('Published '+( c.mps||0)+' MP(s), '+(c.cps||0)+' CP(s) — check MPs / CPs tabs', 'ok')
     if(res.errors && res.errors.length) console.warn('Publish warnings:', res.errors)
-    // Refresh shared state so MPs/CPs/Cascade tabs reflect the new rows immediately
     Promise.all([safeGet('/api/mps',[]), safeGet('/api/cps',[])]).then(function(r){
       S.mps = r[0]||[]; S.cps = r[1]||[]
     })
   }).catch(function(e){ toast('Publish failed: '+e.message, 'err') })
+}
+
+// ── Export ────────────────────────────────────────────────────────────────
+function exportCreatorDraft(){
+  const tree = _treeForExport()
+  if(!tree.length){ toast('Nothing to export — build the outline first', 'err'); return }
+  fetch('/api/mpcp/export_draft', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({nodes: tree})
+  }).then(function(r){
+    if(!r.ok) return r.json().then(function(d){ throw new Error(d.error||'Export failed') })
+    return r.blob()
+  }).then(function(blob){
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href=url; a.download='MPCP_Draft_Export.xlsx'; a.click()
+    URL.revokeObjectURL(url)
+    toast('Draft exported as Excel', 'ok')
+  }).catch(function(e){ toast('Export failed: '+e.message, 'err') })
+}
+function exportCreatorPublished(){
+  window.open('/api/mpcp/export_published', '_blank')
+}
+
+// ── CREATOR EXCEL UPLOAD ─────────────────────────────────────────────────
+// Upload modal: drag-drop zone → parse → preview tree → merge into S.creatorTree or replace → publish
+function creatorShowUpload(){
+  // Inject modal if not present
+  if(!document.getElementById('creator-upload-modal')){
+    document.body.insertAdjacentHTML('beforeend', `
+    <div id="creator-upload-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:500;align-items:center;justify-content:center;backdrop-filter:blur(4px)">
+      <div style="background:var(--surface);border:1px solid var(--border-glow);border-radius:12px;width:680px;max-width:95vw;max-height:90vh;overflow:hidden;box-shadow:0 24px 80px rgba(0,0,0,.8)">
+        <div style="padding:16px 20px;background:linear-gradient(135deg,rgba(16,223,138,.1),rgba(45,158,255,.06));border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <h3 style="font-size:14px;font-weight:700;color:var(--text)">&#8679; Upload MPCP Excel</h3>
+            <p style="font-size:11px;color:var(--muted);margin-top:2px">Import from Creator format or your existing MPCP file</p>
+          </div>
+          <button onclick="creatorCloseUpload()" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:18px;line-height:1">&#10005;</button>
+        </div>
+        <div style="padding:20px;overflow-y:auto;max-height:75vh">
+          <!-- Drop Zone -->
+          <div id="creator-drop-zone" style="border:2px dashed rgba(16,223,138,.3);border-radius:10px;padding:36px 20px;text-align:center;background:rgba(16,223,138,.03);cursor:pointer;transition:.2s;margin-bottom:16px"
+            onclick="document.getElementById('creator-file-inp').click()"
+            ondragover="event.preventDefault();this.style.borderColor='var(--green)';this.style.background='rgba(16,223,138,.07)'"
+            ondragleave="this.style.borderColor='rgba(16,223,138,.3)';this.style.background='rgba(16,223,138,.03)'"
+            ondrop="event.preventDefault();this.style.borderColor='rgba(16,223,138,.3)';this.style.background='rgba(16,223,138,.03)';creatorHandleFileDrop(event)">
+            <div style="font-size:32px;margin-bottom:8px">&#128196;</div>
+            <div style="font-weight:700;color:var(--green);font-size:13px">Drop your Excel file here</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:4px">or click to browse — .xlsx files only</div>
+            <div style="margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+              <a href="/api/mpcp/export_template" onclick="event.stopPropagation()" style="font-size:10px;color:var(--blue);text-decoration:none;border:1px solid rgba(45,158,255,.3);padding:4px 12px;border-radius:20px;background:rgba(45,158,255,.06)">&#8595; Download Blank Template</a>
+              <button onclick="event.stopPropagation();exportCreatorDraft()" style="font-size:10px;color:var(--amber);background:rgba(255,176,32,.06);border:1px solid rgba(255,176,32,.3);padding:4px 12px;border-radius:20px;cursor:pointer;font-family:var(--font)">&#8595; Export Current Draft First</button>
+            </div>
+          </div>
+          <input type="file" id="creator-file-inp" accept=".xlsx,.xls" style="display:none" onchange="creatorHandleFileSelect(this)">
+
+          <!-- Upload progress / status -->
+          <div id="creator-upload-status" style="display:none;margin-bottom:12px">
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--bg-3);border-radius:8px;border:1px solid var(--border)">
+              <div class="spinner" style="width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite"></div>
+              <span id="creator-upload-msg" style="font-size:12px;color:var(--text-2)">Parsing file…</span>
+            </div>
+          </div>
+
+          <!-- Preview panel (hidden until parse completes) -->
+          <div id="creator-upload-preview" style="display:none">
+            <!-- Stats bar -->
+            <div id="creator-parse-stats" style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap"></div>
+            <!-- Warnings -->
+            <div id="creator-parse-warnings" style="margin-bottom:12px"></div>
+            <!-- Tree preview -->
+            <div style="font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Preview — parsed tree</div>
+            <div id="creator-upload-tree" style="border:1px solid var(--border);border-radius:8px;max-height:280px;overflow-y:auto;background:var(--bg-3)"></div>
+            <!-- Actions -->
+            <div style="display:flex;gap:8px;margin-top:16px;align-items:center;flex-wrap:wrap">
+              <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:6px;cursor:pointer">
+                <input type="checkbox" id="creator-upload-merge" style="accent-color:var(--green)">
+                Merge with existing draft (unchecked = replace draft)
+              </label>
+              <div style="flex:1"></div>
+              <button class="btn btn-ghost btn-sm" onclick="creatorCloseUpload()">Cancel</button>
+              <button class="btn btn-sm" id="creator-upload-load-btn" onclick="creatorLoadParsedTree()"
+                style="background:linear-gradient(135deg,rgba(16,223,138,.2),rgba(16,223,138,.1));color:var(--green);border:1px solid rgba(16,223,138,.4);font-weight:700">
+                &#10003; Load into Creator
+              </button>
+              <button class="btn btn-primary btn-sm" id="creator-upload-publish-btn" onclick="creatorUploadAndPublish()"
+                style="background:linear-gradient(135deg,var(--red),#D91F2A)">
+                &#9729; Load + Publish directly
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+    `);
+  }
+  document.getElementById('creator-upload-modal').style.display='flex';
+  document.getElementById('creator-upload-preview').style.display='none';
+  document.getElementById('creator-upload-status').style.display='none';
+  document.getElementById('creator-drop-zone').style.display='block';
+}
+function creatorCloseUpload(){
+  var m=document.getElementById('creator-upload-modal'); if(m)m.style.display='none';
+  S._uploadedNodes=null;
+}
+// Allow closing on backdrop click
+document.addEventListener('click',function(e){
+  var m=document.getElementById('creator-upload-modal');
+  if(m&&e.target===m)creatorCloseUpload();
+});
+
+var _creatorParsedNodes=null;
+
+function creatorHandleFileDrop(e){
+  var f=e.dataTransfer?.files?.[0]; if(f)_creatorUploadFile(f);
+}
+function creatorHandleFileSelect(inp){
+  var f=inp.files?.[0]; if(f)_creatorUploadFile(f); inp.value='';
+}
+function _creatorUploadFile(file){
+  if(!file.name.match(/\.xlsx?$/i)){ toast('Please upload an .xlsx file','err'); return; }
+  // Show spinner
+  document.getElementById('creator-drop-zone').style.display='none';
+  var st=document.getElementById('creator-upload-status'); st.style.display='block';
+  document.getElementById('creator-upload-msg').textContent='Parsing "'+file.name+'"…';
+  document.getElementById('creator-upload-preview').style.display='none';
+
+  var fd=new FormData(); fd.append('file',file);
+  fetch('/api/mpcp/upload_excel',{method:'POST',credentials:'include',body:fd})
+    .then(function(r){return r.json()})
+    .then(function(d){
+      st.style.display='none';
+      if(!d.ok){ toast('Parse error: '+(d.error||'Unknown'),'err'); document.getElementById('creator-drop-zone').style.display='block'; return; }
+      _creatorParsedNodes=d.nodes;
+      _renderUploadPreview(d);
+    })
+    .catch(function(e){ st.style.display='none'; toast('Upload failed: '+e.message,'err'); document.getElementById('creator-drop-zone').style.display='block'; });
+}
+function _renderUploadPreview(d){
+  var stats=d.stats||{}; var warnings=d.warnings||[]; var nodes=d.nodes||[];
+  var skipped=d.skipped||[];
+
+  // ── Stats pills — clickable ──────────────────────────────────────────
+  var sb=document.getElementById('creator-parse-stats');
+  var pills=[
+    {v:stats.roles||0,l:'Roles',c:'var(--amber)',id:''},
+    {v:stats.mps||0,l:'MPs',c:'var(--blue)',id:''},
+    {v:stats.cps||0,l:'CPs',c:'var(--green)',id:''},
+    {v:skipped.length,l:'Skipped',c:skipped.length?'#FF6B6B':'var(--muted)',id:'upl-sec-skipped'},
+    {v:warnings.length,l:'Warnings',c:warnings.length?'var(--amber)':'var(--muted)',id:'upl-sec-warnings'}
+  ];
+  sb.innerHTML=pills.map(function(s){
+    var clickable=s.id&&s.v>0;
+    return '<div onclick="'+(clickable?"document.getElementById('"+s.id+"').scrollIntoView({behavior:'smooth'})":'')+'" '
+      +'style="background:var(--surface);border:1px solid '+(clickable?s.c.replace(')',',0.4)').replace('var(','rgba('):'var(--border)')+';border-radius:8px;padding:10px 16px;flex:1;min-width:80px;text-align:center;'+(clickable?'cursor:pointer;':'')+'transition:.2s">'
+      +'<div style="font-size:20px;font-weight:800;font-family:var(--font-mono);color:'+s.c+'">'+s.v+'</div>'
+      +'<div style="font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-top:2px">'+s.l+'</div>'
+      +(clickable?'<div style="font-size:8px;color:'+s.c+';margin-top:3px">click to view ↓</div>':'')
+      +'</div>';
+  }).join('');
+
+  // ── Parsed tree ──────────────────────────────────────────────────────
+  var treeEl=document.getElementById('creator-upload-tree');
+  var treeHtml='';
+  if(!nodes.length){
+    treeHtml='<div style="padding:24px;text-align:center;color:var(--muted);font-size:12px">No data parsed — check Skipped section below</div>';
+  } else {
+    nodes.forEach(function(rn){
+      treeHtml+='<div style="padding:8px 12px;border-bottom:1px solid var(--border-light);background:rgba(255,176,32,.04)">'
+        +'<span style="font-size:9px;font-weight:700;color:var(--amber);background:rgba(255,176,32,.12);padding:1px 6px;border-radius:4px;margin-right:6px">ROLE</span>'
+        +'<span style="font-size:11px;color:var(--text);font-weight:600">'+esc((rn.text||'').slice(0,80))+'</span>'
+        +'<span style="font-size:9px;color:var(--muted);margin-left:8px">'+((rn.children||[]).length)+' MPs</span></div>';
+      (rn.children||[]).forEach(function(mn){
+        treeHtml+='<div style="padding:6px 12px 6px 28px;border-bottom:1px solid var(--border-light);background:rgba(45,158,255,.03)">'
+          +'<span style="font-size:9px;font-weight:700;color:var(--blue);background:rgba(45,158,255,.12);padding:1px 6px;border-radius:4px;margin-right:6px">MP</span>'
+          +'<span style="font-size:10px;font-family:var(--font-mono);color:var(--blue);margin-right:8px">'+esc(mn.ref||'')+'</span>'
+          +'<span style="font-size:11px;color:var(--text-2)">'+esc((mn.text||'').slice(0,60))+'</span>'
+          +'<span style="font-size:9px;color:var(--muted);margin-left:8px">'+((mn.children||[]).length)+' CPs</span></div>';
+        (mn.children||[]).forEach(function(cn){
+          treeHtml+='<div style="padding:5px 12px 5px 48px;border-bottom:1px solid var(--border-light)">'
+            +'<span style="font-size:9px;font-weight:700;color:var(--green);background:rgba(16,223,138,.12);padding:1px 6px;border-radius:4px;margin-right:6px">CP</span>'
+            +'<span style="font-size:9px;font-family:var(--font-mono);color:var(--green);margin-right:8px">'+esc(cn.ref||'')+'</span>'
+            +'<span style="font-size:10px;color:var(--text-2)">'+esc((cn.text||'').slice(0,55))+'</span>'
+            +(cn.owner_name?'<span style="font-size:9px;color:var(--amber);margin-left:8px">&#128100; '+esc(cn.owner_name)+'</span>':'')
+            +'</div>';
+        });
+      });
+    });
+  }
+  treeEl.innerHTML=treeHtml;
+
+  // ── Skipped + Warnings detail panels ────────────────────────────────
+  var wb2=document.getElementById('creator-parse-warnings');
+  var detailHtml='';
+
+  function fixHint(reason){
+    if(!reason) return 'Check this row';
+    if(reason.includes('empty')) return 'Delete the row or add text to MP TEXT / CP TEXT';
+    if(reason.includes('Header')||reason.includes('hint')) return 'Auto-skipped — header/note row, no action needed';
+    if(reason.includes('Cannot determine kind')) return 'Add "mp" or "cp" in KIND column, or fill MP TEXT / CP TEXT';
+    if(reason.includes('no title')) return 'Fill in the MP TEXT column';
+    if(reason.includes('no description')) return 'Fill in the CP TEXT column';
+    if(reason.includes('no text')) return 'Add text to the ROLE column';
+    if(reason.includes('Unrecognised kind')) return 'KIND must be blank, "role", "mp", or "cp"';
+    return 'Check this row and correct the data';
+  }
+
+  if(skipped.length){
+    var autoSkipped=skipped.filter(function(s){return (s.reason||'').includes('Header')||(s.reason||'').includes('hint')});
+    var realSkipped=skipped.filter(function(s){return !((s.reason||'').includes('Header')||(s.reason||'').includes('hint'))});
+    detailHtml+='<div id="upl-sec-skipped" style="margin-bottom:14px">'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+      +'<span style="font-size:11px;font-weight:700;color:#FF6B6B">&#9940; '+skipped.length+' Skipped Row'+(skipped.length>1?'s':'')+'</span>'
+      +(realSkipped.length?'<span style="font-size:10px;color:var(--muted)">'+realSkipped.length+' need fixing · '+autoSkipped.length+' auto-skipped (headers/notes)</span>'
+        :'<span style="font-size:10px;color:var(--muted)">All are header/note rows — no action needed</span>')
+      +'</div>'
+      +'<div style="border:1px solid rgba(255,107,107,.2);border-radius:8px;overflow:hidden">'
+      +'<table style="width:100%;border-collapse:collapse;font-size:10px">'
+      +'<thead><tr style="background:rgba(255,107,107,.07)">'
+      +'<th style="padding:7px 10px;text-align:left;color:#FF6B6B;font-weight:700;letter-spacing:.4px;width:52px">ROW</th>'
+      +'<th style="padding:7px 10px;text-align:left;color:#FF6B6B;font-weight:700;letter-spacing:.4px;width:200px">REASON</th>'
+      +'<th style="padding:7px 10px;text-align:left;color:#FF6B6B;font-weight:700;letter-spacing:.4px">CONTENT IN THAT ROW</th>'
+      +'<th style="padding:7px 10px;text-align:left;color:#FF6B6B;font-weight:700;letter-spacing:.4px;width:180px">HOW TO FIX</th>'
+      +'</tr></thead><tbody>'
+      +skipped.map(function(s,i){
+        var isAuto=(s.reason||'').includes('Header')||(s.reason||'').includes('hint');
+        var rowBg=i%2?'rgba(255,107,107,.02)':'transparent';
+        return '<tr style="border-top:1px solid rgba(255,255,255,.04);background:'+rowBg+'">'
+          +'<td style="padding:6px 10px;font-family:var(--font-mono);color:'+(isAuto?'var(--muted)':'#FF6B6B')+';font-weight:700">'+s.row+'</td>'
+          +'<td style="padding:6px 10px;color:'+(isAuto?'var(--muted)':'var(--text-2)')+'">'+esc(s.reason||'')+'</td>'
+          +'<td style="padding:6px 10px;color:var(--muted);font-style:italic;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(s.preview||'')+'">'
+            +esc((s.preview||'—').slice(0,70))+'</td>'
+          +'<td style="padding:6px 10px;color:'+(isAuto?'var(--muted)':'var(--green)')+';font-size:9px">'+esc(fixHint(s.reason))+'</td>'
+          +'</tr>';
+      }).join('')
+      +'</tbody></table></div></div>';
+  }
+
+  if(warnings.length){
+    detailHtml+='<div id="upl-sec-warnings" style="margin-bottom:12px">'
+      +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+      +'<span style="font-size:11px;font-weight:700;color:var(--amber)">&#9888; '+warnings.length+' Warning'+(warnings.length>1?'s':'')+'</span>'
+      +'<span style="font-size:10px;color:var(--muted)">Imported but may need review</span>'
+      +'</div>'
+      +'<div style="border:1px solid rgba(255,176,32,.2);border-radius:8px;overflow:hidden">'
+      +'<table style="width:100%;border-collapse:collapse;font-size:10px"><tbody>'
+      +warnings.map(function(w,i){
+        return '<tr style="border-top:1px solid rgba(255,255,255,.04);background:'+(i%2?'rgba(255,176,32,.03)':'transparent')+'">'
+          +'<td style="padding:6px 10px;font-family:var(--font-mono);color:var(--amber);font-weight:700;width:30px">'+(i+1)+'</td>'
+          +'<td style="padding:6px 10px;color:var(--text-2)">'+esc(w)+'</td></tr>';
+      }).join('')
+      +'</tbody></table></div></div>';
+  }
+
+  if(!skipped.length && !warnings.length){
+    detailHtml='<div style="padding:8px 14px;background:rgba(16,223,138,.06);border:1px solid rgba(16,223,138,.2);border-radius:8px;font-size:11px;color:var(--green);margin-bottom:12px">&#10003; Clean import — no skipped rows or warnings</div>';
+  }
+  wb2.innerHTML=detailHtml;
+  document.getElementById('creator-upload-preview').style.display='block';
+}
+function creatorLoadParsedTree(){
+  if(!_creatorParsedNodes||!_creatorParsedNodes.length){ toast('No parsed data to load','err'); return; }
+  var merge=document.getElementById('creator-upload-merge')?.checked;
+  // Convert server nodes → creator tree format (add tmp ids, ensure children arrays)
+  function conv(nodes){
+    return (nodes||[]).map(function(n){
+      var id='tmp-'+Math.random().toString(36).slice(2,10);
+      return Object.assign({},n,{
+        id:id, targetVal:n.targetVal||n.target||'', unit:n.unit||'%', status:n.status||'active',
+        ownerCode:n.owner_code||'', ownerName:n.owner_name||'',
+        children:conv(n.children)
+      });
+    });
+  }
+  var converted=conv(_creatorParsedNodes);
+  if(merge && S.creatorTree && S.creatorTree.length){
+    S.creatorTree=S.creatorTree.concat(converted);
+    toast('Merged '+_creatorParsedNodes.length+' role(s) into existing draft','ok');
+  } else {
+    S.creatorTree=converted;
+    toast('Loaded '+_creatorParsedNodes.length+' role(s) — draft replaced','ok');
+  }
+  S._comboCache={};
+  creatorCloseUpload();
+  renderMpcpCreator();
+}
+function creatorUploadAndPublish(){
+  if(!_creatorParsedNodes||!_creatorParsedNodes.length){ toast('No parsed data','err'); return; }
+  // Flatten parsed nodes for direct publish (skip draft step)
+  var flat=[];
+  function walk(nodes,roleId,parentMpRef){
+    (nodes||[]).forEach(function(n){
+      if(n.kind==='role'){
+        flat.push({kind:'role',ref:'ROLE-'+Math.random().toString(36).slice(2,6),text:n.text,status:n.status||'active'});
+        walk(n.children,n.text,null);
+      } else if(n.kind==='mp'){
+        flat.push({kind:'mp',ref:n.ref,text:n.text,uom:n.uom||'',target:n.targetVal||'',freq:n.freq||'Monthly',status:n.status||'active'});
+        walk(n.children,roleId,n.ref);
+      } else if(n.kind==='cp'){
+        flat.push({kind:'cp',ref:n.ref,text:n.text,uom:n.uom||'',target:n.targetVal||n.target||'',freq:n.freq||'Daily',
+          status:n.status||'active',parent_mp_ref:n.parent_mp_ref||parentMpRef,
+          owner_code:n.owner_code||'',owner_name:n.owner_name||'',source:n.source||''});
+      }
+    });
+  }
+  walk(_creatorParsedNodes,null,null);
+  if(!flat.length){ toast('Nothing to publish','err'); return; }
+  var btn=document.getElementById('creator-upload-publish-btn');
+  if(btn){btn.disabled=true;btn.textContent='Publishing…';}
+  api.post('/api/mpcp/publish',{nodes:flat}).then(function(res){
+    var c=res.created||{};
+    toast('Published '+(c.mps||0)+' MP(s), '+(c.cps||0)+' CP(s) successfully!','ok');
+    creatorCloseUpload();
+    // Also load into creator tree so user can see/edit
+    creatorLoadParsedTree();
+    Promise.all([safeGet('/api/mps',[]),safeGet('/api/cps',[])]).then(function(r){S.mps=r[0]||[];S.cps=r[1]||[];});
+  }).catch(function(e){
+    toast('Publish failed: '+e.message,'err');
+    if(btn){btn.disabled=false;btn.textContent='⛅ Load + Publish directly';}
+  });
 }
 
 let assignEmp=null

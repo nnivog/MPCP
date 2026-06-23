@@ -4817,9 +4817,10 @@ function _findCreatorNode(id, nodes){
 }
 
 // ── Searchable combobox ───────────────────────────────────────────────────
-// Renders a text input + dropdown list. Items = [{label, value, sub}].
-// onSelect(value, item) is called when user picks one.
-// A "+ Create: …" option appears when nothing matches.
+// Combobox — dropdown uses position:fixed to escape overflow:hidden ancestors.
+// Selection uses a global pending-pick so blur never races with click.
+var _comboPendingPick = null  // {nid, field, value, label, meta}
+
 function _comboHtml(nid, field, placeholder, currentVal, currentLabel){
   const inputId = 'cb-'+nid+'-'+field
   const listId  = 'cbl-'+nid+'-'+field
@@ -4829,16 +4830,19 @@ function _comboHtml(nid, field, placeholder, currentVal, currentLabel){
       placeholder="${esc(placeholder)}" value="${esc(currentLabel||currentVal)}"
       onfocus="creatorComboOpen('${nid}','${field}')"
       oninput="creatorComboFilter('${nid}','${field}',this.value)"
-      onblur="setTimeout(function(){creatorComboClose('${nid}','${field}')},180)">
-    <div id="${listId}" class="creator-combo-list" style="display:none;position:absolute;left:0;right:0;top:30px;
-      background:var(--bg-2);border:1.5px solid var(--accent);border-radius:6px;z-index:999;
-      max-height:180px;overflow-y:auto;box-shadow:0 4px 16px rgba(0,0,0,.18)">
+      onblur="creatorComboOnBlur('${nid}','${field}')">
+    <div id="${listId}" class="creator-combo-list" style="display:none;position:fixed;
+      background:var(--bg-2);border:1.5px solid var(--accent);border-radius:6px;z-index:99999;
+      max-height:220px;overflow-y:auto;box-shadow:0 4px 24px rgba(0,0,0,.35)">
     </div>
   </div>`
 }
 function _comboItems(nid, field){
   return (S._comboCache && S._comboCache[nid+'-'+field]) || []
 }
+// Lookup table: stores matched items by listId so onmousedown can reference by index
+// This avoids JSON.stringify inside HTML attributes (breaks on objects with quotes)
+var _comboMatchCache = {}
 function creatorComboOpen(nid, field){
   creatorComboFilter(nid, field, document.getElementById('cb-'+nid+'-'+field)?.value || '')
 }
@@ -4846,29 +4850,64 @@ function creatorComboFilter(nid, field, q){
   const listEl = document.getElementById('cbl-'+nid+'-'+field)
   const inEl   = document.getElementById('cb-'+nid+'-'+field)
   if(!listEl || !inEl) return
+  const rect = inEl.getBoundingClientRect()
+  listEl.style.left  = rect.left + 'px'
+  listEl.style.top   = (rect.bottom + 2) + 'px'
+  listEl.style.width = rect.width + 'px'
   const items = _comboItems(nid, field)
   const ql = q.trim().toLowerCase()
   const matched = ql ? items.filter(function(it){ return it.label.toLowerCase().includes(ql) || (it.sub||'').toLowerCase().includes(ql) }) : items
-  let html = matched.slice(0,40).map(function(it){
-    return `<div class="creator-combo-item" style="padding:6px 10px;cursor:pointer;font-size:11px;
-      border-bottom:1px solid var(--border)"
-      onmousedown="creatorComboPick('${nid}','${field}',${JSON.stringify(it.value)},${JSON.stringify(it.label)},${JSON.stringify(it.meta||null)})">
-      <span style="color:var(--text)">${esc(it.label)}</span>
-      ${it.sub ? '<span style="color:var(--muted);font-size:9px;margin-left:4px">'+esc(it.sub)+'</span>' : ''}
-    </div>`
+  const cacheKey = nid+':'+field
+  // Store matched items + free-text option in lookup table, referenced by index in HTML
+  const matchList = matched.slice(0,40).map(function(it){ return {value:it.value, label:it.label, meta:it.meta||null} })
+  if(ql) matchList.push({value:q, label:q, meta:null, isNew:true})
+  _comboMatchCache[cacheKey] = matchList
+  let html = matched.slice(0,40).map(function(it, idx){
+    return '<div class="creator-combo-item" style="padding:6px 10px;cursor:pointer;font-size:11px;border-bottom:1px solid var(--border)" onmousedown="creatorComboPickIdx(\'' + nid + '\',\'' + field + '\',' + idx + ')">'
+      + '<span style="color:var(--text)">' + esc(it.label) + '</span>'
+      + (it.sub ? '<span style="color:var(--muted);font-size:9px;margin-left:4px">' + esc(it.sub) + '</span>' : '')
+      + '</div>'
   }).join('')
   if(ql){
-    html += `<div class="creator-combo-item" style="padding:6px 10px;cursor:pointer;font-size:11px;color:var(--accent)"
-      onmousedown="creatorComboPick('${nid}','${field}',${JSON.stringify(q)},${JSON.stringify(q)},null)">
-      + Create new: <strong>${esc(q)}</strong>
-    </div>`
+    const newIdx = matched.slice(0,40).length
+    html += '<div class="creator-combo-item" style="padding:6px 10px;cursor:pointer;font-size:11px;color:var(--accent)" onmousedown="creatorComboPickIdx(\'' + nid + '\',\'' + field + '\',' + newIdx + ')">'
+      + '+ Create new: <strong>' + esc(q) + '</strong></div>'
   }
   listEl.innerHTML = html || '<div style="padding:8px 10px;font-size:11px;color:var(--muted)">No matches</div>'
   listEl.style.display = 'block'
 }
+function creatorComboPickIdx(nid, field, idx){
+  const cacheKey = nid+':'+field
+  const item = _comboMatchCache[cacheKey] && _comboMatchCache[cacheKey][idx]
+  if(!item) return
+  _comboPendingPick = {nid:nid, field:field, value:item.value, label:item.label, meta:item.meta}
+}
 function creatorComboClose(nid, field){
   const listEl = document.getElementById('cbl-'+nid+'-'+field)
   if(listEl) listEl.style.display = 'none'
+}
+function creatorComboOnBlur(nid, field){
+  // Tiny delay so mousedown sets _comboPendingPick before we read it
+  setTimeout(function(){
+    const pick = _comboPendingPick
+    _comboPendingPick = null
+    creatorComboClose(nid, field)
+    if(pick && pick.nid === nid && pick.field === field){
+      // User clicked a dropdown item — use that pick
+      creatorComboPick(pick.nid, pick.field, pick.value, pick.label, pick.meta)
+    } else {
+      // User tabbed/clicked away without picking — save whatever they typed
+      const inEl = document.getElementById('cb-'+nid+'-'+field)
+      if(!inEl) return
+      const val = inEl.value.trim()
+      if(!val) return
+      const n = _findCreatorNode(nid)
+      if(!n) return
+      if(field === 'text') n.text = val
+      else if(field === 'owner'){ n.ownerCode = val; n.ownerName = val }
+      _refreshPerfBadge(nid)
+    }
+  }, 80)
 }
 function creatorComboPick(nid, field, value, label, meta){
   const inEl = document.getElementById('cb-'+nid+'-'+field)
@@ -4889,6 +4928,7 @@ function creatorComboPick(nid, field, value, label, meta){
     n.ownerCode = meta && meta.emp_code ? meta.emp_code : value
     n.ownerName = label
   }
+  _refreshPerfBadge(nid)
 }
 function _loadComboItems(nid, field, kind){
   if(!S._comboCache) S._comboCache = {}
@@ -4970,7 +5010,7 @@ function _renderCreatorNodes(nodes, path, depth){
       const hasTarget = n.targetVal && String(n.targetVal).trim()
       const hasOwner  = n.ownerCode && n.ownerCode.trim()
       const ready = hasTarget && hasOwner
-      perfBadge = `<span title="Perf ready: target + owner set" style="font-size:9px;padding:1px 5px;border-radius:4px;
+      perfBadge = `<span class="perf-badge" title="Perf ready: target + owner set" style="font-size:9px;padding:1px 5px;border-radius:4px;
         background:${ready?'#dcfce7':'#fef9c3'};color:${ready?'#15803d':'#854d0e'}">
         ${ready ? '✓ Perf Ready' : '⚠ Incomplete'}</span>`
     }
@@ -5026,20 +5066,40 @@ function _renderCreatorNodes(nodes, path, depth){
 // ── Setters ───────────────────────────────────────────────────────────────
 function creatorSet(id, field, val){
   const n = _findCreatorNode(id)
-  if(n) n[field] = val
+  if(!n) return
+  n[field] = val
+  _refreshPerfBadge(id)
 }
 function creatorSetText(id, val){ creatorSet(id,'text',val) }
 function creatorSetOwner(id, val){ creatorSet(id,'ownerCode',val.trim()) }
+function _refreshPerfBadge(id){
+  const n = _findCreatorNode(id)
+  if(!n || n.kind !== 'cp') return
+  const hasTarget = n.targetVal && String(n.targetVal).trim()
+  const hasOwner  = n.ownerCode && n.ownerCode.trim()
+  const ready = hasTarget && hasOwner
+  const row = document.querySelector('.creator-row[data-id="'+id+'"]')
+  if(!row) return
+  const badge = row.querySelector('.perf-badge')
+  if(!badge) return
+  badge.style.background = ready ? '#dcfce7' : '#fef9c3'
+  badge.style.color       = ready ? '#15803d' : '#854d0e'
+  badge.textContent       = ready ? '✓ Perf Ready' : '⚠ Incomplete'
+}
 function creatorAddRole(){
   _ensureCreatorTree()
   S.creatorTree.push(_newCreatorNode('role'))
   renderMpcpCreator()
+  var rows = document.querySelectorAll('.creator-row')
+  if(rows.length) rows[rows.length-1].scrollIntoView({behavior:'smooth', block:'nearest'})
 }
 function creatorAddChild(parentId){
   const parent = _findCreatorNode(parentId)
   if(!parent) return
   parent.children.push(_newCreatorNode(parent.kind==='role' ? 'mp' : 'cp'))
   renderMpcpCreator()
+  var rows = document.querySelectorAll('.creator-row')
+  if(rows.length) rows[rows.length-1].scrollIntoView({behavior:'smooth', block:'nearest'})
 }
 function creatorToggleStatus(id){
   const n = _findCreatorNode(id); if(!n) return
